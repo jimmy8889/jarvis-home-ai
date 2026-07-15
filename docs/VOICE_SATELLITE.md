@@ -26,10 +26,11 @@ Output: pipewire/alsa_output.usb-FiiO_K3-00.analog-stereo
 ```
 
 After the service is enabled and healthy, Home Assistant should discover
-`lva-02439f365e93`. If it does not, open **Settings → Devices & services → Add
-integration → ESPHome**, then enter `10.0.1.228` and port `6053`. Select the
-desired local Assist pipeline for the new satellite. The wake word runs locally;
-audio following a trigger is sent to that Home Assistant pipeline.
+`lva-e051d81d452f`. If it does not, open **Settings → Devices & services → Add
+integration → ESPHome**, then enter `10.0.1.53` and port `6053`. The native
+endpoint is assigned to the **Office** area and the **Full local assistant**
+pipeline. The wake word runs locally; audio following a trigger is sent to that
+Home Assistant pipeline.
 
 Verify the endpoint with:
 

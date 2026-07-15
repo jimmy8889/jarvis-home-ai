@@ -17,7 +17,7 @@ room_endpoint_lva_client_name: Pilot Office
 room_endpoint_lva_wake_model: okay_nabu
 room_endpoint_lva_audio_input_device: ""
 room_endpoint_lva_audio_output_device: ""
-room_endpoint_lva_network_interface: ens18
+room_endpoint_lva_network_interface: "{{ ansible_facts['default_ipv4']['interface'] }}"
 room_endpoint_lva_host: "{{ ansible_facts['default_ipv4']['address'] }}"
 room_endpoint_lva_port: 6053
 room_endpoint_airplay_install: false

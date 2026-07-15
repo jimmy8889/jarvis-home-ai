@@ -11,8 +11,9 @@ all:
           room_endpoint_speaker_description: FiiO K3
           room_endpoint_microphone_node: alsa_input.example.mono-fallback
           room_endpoint_speaker_node: alsa_output.usb-FiiO_K3-00.analog-stereo
-          room_endpoint_capture_alsa_device: plughw:CARD=microphone,DEV=0
-          room_endpoint_playback_alsa_device: plughw:CARD=K3,DEV=0
+          # Validate through the same shared PipeWire path used in production.
+          room_endpoint_capture_alsa_device: pipewire
+          room_endpoint_playback_alsa_device: pipewire
           room_endpoint_lva_install: true
           room_endpoint_lva_enabled: false
           room_endpoint_lva_version: v1.1.12

@@ -1,8 +1,8 @@
 # Pilot OS Blueprint
 
-Version 0.4
+Version 0.5
 
-Last updated: 2026-07-15
+Last updated: 2026-07-16
 
 Status: Canonical architecture reference
 
@@ -98,10 +98,9 @@ becomes important.
 ### Office room endpoint
 
 ```text
-Host: homeai / 10.0.1.228
-Platform: Proxmox Q35 virtual machine
+Host: officen150 / 10.0.1.53
+Platform: native Intel N150 appliance
 OS: Debian 13
-CPU/RAM: 4 vCPU / 3.8 GiB
 Input: Stadium USB microphone
 Output: FiiO K3 USB DAC
 ```
@@ -116,8 +115,15 @@ Active room services:
 - Sendspin 7.5.0 client connected to Music Assistant on TCP 8927
 - Boot-time restoration of stable Stadium/K3 PipeWire defaults
 
-Bluetooth support is installed but disabled because no dedicated USB Bluetooth
-adapter is currently passed through.
+Bluetooth support is installed but disabled until Bluetooth source arbitration
+is implemented and accepted. The native host exposes its Intel Bluetooth
+controller, so a dedicated adapter is no longer a prerequisite for discovery.
+
+The permanent native deployment replaced the original Proxmox VM after music
+playback on the VM exhibited skipping. Native Debian removes USB scheduling and
+audio virtualization from the room playback path. The migration passed all 15
+silent health checks after reboot, plus microphone capture, K3 playback, and
+simultaneous input/output through PipeWire.
 
 ## 5. Hardware plan
 
@@ -134,7 +140,8 @@ adapter is currently passed through.
 ### Room endpoint standard
 
 - Intel N150-class computer
-- Native Debian or Debian VM where USB audio is reliable
+- Native Debian for latency-sensitive room audio; virtualization is reserved
+  for central services
 - Far-field USB microphone array
 - USB DAC, digital speakers, or HDMI/optical room output
 - Dedicated USB Bluetooth adapter when Bluetooth input is required

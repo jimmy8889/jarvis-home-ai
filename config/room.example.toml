@@ -2,12 +2,12 @@ room_id = "office"
 listen_host = "127.0.0.1"
 listen_port = 8765
 bluetooth_enabled = false
-microphone_description = "Set after USB passthrough validation"
+microphone_description = "Set after USB audio enumeration"
 speaker_description = "FiiO K3"
 microphone_node = ""
 speaker_node = "alsa_output.usb-FiiO_K3-00.analog-stereo"
-capture_alsa_device = "default"
-playback_alsa_device = "plughw:CARD=K3,DEV=0"
+capture_alsa_device = "pipewire"
+playback_alsa_device = "pipewire"
 voice_satellite_enabled = false
 voice_satellite_port = 6053
 airplay_enabled = false

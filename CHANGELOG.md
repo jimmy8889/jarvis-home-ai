@@ -2,6 +2,16 @@
 
 ## 2026-07-16
 
+- Migrated the Office N150 from a Proxmox VM to native Debian 13 at the
+  permanent address `10.0.1.53` to remove virtualization from the audio path.
+- Made the voice runtime derive its network interface from Ansible facts rather
+  than assuming the VM-only `ens18` name.
+- Changed audible validation to use the shared PipeWire route and fixed test
+  directory ownership so it can coexist with the running voice service.
+- Registered the native endpoint in Home Assistant, assigned it to Office, and
+  configured the Full local assistant pipeline with Piper and Whisper.
+- Verified all 15 health checks, microphone capture, K3 playback, simultaneous
+  input/output, Music Assistant, AirPlay, voice, and rollback state after reboot.
 - Published the baseline as the private `jimmy8889/jarvis-home-ai` repository.
 - Upgraded Pilot Core to an authenticated FastAPI control plane with SQLite
   persistence, hashed per-device credentials, event history, and WebSockets.

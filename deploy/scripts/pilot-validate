@@ -129,6 +129,7 @@ if ! "$audio_tests"; then
   printf '\nAudio tests skipped. Re-run with --audio-tests when speakers are at a safe volume.\n'
 else
   test_dir="$(mktemp -d /tmp/pilot-audio-test.XXXXXX)"
+  chown "pilot:pilot" "$test_dir"
   trap 'rm -rf "$test_dir"' EXIT
   wav="${test_dir}/capture.wav"
   printf '\nRecording %s seconds from %s. Speak now.\n' "$duration" "$capture_device"

@@ -9,6 +9,17 @@ import tomllib
 class ServerSettings:
     listen_host: str = "127.0.0.1"
     listen_port: int = 8770
+    database_path: str = "/var/lib/pilot-core/pilot.db"
+    admin_token_env: str = "PILOT_CORE_ADMIN_TOKEN"
+    bootstrap_token_env: str = "PILOT_CORE_BOOTSTRAP_TOKEN"
+
+
+@dataclass(frozen=True)
+class IntegrationSettings:
+    music_assistant_url: str = ""
+    music_assistant_token_env: str = "MUSIC_ASSISTANT_TOKEN"
+    home_assistant_url: str = ""
+    home_assistant_token_env: str = "HOME_ASSISTANT_TOKEN"
 
 
 @dataclass(frozen=True)
@@ -37,6 +48,7 @@ class Player:
     protocol: str
     kind: str
     endpoint: str = ""
+    external_id: str = ""
     enabled: bool = True
 
     def as_dict(self) -> dict[str, str | bool]:
@@ -47,6 +59,7 @@ class Player:
             "protocol": self.protocol,
             "kind": self.kind,
             "endpoint": self.endpoint,
+            "external_id": self.external_id,
             "enabled": self.enabled,
         }
 
@@ -54,6 +67,7 @@ class Player:
 @dataclass(frozen=True)
 class Settings:
     server: ServerSettings
+    integrations: IntegrationSettings
     rooms: tuple[Room, ...]
     players: tuple[Player, ...]
 
@@ -92,6 +106,7 @@ def _parse_player(value: dict[str, object]) -> Player:
         ),
         kind=_require_nonempty(value.get("kind"), f"player[{player_id}].kind"),
         endpoint=str(value.get("endpoint", "")).strip(),
+        external_id=str(value.get("external_id", "")).strip(),
         enabled=bool(value.get("enabled", True)),
     )
 
@@ -140,6 +155,37 @@ def load_settings(path: str | Path) -> Settings:
     server = ServerSettings(
         listen_host=str(server_values.get("listen_host", "127.0.0.1")),
         listen_port=int(server_values.get("listen_port", 8770)),
+        database_path=str(
+            server_values.get("database_path", "/var/lib/pilot-core/pilot.db")
+        ),
+        admin_token_env=str(
+            server_values.get("admin_token_env", "PILOT_CORE_ADMIN_TOKEN")
+        ),
+        bootstrap_token_env=str(
+            server_values.get("bootstrap_token_env", "PILOT_CORE_BOOTSTRAP_TOKEN")
+        ),
+    )
+
+    integration_values = values.get("integrations", {})
+    if not isinstance(integration_values, dict):
+        raise ValueError("integrations must be a TOML table")
+    integrations = IntegrationSettings(
+        music_assistant_url=str(
+            integration_values.get("music_assistant_url", "")
+        ).rstrip("/"),
+        music_assistant_token_env=str(
+            integration_values.get(
+                "music_assistant_token_env", "MUSIC_ASSISTANT_TOKEN"
+            )
+        ),
+        home_assistant_url=str(
+            integration_values.get("home_assistant_url", "")
+        ).rstrip("/"),
+        home_assistant_token_env=str(
+            integration_values.get(
+                "home_assistant_token_env", "HOME_ASSISTANT_TOKEN"
+            )
+        ),
     )
 
     raw_rooms = values.get("rooms", [])
@@ -157,4 +203,9 @@ def load_settings(path: str | Path) -> Settings:
     _assert_unique(rooms, "room")
     _assert_unique(players, "player")
     _validate_references(rooms, players)
-    return Settings(server=server, rooms=rooms, players=players)
+    return Settings(
+        server=server,
+        integrations=integrations,
+        rooms=rooms,
+        players=players,
+    )

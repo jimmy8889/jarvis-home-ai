@@ -116,12 +116,12 @@ def _tcp_remote_port_status(
     }
 
 
-def _airplay_playback_status() -> dict[str, Any]:
+def _mpris_playback_status(bus_name: str) -> dict[str, Any]:
     base_command = [
         "busctl",
         "--user",
         "get-property",
-        "org.mpris.MediaPlayer2.ShairportSync",
+        bus_name,
         "/org/mpris/MediaPlayer2",
         "org.mpris.MediaPlayer2.Player",
     ]
@@ -149,6 +149,17 @@ def _airplay_playback_status() -> dict[str, Any]:
         "state": state,
         "volume": parsed_volume,
     }
+
+
+def _sendspin_bus_name() -> str | None:
+    listing = _command_status(["busctl", "--user", "list"])
+    if not listing["ok"]:
+        return None
+    for line in listing["detail"].splitlines():
+        name = line.split(maxsplit=1)[0] if line.split() else ""
+        if name.startswith("org.mpris.MediaPlayer2.Sendspin."):
+            return name
+    return None
 
 
 def collect_status(settings: Settings) -> dict[str, Any]:
@@ -202,7 +213,9 @@ def collect_status(settings: Settings) -> dict[str, Any]:
             "ok": service["ok"] and socket_status["ok"],
             "service": service,
             "api": socket_status,
-            "playback": _airplay_playback_status(),
+            "playback": _mpris_playback_status(
+                "org.mpris.MediaPlayer2.ShairportSync"
+            ),
         }
     else:
         airplay = {
@@ -221,6 +234,16 @@ def collect_status(settings: Settings) -> dict[str, Any]:
             "protocol": settings.music_assistant_protocol,
             "service": service,
             "transport": transport,
+            "playback": (
+                _mpris_playback_status(sendspin_bus)
+                if (sendspin_bus := _sendspin_bus_name())
+                else {
+                    "available": False,
+                    "ok": False,
+                    "state": "Unavailable",
+                    "volume": None,
+                }
+            ),
         }
     else:
         music_assistant = {

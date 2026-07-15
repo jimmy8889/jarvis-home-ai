@@ -103,3 +103,25 @@ Select **Pilot Office Music** in Music Assistant and confirm a TIDAL track and a
 local lossless track are physically audible through the K3. Then test the
 connected Assist pipeline with **“Okay Nabu.”** Squeezelite is retained only as
 an unused fallback.
+
+## 2026-07-16 control-plane update
+
+- Deployed room-agent release `/opt/pilot/releases/20260716T050408` with
+  Sendspin and AirPlay MPRIS playback-state reporting.
+- Preserved `/opt/pilot/releases/20260716T045157` as the rollback target.
+- All fifteen endpoint validation checks continued to pass.
+- Built and started Pilot Core 0.2 in a disposable container, registered the
+  real Office N150, and enabled outbound reporting temporarily.
+- Pilot Core received authenticated health events plus `airplay=true` and
+  `music=false`, then selected AirPlay as the foreground source.
+- Restarted Pilot Core and verified that the device and event history persisted
+  in SQLite.
+- Disabled temporary reporting, removed the temporary device credential from
+  the endpoint, and destroyed the disposable container volume.
+- Installed the audio-focus engine in its explicit disabled state with a
+  conservative `0.2` ducking gain ready for the audible acceptance test.
+
+The office endpoint is therefore back in its production-safe configuration:
+voice, AirPlay, and Sendspin remain active, while central reporting and live
+gain enforcement remain disabled until a permanent Pilot Core host and the
+audible switching test are complete.

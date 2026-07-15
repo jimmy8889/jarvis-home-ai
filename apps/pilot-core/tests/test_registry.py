@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from pilot_core.config import Player, Room, ServerSettings, Settings
+from pilot_core.config import IntegrationSettings, Player, Room, ServerSettings, Settings
 from pilot_core.registry import Registry
 
 
@@ -10,6 +10,7 @@ class RegistryTests(unittest.TestCase):
     def setUp(self) -> None:
         self.settings = Settings(
             server=ServerSettings(),
+            integrations=IntegrationSettings(),
             rooms=(
                 Room(
                     id="office",

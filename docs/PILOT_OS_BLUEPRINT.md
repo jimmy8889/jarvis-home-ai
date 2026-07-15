@@ -1,6 +1,6 @@
 # Pilot OS Blueprint
 
-Version 0.3
+Version 0.4
 
 Last updated: 2026-07-15
 
@@ -154,13 +154,15 @@ Implemented foundation:
 
 - Validated TOML room and player registry
 - Deterministic response-player and default-music-player assignments
-- Read-only REST endpoints for rooms, players, liveness, and readiness
+- SQLite persistence for rooms, players, devices, source state, and events
+- Separate administrator, bootstrap, and per-device bearer credentials
+- Authenticated REST APIs and realtime WebSocket event subscribers
+- Music Assistant control/search adapter and Home Assistant conversation adapter
+- Container deployment with persistent storage and health checks
 - Deterministic registry revision for configuration change detection
 
 Planned responsibilities:
 
-- Authentication and authorization
-- Room and device registry
 - Command routing and tool execution
 - Conversation and session state
 - Media and display orchestration
@@ -176,6 +178,7 @@ Current responsibilities:
 - Voice, AirPlay, and Music Assistant service health
 - Home Assistant and Music Assistant connection status
 - Playback state visibility through MPRIS where available
+- Outbound authenticated health and source-state reporting to Pilot Core
 - Reproducible deployment, validation, and rollback
 
 Planned responsibilities:
@@ -269,6 +272,10 @@ Target Pilot Core APIs:
 - `/memory`
 - `/assistant`
 - WebSockets for events and streaming transcripts
+
+Pilot Core 0.2 now implements authenticated `/v1/rooms`, `/v1/players`,
+`/v1/devices`, `/v1/media`, `/v1/assistant`, event ingestion/history, and a
+realtime event WebSocket. Meeting and memory APIs remain future phases.
 
 ## 10. Data and security
 
@@ -370,15 +377,19 @@ deployed integration, hardware boundary, or milestone status changes.
 ### Platform foundation
 
 - [x] Validated Pilot Core room/player registry
-- [ ] Authenticated room-agent event transport
-- [ ] Dynamic device discovery and registry persistence
+- [x] Authenticated room-agent event transport
+- [x] Device registration and registry persistence
+- [x] Music Assistant and Home Assistant API adapters
+- [ ] Deploy Pilot Core on the selected central container host
+- [ ] Enable the registered office room-agent reporter
 
 ## 14. Immediate next steps
 
 1. Select `Pilot Office Music` in Music Assistant and prove audible playback.
 2. Validate TIDAL playback and a local lossless track.
-3. Implement authenticated room-agent events and deterministic ducking policy.
-4. Add Music Assistant control/API integration to Pilot Core.
+3. Deploy Pilot Core centrally and register the Office N150.
+4. Observe real AirPlay/Sendspin source identifiers and enable local gain
+   enforcement after the safe switching test.
 5. Add the dedicated Bluetooth adapter before enabling A2DP input.
 6. Train and deploy the **Hey Pilot** wake model.
 
@@ -406,3 +417,7 @@ deployed integration, hardware boundary, or milestone status changes.
 - **0.3** — Verified the complete room stack and Sendspin reconnection across a
   controlled reboot, and added the first validated Pilot Core room/player
   registry and read-only API.
+- **0.4** — Added authenticated device registration and outbound room events,
+  persistent control-plane state, realtime event streaming, deterministic
+  audio-focus decisions, HA/MA adapters, and a containerized Pilot Core
+  deployment.

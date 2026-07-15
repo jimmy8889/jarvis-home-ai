@@ -7,6 +7,8 @@ import json
 import os
 
 from .config import Settings, load_settings
+from .audio_focus import AudioFocusLoop
+from .reporter import EventReporter
 from .status import collect_status
 
 
@@ -49,13 +51,27 @@ def main() -> None:
     args = parse_args()
     settings = load_settings(args.config)
     Handler.settings = settings
+    reporter: EventReporter | None = None
+    focus_loop: AudioFocusLoop | None = None
+    if settings.core_reporting_enabled:
+        reporter = EventReporter(settings)
+        reporter.start()
+    if settings.audio_focus_enabled:
+        focus_loop = AudioFocusLoop(settings)
+        focus_loop.start()
     server = ThreadingHTTPServer((settings.listen_host, settings.listen_port), Handler)
     print(
         f"Pilot room-agent for {settings.room_id} listening on "
         f"{settings.listen_host}:{settings.listen_port}",
         flush=True,
     )
-    server.serve_forever()
+    try:
+        server.serve_forever()
+    finally:
+        if reporter:
+            reporter.stop()
+        if focus_loop:
+            focus_loop.stop()
 
 
 if __name__ == "__main__":

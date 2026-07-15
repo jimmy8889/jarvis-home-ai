@@ -1,0 +1,32 @@
+services:
+  pilot-core:
+    build:
+      context: ..
+      dockerfile: infra/pilot-core/Dockerfile
+    container_name: pilot-core
+    restart: unless-stopped
+    ports:
+      - "8770:8770"
+    environment:
+      PILOT_CORE_ADMIN_TOKEN: ${PILOT_CORE_ADMIN_TOKEN:?required}
+      PILOT_CORE_BOOTSTRAP_TOKEN: ${PILOT_CORE_BOOTSTRAP_TOKEN:?required}
+      MUSIC_ASSISTANT_TOKEN: ${MUSIC_ASSISTANT_TOKEN:-}
+      HOME_ASSISTANT_TOKEN: ${HOME_ASSISTANT_TOKEN:-}
+    volumes:
+      - ../config/core.container.toml:/config/core.toml:ro
+      - pilot-core-data:/data
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - >-
+          import urllib.request;
+          urllib.request.urlopen('http://127.0.0.1:8770/readyz', timeout=3)
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  pilot-core-data:

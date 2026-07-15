@@ -1,12 +1,14 @@
 # Pilot Framework
 
+[![GitHub](https://img.shields.io/badge/GitHub-private_repository-181717)](https://github.com/jimmy8889/jarvis-home-ai)
+
 Pilot OS is developed under the **Jarvis Home AI** project. The canonical,
 living architecture reference is
 [docs/PILOT_OS_BLUEPRINT.md](docs/PILOT_OS_BLUEPRINT.md).
 
 Pilot is a local-first platform for voice, audio, and home automation. The
 repository contains the deployed Debian room endpoint and the first Pilot Core
-room/player registry.
+orchestration service.
 
 The deployment deliberately does **not** configure Intel GPU or HDMI
 passthrough.
@@ -46,11 +48,22 @@ Voice-satellite deployment is documented in
 The room AirPlay receiver is documented in
 [docs/AIRPLAY.md](docs/AIRPLAY.md).
 
+Audio source priority and the safely gated ducking engine are documented in
+[docs/AUDIO_FOCUS.md](docs/AUDIO_FOCUS.md).
+
 Staged Music Assistant playback is documented in
 [docs/MUSIC_ASSISTANT.md](docs/MUSIC_ASSISTANT.md).
 
 The central room/player registry is documented in
 [docs/PILOT_CORE.md](docs/PILOT_CORE.md).
+
+Pilot Core can be started centrally with Docker Compose:
+
+```bash
+cp infra/.env.example infra/.env
+# Generate and insert strong tokens, then add HA/MA long-lived tokens.
+docker compose -f infra/docker-compose.yml up -d --build
+```
 
 The first office VM deployment is recorded in
 [docs/DEPLOYMENT-2026-07-15.md](docs/DEPLOYMENT-2026-07-15.md).
@@ -65,6 +78,7 @@ deploy/ansible/        Reproducible Debian 13 deployment
 deploy/scripts/        Inventory, validation, and rollback commands
 docs/                  Architecture and operator runbooks
 systemd/               Service definitions
+infra/                 Central Pilot Core container deployment
 ```
 
 ## Safety boundaries

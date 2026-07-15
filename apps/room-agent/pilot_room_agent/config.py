@@ -24,6 +24,14 @@ class Settings:
     music_assistant_enabled: bool = False
     music_assistant_port: int = 8927
     music_assistant_protocol: str = "sendspin"
+    core_reporting_enabled: bool = False
+    core_url: str = ""
+    core_device_id: str = ""
+    core_device_token_file: str = "/etc/pilot/device-token"
+    core_report_interval_seconds: int = 15
+    audio_focus_enabled: bool = False
+    audio_focus_duck_gain: float = 0.2
+    audio_focus_interval_seconds: int = 1
 
 
 def load_settings(path: str | Path) -> Settings:

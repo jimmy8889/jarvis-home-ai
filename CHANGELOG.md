@@ -1,5 +1,21 @@
 # Changelog
 
+## 2026-07-16
+
+- Published the baseline as the private `jimmy8889/jarvis-home-ai` repository.
+- Upgraded Pilot Core to an authenticated FastAPI control plane with SQLite
+  persistence, hashed per-device credentials, event history, and WebSockets.
+- Added deterministic audio-focus decisions for critical, assistant, Bluetooth,
+  AirPlay, and Music Assistant sources.
+- Added Music Assistant playback/search/transfer controls and Home Assistant
+  conversation routing adapters.
+- Added outbound room-agent health and MPRIS source-state reporting while
+  keeping its diagnostic API loopback-only.
+- Added a local PipeWire stream focus enforcer with captured-volume restoration;
+  deployment remains disabled until the audible source-switching gate passes.
+- Added a central Docker Compose deployment, persistent volume, health check,
+  device-registration helper, and Ansible-managed device credential.
+
 ## 2026-07-15
 
 - Reconstructed the framework because the referenced `/mnt/data` archive was

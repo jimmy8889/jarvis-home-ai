@@ -55,6 +55,18 @@ The central room/player registry is documented in
 The first office VM deployment is recorded in
 [docs/DEPLOYMENT-2026-07-15.md](docs/DEPLOYMENT-2026-07-15.md).
 
+## Architecture research and decisions
+
+The open-source assistant feature review is documented in
+[docs/research/JARVIS_FEATURE_REVIEW.md](docs/research/JARVIS_FEATURE_REVIEW.md).
+
+Material design decisions are recorded under
+[docs/adr/](docs/adr/README.md). The initial ADRs cover execution modes,
+layered memory, the skill runtime, and the unified inference gateway.
+
+A proposed skill package is shown in
+[docs/schemas/skill-manifest.example.yaml](docs/schemas/skill-manifest.example.yaml).
+
 ## Repository layout
 
 ```text
@@ -63,7 +75,7 @@ apps/pilot-core/       Central room and player registry API
 config/                Versioned example room configuration
 deploy/ansible/        Reproducible Debian 13 deployment
 deploy/scripts/        Inventory, validation, and rollback commands
-docs/                  Architecture and operator runbooks
+docs/                  Architecture, ADRs, research, and operator runbooks
 systemd/               Service definitions
 ```
 

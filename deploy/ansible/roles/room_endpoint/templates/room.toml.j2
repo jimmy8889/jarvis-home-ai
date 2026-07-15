@@ -1,0 +1,17 @@
+room_id = "{{ room_endpoint_room_id }}"
+listen_host = "{{ room_endpoint_listen_host }}"
+listen_port = {{ room_endpoint_listen_port }}
+bluetooth_enabled = {{ room_endpoint_bluetooth_enabled | bool | lower }}
+microphone_description = "{{ room_endpoint_microphone_description }}"
+speaker_description = "{{ room_endpoint_speaker_description }}"
+microphone_node = "{{ room_endpoint_microphone_node }}"
+speaker_node = "{{ room_endpoint_speaker_node }}"
+capture_alsa_device = "{{ room_endpoint_capture_alsa_device }}"
+playback_alsa_device = "{{ room_endpoint_playback_alsa_device }}"
+voice_satellite_enabled = {{ room_endpoint_lva_enabled | bool | lower }}
+voice_satellite_port = {{ room_endpoint_lva_port }}
+airplay_enabled = {{ room_endpoint_airplay_enabled | bool | lower }}
+airplay_port = {{ room_endpoint_airplay_port }}
+music_assistant_enabled = {{ room_endpoint_sendspin_enabled | bool | lower }}
+music_assistant_port = {{ room_endpoint_sendspin_server_port }}
+music_assistant_protocol = "sendspin"

@@ -1,0 +1,172 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+audio_tests=false
+duration=5
+capture_device=""
+playback_device=""
+
+usage() {
+  printf '%s\n' \
+    "Usage: pilot-validate [--audio-tests] [--duration SECONDS]" \
+    "                      [--capture-device ALSA_DEVICE]" \
+    "                      [--playback-device ALSA_DEVICE]" \
+    "" \
+    "Without --audio-tests, checks are non-destructive and silent."
+}
+
+while (($#)); do
+  case "$1" in
+    --audio-tests) audio_tests=true ;;
+    --duration) duration="$2"; shift ;;
+    --capture-device) capture_device="$2"; shift ;;
+    --playback-device) playback_device="$2"; shift ;;
+    -h|--help) usage; exit 0 ;;
+    *) printf 'Unknown option: %s\n' "$1" >&2; usage >&2; exit 2 ;;
+  esac
+  shift
+done
+
+failures=0
+check() {
+  local name="$1"
+  shift
+  if "$@" >/dev/null 2>&1; then
+    printf 'PASS  %s\n' "$name"
+  else
+    printf 'FAIL  %s\n' "$name"
+    failures=$((failures + 1))
+  fi
+}
+
+pilot_uid="$(id -u pilot)"
+runtime_dir="/run/user/${pilot_uid}"
+pilot_cmd=(
+  runuser -u pilot -- env
+  "XDG_RUNTIME_DIR=${runtime_dir}"
+  "DBUS_SESSION_BUS_ADDRESS=unix:path=${runtime_dir}/bus"
+)
+listen_port="$(python3 -c 'import tomllib; print(tomllib.load(open("/etc/pilot/room.toml", "rb")).get("listen_port", 8765))')"
+capture_device="${capture_device:-$(python3 -c 'import tomllib; print(tomllib.load(open("/etc/pilot/room.toml", "rb")).get("capture_alsa_device", "default"))')}"
+playback_device="${playback_device:-$(python3 -c 'import tomllib; print(tomllib.load(open("/etc/pilot/room.toml", "rb")).get("playback_alsa_device", "default"))')}"
+
+has_capture_hardware() {
+  arecord -l 2>/dev/null | grep -q '^card '
+}
+
+has_playback_hardware() {
+  aplay -l 2>/dev/null | grep -q '^card '
+}
+
+has_listening_voice_socket() {
+  local port
+  port="$(systemctl show pilot-linux-voice-assistant.service \
+    --property=Environment --value \
+    | tr ' ' '\n' \
+    | sed -n 's/^PORT=//p' \
+    | head -n 1)"
+  [[ -n "$port" ]] && ss -H -ltn | grep -qE "[.:]${port}[[:space:]]"
+}
+
+has_connected_voice_client() {
+  local port
+  port="$(systemctl show pilot-linux-voice-assistant.service \
+    --property=Environment --value \
+    | tr ' ' '\n' \
+    | sed -n 's/^PORT=//p' \
+    | head -n 1)"
+  [[ -n "$port" ]] && ss -H -nt state established \
+    | grep -qE "[.:]${port}[[:space:]]"
+}
+
+has_listening_airplay_socket() {
+  local port
+  port="$(systemctl show pilot-airplay.service \
+    --property=Environment --value \
+    | tr ' ' '\n' \
+    | sed -n 's/^PORT=//p' \
+    | head -n 1)"
+  [[ -n "$port" ]] && ss -H -ltn | grep -qE "[.:]${port}[[:space:]]"
+}
+
+has_connected_music_assistant() {
+  local port
+  port="$(systemctl show pilot-sendspin.service \
+    --property=Environment --value \
+    | tr ' ' '\n' \
+    | sed -n 's/^SERVER_PORT=//p' \
+    | head -n 1)"
+  [[ -n "$port" ]] && ss -H -nt state established \
+    | grep -qE "[.:]${port}[[:space:]]"
+}
+
+check "pilot user exists" id pilot
+check "lingering enabled" test -e /var/lib/systemd/linger/pilot
+check "PipeWire service active" "${pilot_cmd[@]}" systemctl --user is-active pipewire.service
+check "WirePlumber service active" "${pilot_cmd[@]}" systemctl --user is-active wireplumber.service
+check "room-agent active" systemctl is-active pilot-room-agent.service
+check "ALSA capture device present" has_capture_hardware
+check "ALSA playback device present" has_playback_hardware
+check "room-agent health endpoint" curl --fail --silent "http://127.0.0.1:${listen_port}/healthz"
+
+if systemctl is-enabled --quiet pilot-linux-voice-assistant.service 2>/dev/null; then
+  check "voice satellite active" systemctl is-active pilot-linux-voice-assistant.service
+  check "voice satellite API listening" has_listening_voice_socket
+  check "Home Assistant connected" has_connected_voice_client
+fi
+
+if systemctl is-enabled --quiet pilot-airplay.service 2>/dev/null; then
+  check "AirPlay receiver active" systemctl is-active pilot-airplay.service
+  check "AirPlay receiver listening" has_listening_airplay_socket
+fi
+
+if systemctl is-enabled --quiet pilot-sendspin.service 2>/dev/null; then
+  check "Music Assistant player active" systemctl is-active pilot-sendspin.service
+  check "Music Assistant connected" has_connected_music_assistant
+fi
+
+if ! "$audio_tests"; then
+  printf '\nAudio tests skipped. Re-run with --audio-tests when speakers are at a safe volume.\n'
+else
+  test_dir="$(mktemp -d /tmp/pilot-audio-test.XXXXXX)"
+  trap 'rm -rf "$test_dir"' EXIT
+  wav="${test_dir}/capture.wav"
+  printf '\nRecording %s seconds from %s. Speak now.\n' "$duration" "$capture_device"
+  if "${pilot_cmd[@]}" arecord -q -D "$capture_device" -f S16_LE -r 16000 -c 1 -d "$duration" "$wav"; then
+    printf 'PASS  microphone capture\n'
+  else
+    printf 'FAIL  microphone capture\n'
+    failures=$((failures + 1))
+  fi
+
+  printf 'Playing capture through %s.\n' "$playback_device"
+  if "${pilot_cmd[@]}" aplay -q -D "$playback_device" "$wav"; then
+    printf 'PASS  speaker playback\n'
+  else
+    printf 'FAIL  speaker playback\n'
+    failures=$((failures + 1))
+  fi
+
+  printf 'Testing simultaneous playback and capture for %s seconds.\n' "$duration"
+  timeout "$((duration + 5))s" \
+    "${pilot_cmd[@]}" aplay -q -D "$playback_device" "$wav" &
+  speaker_pid=$!
+  duplex_ok=true
+  if "${pilot_cmd[@]}" arecord -q -D "$capture_device" -f S16_LE -r 16000 -c 1 -d "$duration" "${test_dir}/duplex.wav"; then
+    :
+  else
+    duplex_ok=false
+  fi
+  if ! wait "$speaker_pid"; then
+    duplex_ok=false
+  fi
+  if "$duplex_ok"; then
+    printf 'PASS  simultaneous input/output\n'
+  else
+    printf 'FAIL  simultaneous input/output\n'
+    failures=$((failures + 1))
+  fi
+fi
+
+printf '\nValidation complete: %s failure(s).\n' "$failures"
+exit "$failures"

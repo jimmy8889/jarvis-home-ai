@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+state_dir=/var/lib/pilot
+current_link=/opt/pilot/current
+previous_file="${state_dir}/previous_release"
+
+if [[ ! -s "$previous_file" ]]; then
+  printf 'No previous Pilot release is recorded. Nothing changed.\n' >&2
+  exit 1
+fi
+
+previous="$(<"$previous_file")"
+if [[ ! -d "$previous" ]]; then
+  printf 'Recorded previous release does not exist: %s\n' "$previous" >&2
+  exit 1
+fi
+
+current="$(readlink -f "$current_link" || true)"
+ln -sfn "$previous" "${current_link}.new"
+mv -Tf "${current_link}.new" "$current_link"
+printf '%s\n' "$current" > "$previous_file"
+systemctl daemon-reload
+systemctl restart pilot-room-agent.service
+printf 'Pilot rolled back to %s. Previous pointer is now %s.\n' "$previous" "$current"

@@ -1,0 +1,22 @@
+[Unit]
+Description=Apply Pilot PipeWire input and output defaults
+After=systemd-user-sessions.service
+
+[Service]
+Type=oneshot
+User={{ room_endpoint_user }}
+Group={{ room_endpoint_user }}
+Environment=XDG_RUNTIME_DIR=/run/user/{{ room_endpoint_uid.stdout }}
+Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{{ room_endpoint_uid.stdout }}/bus
+Environment=PYTHONPATH=/opt/pilot/current/apps/room-agent
+ExecStart=/opt/pilot/current/.venv/bin/python -m pilot_room_agent.audio_defaults
+RemainAfterExit=yes
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+
+[Install]
+WantedBy=multi-user.target

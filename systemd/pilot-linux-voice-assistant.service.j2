@@ -1,0 +1,41 @@
+[Unit]
+Description=Pilot Linux Voice Assistant satellite
+After=network-online.target pilot-audio-defaults.service
+Wants=network-online.target pilot-audio-defaults.service
+
+[Service]
+Type=simple
+User={{ room_endpoint_user }}
+Group={{ room_endpoint_user }}
+WorkingDirectory=/opt/pilot/vendor/linux-voice-assistant-{{ room_endpoint_lva_version }}
+Environment=HOME=/home/{{ room_endpoint_user }}
+Environment=PATH=/opt/pilot/vendor/linux-voice-assistant-{{ room_endpoint_lva_version }}/.venv/bin:/usr/bin:/bin
+Environment=XDG_RUNTIME_DIR=/run/user/{{ room_endpoint_uid.stdout }}
+Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{{ room_endpoint_uid.stdout }}/bus
+Environment=PULSE_SERVER=/run/user/{{ room_endpoint_uid.stdout }}/pulse/native
+Environment=PULSE_COOKIE=DISABLED
+Environment=PREFERENCES_FILE=/var/lib/pilot/lva/preferences.json
+Environment=DOWNLOAD_DIR=/var/lib/pilot/lva/downloads
+Environment="CLIENT_NAME={{ room_endpoint_lva_client_name }}"
+Environment=NETWORK_INTERFACE={{ room_endpoint_lva_network_interface }}
+{% if room_endpoint_lva_host | length > 0 %}
+Environment=HOST={{ room_endpoint_lva_host }}
+{% endif %}
+Environment=PORT={{ room_endpoint_lva_port }}
+Environment=AUDIO_INPUT_CHANNELS=1
+Environment=MIC_NOISE_SUPPRESSION=2
+Environment=WAKE_MODEL={{ room_endpoint_lva_wake_model }}
+{% if room_endpoint_lva_audio_input_device | length > 0 %}
+Environment="AUDIO_INPUT_DEVICE={{ room_endpoint_lva_audio_input_device }}"
+{% endif %}
+{% if room_endpoint_lva_audio_output_device | length > 0 %}
+Environment="AUDIO_OUTPUT_DEVICE={{ room_endpoint_lva_audio_output_device }}"
+{% endif %}
+ExecStart=/opt/pilot/vendor/linux-voice-assistant-{{ room_endpoint_lva_version }}/docker-entrypoint.sh
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

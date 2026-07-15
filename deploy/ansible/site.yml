@@ -1,0 +1,7 @@
+---
+- name: Configure Pilot room endpoints
+  hosts: pilot_endpoints
+  become: true
+  gather_facts: true
+  roles:
+    - room_endpoint

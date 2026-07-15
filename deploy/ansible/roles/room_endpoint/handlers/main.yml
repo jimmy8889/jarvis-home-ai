@@ -1,0 +1,38 @@
+---
+- name: Reload systemd
+  ansible.builtin.systemd_service:
+    daemon_reload: true
+
+- name: Restart Pilot room-agent
+  ansible.builtin.systemd_service:
+    name: pilot-room-agent.service
+    state: restarted
+
+- name: Restart Pilot audio-defaults
+  ansible.builtin.systemd_service:
+    name: pilot-audio-defaults.service
+    state: restarted
+
+- name: Restart Pilot Linux Voice Assistant
+  ansible.builtin.systemd_service:
+    name: pilot-linux-voice-assistant.service
+    state: restarted
+  when: room_endpoint_lva_enabled | bool
+
+- name: Restart Pilot AirPlay
+  ansible.builtin.systemd_service:
+    name: pilot-airplay.service
+    state: restarted
+  when: room_endpoint_airplay_enabled | bool
+
+- name: Restart Pilot Squeezelite
+  ansible.builtin.systemd_service:
+    name: pilot-squeezelite.service
+    state: restarted
+  when: room_endpoint_squeezelite_enabled | bool
+
+- name: Restart Pilot Sendspin
+  ansible.builtin.systemd_service:
+    name: pilot-sendspin.service
+    state: restarted
+  when: room_endpoint_sendspin_enabled | bool

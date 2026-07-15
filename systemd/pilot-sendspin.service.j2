@@ -1,0 +1,26 @@
+[Unit]
+Description=Pilot Music Assistant Sendspin player
+After=network-online.target pilot-audio-defaults.service
+Wants=network-online.target pilot-audio-defaults.service
+
+[Service]
+Type=simple
+User={{ room_endpoint_user }}
+Group={{ room_endpoint_user }}
+Environment=HOME=/home/{{ room_endpoint_user }}
+Environment=XDG_RUNTIME_DIR=/run/user/{{ room_endpoint_uid.stdout }}
+Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{{ room_endpoint_uid.stdout }}/bus
+Environment=XDG_CONFIG_HOME=/var/lib/pilot/sendspin/config
+Environment=XDG_CACHE_HOME=/var/lib/pilot/sendspin/cache
+Environment=SERVER_PORT={{ room_endpoint_sendspin_server_port }}
+ExecStart=/opt/pilot/vendor/sendspin-{{ room_endpoint_sendspin_version }}/bin/sendspin daemon --name "{{ room_endpoint_sendspin_name }}" --id "{{ room_endpoint_sendspin_id }}" --url "{{ room_endpoint_sendspin_server_url }}" --audio-device "{{ room_endpoint_sendspin_audio_device }}" --hardware-volume false --interface "{{ room_endpoint_sendspin_interface }}" --manufacturer "Pilot OS" --product-name "Pilot Room Endpoint"
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/var/lib/pilot/sendspin
+
+[Install]
+WantedBy=multi-user.target

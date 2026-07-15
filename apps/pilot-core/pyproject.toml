@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pilot-core"
+version = "0.1.0"
+description = "Central room and player registry for Pilot OS"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.scripts]
+pilot-core = "pilot_core.main:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["pilot_core*"]

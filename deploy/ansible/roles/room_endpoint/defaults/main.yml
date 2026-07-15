@@ -1,0 +1,78 @@
+---
+room_endpoint_user: pilot
+room_endpoint_room_id: unconfigured
+room_endpoint_listen_host: 127.0.0.1
+room_endpoint_listen_port: 8765
+room_endpoint_bluetooth_enabled: false
+room_endpoint_microphone_description: "Set after USB passthrough validation"
+room_endpoint_speaker_description: "Set after USB passthrough validation"
+room_endpoint_microphone_node: ""
+room_endpoint_speaker_node: ""
+room_endpoint_capture_alsa_device: default
+room_endpoint_playback_alsa_device: default
+room_endpoint_lva_install: false
+room_endpoint_lva_enabled: false
+room_endpoint_lva_version: v1.1.12
+room_endpoint_lva_client_name: Pilot Office
+room_endpoint_lva_wake_model: okay_nabu
+room_endpoint_lva_audio_input_device: ""
+room_endpoint_lva_audio_output_device: ""
+room_endpoint_lva_network_interface: ens18
+room_endpoint_lva_host: "{{ ansible_facts['default_ipv4']['address'] }}"
+room_endpoint_lva_port: 6053
+room_endpoint_airplay_install: false
+room_endpoint_airplay_enabled: false
+room_endpoint_airplay_name: "Pilot {{ room_endpoint_room_id | title }}"
+room_endpoint_airplay_port: 5000
+room_endpoint_airplay_volume_range_db: 40
+room_endpoint_airplay_default_volume_db: -24.0
+room_endpoint_squeezelite_install: false
+room_endpoint_squeezelite_enabled: false
+room_endpoint_squeezelite_name: "Pilot {{ room_endpoint_room_id | title }} Music"
+room_endpoint_squeezelite_server: ""
+room_endpoint_squeezelite_output_device: default
+room_endpoint_sendspin_install: false
+room_endpoint_sendspin_enabled: false
+room_endpoint_sendspin_version: 7.5.0
+room_endpoint_sendspin_name: "Pilot {{ room_endpoint_room_id | title }} Music"
+room_endpoint_sendspin_id: "pilot-{{ room_endpoint_room_id }}"
+room_endpoint_sendspin_server_url: ""
+room_endpoint_sendspin_server_port: 8927
+room_endpoint_sendspin_audio_device: default
+room_endpoint_sendspin_interface: "{{ ansible_facts['default_ipv4']['address'] }}"
+room_endpoint_release_id: "{{ ansible_facts['date_time']['iso8601_basic_short'] }}"
+room_endpoint_project_root: "{{ role_path }}/../../../.."
+room_endpoint_packages:
+  - alsa-utils
+  - avahi-daemon
+  - bluez
+  - curl
+  - git
+  - libspa-0.2-bluetooth
+  - pipewire
+  - pipewire-alsa
+  - pipewire-pulse
+  - python3
+  - python3-venv
+  - usbutils
+  - wireplumber
+room_endpoint_lva_packages:
+  - avahi-utils
+  - build-essential
+  - ca-certificates
+  - iproute2
+  - jq
+  - libasound2-plugins
+  - libmpv-dev
+  - pipewire-bin
+  - procps
+  - pulseaudio-utils
+  - python3-dev
+  - wget
+room_endpoint_airplay_packages:
+  - shairport-sync
+room_endpoint_squeezelite_packages:
+  - squeezelite
+room_endpoint_sendspin_packages:
+  - ffmpeg
+  - libportaudio2

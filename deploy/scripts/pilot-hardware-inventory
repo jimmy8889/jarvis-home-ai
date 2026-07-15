@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+section() {
+  printf '\n## %s\n' "$1"
+}
+
+section "USB devices visible to the Debian guest"
+lsusb || true
+
+section "ALSA capture devices"
+arecord -l || true
+
+section "ALSA playback devices"
+aplay -l || true
+
+section "PipeWire/WirePlumber state for pilot"
+pilot_uid="$(id -u pilot)"
+runuser -u pilot -- env \
+  XDG_RUNTIME_DIR="/run/user/${pilot_uid}" \
+  DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/${pilot_uid}/bus" \
+  wpctl status --name || true
+
+section "Bluetooth controllers"
+if systemctl is-active --quiet bluetooth.service; then
+  timeout 5 bluetoothctl list || true
+else
+  printf 'bluetooth.service is disabled for this endpoint\n'
+fi
+
+section "Out-of-scope PCI devices (informational only)"
+printf 'Pilot does not configure PCI, GPU, HDMI, VFIO, or IOMMU passthrough.\n'

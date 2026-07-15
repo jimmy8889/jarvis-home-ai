@@ -1,0 +1,36 @@
+[server]
+listen_host = "127.0.0.1"
+listen_port = 8770
+
+[[rooms]]
+id = "office"
+name = "Office"
+response_player_id = "office-assistant"
+default_music_player_id = "office-music"
+# The deployed room-agent currently binds to loopback. Leave this empty until
+# authenticated central-to-room health transport is implemented.
+agent_url = ""
+
+[[players]]
+id = "office-assistant"
+room_id = "office"
+name = "Office Assistant"
+protocol = "pipewire"
+kind = "response"
+endpoint = "homeai"
+
+[[players]]
+id = "office-music"
+room_id = "office"
+name = "Pilot Office Music"
+protocol = "sendspin"
+kind = "music"
+endpoint = "ws://10.0.2.72:8927/sendspin"
+
+[[players]]
+id = "office-airplay"
+room_id = "office"
+name = "Pilot Office"
+protocol = "airplay"
+kind = "music-input"
+endpoint = "homeai.local:5000"

@@ -1,0 +1,37 @@
+all:
+  children:
+    pilot_endpoints:
+      hosts:
+        office-pilot:
+          ansible_host: 192.0.2.10
+          ansible_user: debian-admin
+          room_endpoint_room_id: office
+          room_endpoint_bluetooth_enabled: false
+          room_endpoint_microphone_description: Stadium USB microphone
+          room_endpoint_speaker_description: FiiO K3
+          room_endpoint_microphone_node: alsa_input.example.mono-fallback
+          room_endpoint_speaker_node: alsa_output.usb-FiiO_K3-00.analog-stereo
+          room_endpoint_capture_alsa_device: plughw:CARD=microphone,DEV=0
+          room_endpoint_playback_alsa_device: plughw:CARD=K3,DEV=0
+          room_endpoint_lva_install: true
+          room_endpoint_lva_enabled: false
+          room_endpoint_lva_version: v1.1.12
+          room_endpoint_lva_client_name: Pilot Office
+          room_endpoint_lva_wake_model: okay_nabu
+          room_endpoint_lva_audio_input_device: Stadium USB microphone Mono
+          room_endpoint_lva_audio_output_device: pipewire/alsa_output.usb-FiiO_K3-00.analog-stereo
+          room_endpoint_airplay_install: true
+          room_endpoint_airplay_enabled: false
+          room_endpoint_airplay_name: Pilot Office
+          room_endpoint_squeezelite_install: true
+          room_endpoint_squeezelite_enabled: false
+          room_endpoint_squeezelite_name: Pilot Office Music
+          room_endpoint_squeezelite_server: 192.0.2.20
+          room_endpoint_sendspin_install: true
+          room_endpoint_sendspin_enabled: false
+          room_endpoint_sendspin_version: 7.5.0
+          room_endpoint_sendspin_name: Pilot Office Music
+          room_endpoint_sendspin_id: pilot-office
+          room_endpoint_sendspin_server_url: ws://192.0.2.20:8927/sendspin
+          room_endpoint_sendspin_server_port: 8927
+          room_endpoint_sendspin_audio_device: default

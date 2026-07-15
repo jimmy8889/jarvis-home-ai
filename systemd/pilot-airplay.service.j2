@@ -1,0 +1,26 @@
+[Unit]
+Description=Pilot AirPlay receiver
+After=network-online.target avahi-daemon.service pilot-audio-defaults.service
+Wants=network-online.target avahi-daemon.service pilot-audio-defaults.service
+
+[Service]
+Type=simple
+User={{ room_endpoint_user }}
+Group={{ room_endpoint_user }}
+Environment=HOME=/home/{{ room_endpoint_user }}
+Environment=XDG_RUNTIME_DIR=/run/user/{{ room_endpoint_uid.stdout }}
+Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{{ room_endpoint_uid.stdout }}/bus
+Environment=PULSE_SERVER=/run/user/{{ room_endpoint_uid.stdout }}/pulse/native
+Environment=PULSE_COOKIE=/var/lib/pilot/pulse-cookie
+Environment=PORT={{ room_endpoint_airplay_port }}
+ExecStart=/usr/bin/shairport-sync -c /etc/pilot/shairport-sync.conf
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/var/lib/pilot
+
+[Install]
+WantedBy=multi-user.target

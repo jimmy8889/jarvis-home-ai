@@ -1,0 +1,415 @@
+---
+- name: Assert supported Debian release
+  ansible.builtin.assert:
+    that:
+      - ansible_facts.distribution == "Debian"
+      - ansible_facts.distribution_major_version == "13"
+    fail_msg: "This role is intentionally limited to Debian 13 endpoints."
+
+- name: Install room endpoint packages
+  ansible.builtin.apt:
+    name: "{{ room_endpoint_packages }}"
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Install Linux Voice Assistant build and runtime packages
+  ansible.builtin.apt:
+    name: "{{ room_endpoint_lva_packages }}"
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+  when: room_endpoint_lva_install | bool
+
+- name: Install AirPlay runtime packages
+  ansible.builtin.apt:
+    name: "{{ room_endpoint_airplay_packages }}"
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+  when: room_endpoint_airplay_install | bool
+
+- name: Install Squeezelite runtime packages
+  ansible.builtin.apt:
+    name: "{{ room_endpoint_squeezelite_packages }}"
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+  when: room_endpoint_squeezelite_install | bool
+
+- name: Install Sendspin runtime packages
+  ansible.builtin.apt:
+    name: "{{ room_endpoint_sendspin_packages }}"
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+  when: room_endpoint_sendspin_install | bool
+
+- name: Create Pilot service user
+  ansible.builtin.user:
+    name: "{{ room_endpoint_user }}"
+    system: true
+    create_home: true
+    home: "/home/{{ room_endpoint_user }}"
+    shell: /usr/sbin/nologin
+    groups: audio,video,bluetooth
+    append: true
+
+- name: Enable lingering for headless user audio services
+  ansible.builtin.command: "loginctl enable-linger {{ room_endpoint_user }}"
+  args:
+    creates: "/var/lib/systemd/linger/{{ room_endpoint_user }}"
+
+- name: Resolve Pilot user ID
+  ansible.builtin.command: "id -u {{ room_endpoint_user }}"
+  register: room_endpoint_uid
+  changed_when: false
+
+- name: Start user manager for Pilot
+  ansible.builtin.systemd_service:
+    name: "user@{{ room_endpoint_uid.stdout }}.service"
+    state: started
+
+- name: Create Pilot directories
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: "{{ item.owner | default('root') }}"
+    group: "{{ item.group | default('root') }}"
+    mode: "{{ item.mode }}"
+  loop:
+    - path: /etc/pilot
+      owner: root
+      group: "{{ room_endpoint_user }}"
+      mode: "0750"
+    - { path: /opt/pilot/releases, mode: "0755" }
+    - path: /var/lib/pilot
+      owner: "{{ room_endpoint_user }}"
+      group: "{{ room_endpoint_user }}"
+      mode: "0750"
+    - { path: /var/backups/pilot, mode: "0700" }
+    - { path: "/opt/pilot/releases/{{ room_endpoint_release_id }}", mode: "0755" }
+
+- name: Create Linux Voice Assistant directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ room_endpoint_user }}"
+    group: "{{ room_endpoint_user }}"
+    mode: "0750"
+  loop:
+    - /opt/pilot/vendor
+    - /var/lib/pilot/lva
+    - /var/lib/pilot/lva/downloads
+  when: room_endpoint_lva_install | bool
+
+- name: Download pinned Linux Voice Assistant release
+  ansible.builtin.git:
+    repo: https://github.com/OHF-Voice/linux-voice-assistant.git
+    dest: "/opt/pilot/vendor/linux-voice-assistant-{{ room_endpoint_lva_version }}"
+    version: "{{ room_endpoint_lva_version }}"
+    depth: 1
+    single_branch: true
+    update: false
+  when: room_endpoint_lva_install | bool
+
+- name: Assign Linux Voice Assistant release to Pilot
+  ansible.builtin.file:
+    path: "/opt/pilot/vendor/linux-voice-assistant-{{ room_endpoint_lva_version }}"
+    state: directory
+    owner: "{{ room_endpoint_user }}"
+    group: "{{ room_endpoint_user }}"
+    recurse: true
+  when: room_endpoint_lva_install | bool
+
+- name: Build Linux Voice Assistant virtual environment
+  ansible.builtin.command:
+    argv:
+      - runuser
+      - -u
+      - "{{ room_endpoint_user }}"
+      - --
+      - env
+      - "HOME=/home/{{ room_endpoint_user }}"
+      - ./script/setup
+      - "--cxxflags=-O2 -g0"
+      - "--makeflags=-j2"
+    chdir: "/opt/pilot/vendor/linux-voice-assistant-{{ room_endpoint_lva_version }}"
+    creates: "/opt/pilot/vendor/linux-voice-assistant-{{ room_endpoint_lva_version }}/.venv/bin/python"
+  when: room_endpoint_lva_install | bool
+
+- name: Create Sendspin state directory
+  ansible.builtin.file:
+    path: /var/lib/pilot/sendspin
+    state: directory
+    owner: "{{ room_endpoint_user }}"
+    group: "{{ room_endpoint_user }}"
+    mode: "0750"
+  when: room_endpoint_sendspin_install | bool
+
+- name: Create pinned Sendspin virtual environment
+  ansible.builtin.command:
+    cmd: >-
+      python3 -m venv
+      /opt/pilot/vendor/sendspin-{{ room_endpoint_sendspin_version }}
+    creates: >-
+      /opt/pilot/vendor/sendspin-{{ room_endpoint_sendspin_version }}/bin/python
+  when: room_endpoint_sendspin_install | bool
+
+- name: Install pinned Sendspin client
+  ansible.builtin.pip:
+    name: "sendspin=={{ room_endpoint_sendspin_version }}"
+    virtualenv: "/opt/pilot/vendor/sendspin-{{ room_endpoint_sendspin_version }}"
+  when: room_endpoint_sendspin_install | bool
+
+- name: Back up current Pilot configuration  # noqa command-instead-of-module
+  ansible.builtin.command:
+    cmd: >-
+      tar -C /etc -czf /var/backups/pilot/pre-{{ room_endpoint_release_id }}.tar.gz
+      pilot
+  args:
+    creates: "/var/backups/pilot/pre-{{ room_endpoint_release_id }}.tar.gz"
+
+- name: Install room-agent source into release
+  ansible.builtin.copy:
+    src: "{{ room_endpoint_project_root }}/apps/room-agent/"
+    dest: "/opt/pilot/releases/{{ room_endpoint_release_id }}/apps/room-agent/"
+    owner: root
+    group: root
+    mode: preserve
+
+- name: Create release virtual environment
+  ansible.builtin.command:
+    cmd: "python3 -m venv /opt/pilot/releases/{{ room_endpoint_release_id }}/.venv"
+    creates: "/opt/pilot/releases/{{ room_endpoint_release_id }}/.venv/bin/python"
+
+- name: Render room configuration
+  ansible.builtin.template:
+    src: room.toml.j2
+    dest: /etc/pilot/room.toml
+    owner: root
+    group: "{{ room_endpoint_user }}"
+    mode: "0640"
+  notify: Restart Pilot room-agent
+
+- name: Inspect current release link
+  ansible.builtin.stat:
+    path: /opt/pilot/current
+    follow: false
+  register: room_endpoint_current_link
+
+- name: Read current release target
+  ansible.builtin.command: readlink -f /opt/pilot/current
+  register: room_endpoint_current_release
+  changed_when: false
+  when: room_endpoint_current_link.stat.islnk | default(false)
+
+- name: Record previous release target
+  ansible.builtin.copy:
+    content: "{{ room_endpoint_current_release.stdout }}\n"
+    dest: /var/lib/pilot/previous_release
+    owner: root
+    group: root
+    mode: "0600"
+  when: >-
+    room_endpoint_current_link.stat.islnk | default(false) and
+    room_endpoint_current_release.rc == 0 and
+    room_endpoint_current_release.stdout | length > 0
+
+- name: Activate new release
+  ansible.builtin.file:
+    src: "/opt/pilot/releases/{{ room_endpoint_release_id }}"
+    dest: /opt/pilot/current
+    state: link
+    force: true
+    follow: false
+  notify: Restart Pilot room-agent
+
+- name: Install room-agent systemd service
+  ansible.builtin.template:
+    src: "{{ room_endpoint_project_root }}/systemd/pilot-room-agent.service.j2"
+    dest: /etc/systemd/system/pilot-room-agent.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify:
+    - Reload systemd
+    - Restart Pilot room-agent
+
+- name: Install audio-defaults systemd service
+  ansible.builtin.template:
+    src: "{{ room_endpoint_project_root }}/systemd/pilot-audio-defaults.service.j2"
+    dest: /etc/systemd/system/pilot-audio-defaults.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify:
+    - Reload systemd
+    - Restart Pilot audio-defaults
+
+- name: Install Linux Voice Assistant systemd service
+  ansible.builtin.template:
+    src: "{{ room_endpoint_project_root }}/systemd/pilot-linux-voice-assistant.service.j2"
+    dest: /etc/systemd/system/pilot-linux-voice-assistant.service
+    owner: root
+    group: root
+    mode: "0644"
+  when: room_endpoint_lva_install | bool
+  notify:
+    - Reload systemd
+    - Restart Pilot Linux Voice Assistant
+
+- name: Disable distribution Shairport Sync service
+  ansible.builtin.systemd_service:
+    name: shairport-sync.service
+    enabled: false
+    state: stopped
+  when: room_endpoint_airplay_install | bool
+
+- name: Install Pilot AirPlay configuration
+  ansible.builtin.template:
+    src: shairport-sync.conf.j2
+    dest: /etc/pilot/shairport-sync.conf
+    owner: root
+    group: "{{ room_endpoint_user }}"
+    mode: "0640"
+  when: room_endpoint_airplay_install | bool
+  notify: Restart Pilot AirPlay
+
+- name: Install Pilot AirPlay systemd service
+  ansible.builtin.template:
+    src: "{{ room_endpoint_project_root }}/systemd/pilot-airplay.service.j2"
+    dest: /etc/systemd/system/pilot-airplay.service
+    owner: root
+    group: root
+    mode: "0644"
+  when: room_endpoint_airplay_install | bool
+  notify:
+    - Reload systemd
+    - Restart Pilot AirPlay
+
+- name: Disable distribution Squeezelite service
+  ansible.builtin.systemd_service:
+    name: squeezelite.service
+    enabled: false
+    state: stopped
+  when: room_endpoint_squeezelite_install | bool
+
+- name: Install Pilot Squeezelite systemd service
+  ansible.builtin.template:
+    src: "{{ room_endpoint_project_root }}/systemd/pilot-squeezelite.service.j2"
+    dest: /etc/systemd/system/pilot-squeezelite.service
+    owner: root
+    group: root
+    mode: "0644"
+  when: room_endpoint_squeezelite_install | bool
+  notify:
+    - Reload systemd
+    - Restart Pilot Squeezelite
+
+- name: Install Pilot Sendspin systemd service
+  ansible.builtin.template:
+    src: "{{ room_endpoint_project_root }}/systemd/pilot-sendspin.service.j2"
+    dest: /etc/systemd/system/pilot-sendspin.service
+    owner: root
+    group: root
+    mode: "0644"
+  when: room_endpoint_sendspin_install | bool
+  notify:
+    - Reload systemd
+    - Restart Pilot Sendspin
+
+- name: Install operator commands
+  ansible.builtin.copy:
+    src: "{{ room_endpoint_project_root }}/deploy/scripts/{{ item }}"
+    dest: "/usr/local/sbin/{{ item }}"
+    owner: root
+    group: root
+    mode: "0755"
+  loop:
+    - pilot-hardware-inventory
+    - pilot-rollback
+    - pilot-validate
+
+- name: Enable user PipeWire sockets and session manager
+  ansible.builtin.command:
+    cmd: >-
+      runuser -u {{ room_endpoint_user }} -- env
+      XDG_RUNTIME_DIR=/run/user/{{ room_endpoint_uid.stdout }}
+      DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{{ room_endpoint_uid.stdout }}/bus
+      systemctl --user enable --now {{ item }}
+  changed_when: false
+  loop:
+    - pipewire.socket
+    - pipewire-pulse.socket
+    - wireplumber.service
+
+- name: Configure Bluetooth service state
+  ansible.builtin.systemd_service:
+    name: bluetooth.service
+    enabled: "{{ room_endpoint_bluetooth_enabled | bool }}"
+    state: "{{ 'started' if room_endpoint_bluetooth_enabled | bool else 'stopped' }}"
+
+- name: Enable Avahi
+  ansible.builtin.systemd_service:
+    name: avahi-daemon.service
+    enabled: true
+    state: started
+
+- name: Enable and start Pilot room-agent
+  ansible.builtin.systemd_service:
+    name: pilot-room-agent.service
+    enabled: true
+    state: started
+    daemon_reload: true
+
+- name: Enable and start Pilot audio-defaults
+  ansible.builtin.systemd_service:
+    name: pilot-audio-defaults.service
+    enabled: true
+    state: started
+    daemon_reload: true
+
+- name: Configure Linux Voice Assistant service state
+  ansible.builtin.systemd_service:
+    name: pilot-linux-voice-assistant.service
+    enabled: "{{ room_endpoint_lva_enabled | bool }}"
+    state: "{{ 'started' if room_endpoint_lva_enabled | bool else 'stopped' }}"
+    daemon_reload: true
+  when: room_endpoint_lva_install | bool
+
+- name: Configure Pilot AirPlay service state
+  ansible.builtin.systemd_service:
+    name: pilot-airplay.service
+    enabled: "{{ room_endpoint_airplay_enabled | bool }}"
+    state: "{{ 'started' if room_endpoint_airplay_enabled | bool else 'stopped' }}"
+    daemon_reload: true
+  when: room_endpoint_airplay_install | bool
+
+- name: Configure Pilot Squeezelite service state
+  ansible.builtin.systemd_service:
+    name: pilot-squeezelite.service
+    enabled: "{{ room_endpoint_squeezelite_enabled | bool }}"
+    state: "{{ 'started' if room_endpoint_squeezelite_enabled | bool else 'stopped' }}"
+    daemon_reload: true
+  when: room_endpoint_squeezelite_install | bool
+
+- name: Configure Pilot Sendspin service state
+  ansible.builtin.systemd_service:
+    name: pilot-sendspin.service
+    enabled: "{{ room_endpoint_sendspin_enabled | bool }}"
+    state: "{{ 'started' if room_endpoint_sendspin_enabled | bool else 'stopped' }}"
+    daemon_reload: true
+  when: room_endpoint_sendspin_install | bool
+
+- name: Flush service handlers before health check
+  ansible.builtin.meta: flush_handlers
+
+- name: Verify room-agent health
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ room_endpoint_listen_port }}/healthz"
+    status_code: 200
+  register: room_endpoint_health
+  retries: 5
+  delay: 2
+  until: room_endpoint_health.status == 200

@@ -1,0 +1,18 @@
+general =
+{
+  name = "{{ room_endpoint_airplay_name }}";
+  output_backend = "pa";
+  mdns_backend = "avahi";
+  port = {{ room_endpoint_airplay_port }};
+  dbus_service_bus = "session";
+  mpris_service_bus = "session";
+  interpolation = "soxr";
+  volume_range_db = {{ room_endpoint_airplay_volume_range_db }};
+  default_airplay_volume = {{ room_endpoint_airplay_default_volume_db }};
+};
+
+metadata =
+{
+  enabled = "yes";
+  include_cover_art = "yes";
+};

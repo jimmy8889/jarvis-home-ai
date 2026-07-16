@@ -27,6 +27,7 @@ class EventReporter:
 
     def stop(self) -> None:
         self.stop_event.set()
+        self.control_state.wake_waiters()
         self.thread.join(timeout=5)
 
     def _token(self) -> str:
@@ -91,8 +92,12 @@ class EventReporter:
 
     def _run(self) -> None:
         while not self.stop_event.is_set():
+            revision = self.control_state.snapshot()["revision"]
             try:
                 self.report_once()
             except (OSError, HTTPError, URLError, RuntimeError, ValueError) as error:
                 print(f"room-agent: Pilot Core reporting failed: {error}", flush=True)
-            self.stop_event.wait(max(self.settings.core_report_interval_seconds, 5))
+            wait_seconds = max(self.settings.core_report_interval_seconds, 5)
+            if self.stop_event.is_set():
+                break
+            self.control_state.wait_for_change(revision, wait_seconds)

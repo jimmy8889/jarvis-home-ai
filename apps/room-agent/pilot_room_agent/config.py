@@ -34,6 +34,10 @@ class Settings:
     core_command_heartbeat_seconds: int = 20
     core_command_reconnect_min_seconds: int = 2
     core_command_reconnect_max_seconds: int = 30
+    audio_cache_path: str = "/var/lib/pilot/audio"
+    audio_max_bytes: int = 20_000_000
+    audio_download_timeout_seconds: int = 15
+    audio_cache_retention_seconds: int = 86_400
     audio_focus_enabled: bool = False
     audio_focus_duck_gain: float = 0.2
     audio_focus_interval_seconds: int = 1

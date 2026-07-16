@@ -99,6 +99,20 @@ class Store:
                 );
                 CREATE INDEX IF NOT EXISTS commands_device_created
                     ON device_commands(device_id, id DESC);
+                CREATE TABLE IF NOT EXISTS audio_assets (
+                    id TEXT PRIMARY KEY,
+                    room_id TEXT NOT NULL REFERENCES rooms(id),
+                    kind TEXT NOT NULL,
+                    filename TEXT NOT NULL,
+                    content_type TEXT NOT NULL,
+                    sha256 TEXT NOT NULL,
+                    size_bytes INTEGER NOT NULL,
+                    path TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    expires_at TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS audio_assets_room_created
+                    ON audio_assets(room_id, created_at DESC);
                 """
             )
             room_columns = {
@@ -230,6 +244,92 @@ class Store:
             }
             for row in rows
         ]
+
+    def create_audio_asset(
+        self,
+        asset_id: str,
+        room_id: str,
+        kind: str,
+        filename: str,
+        content_type: str,
+        digest: str,
+        size_bytes: int,
+        path: str,
+        expires_at: str,
+    ) -> dict[str, Any]:
+        now = _now()
+        with self._lock, self._connection:
+            if not self._connection.execute(
+                "SELECT 1 FROM rooms WHERE id = ?", (room_id,)
+            ).fetchone():
+                raise KeyError(room_id)
+            self._connection.execute(
+                """INSERT INTO audio_assets
+                   (id, room_id, kind, filename, content_type, sha256,
+                    size_bytes, path, created_at, expires_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    asset_id,
+                    room_id,
+                    kind,
+                    filename,
+                    content_type,
+                    digest,
+                    size_bytes,
+                    path,
+                    now,
+                    expires_at,
+                ),
+            )
+        asset = self.get_audio_asset(asset_id)
+        assert asset is not None
+        return asset
+
+    def get_audio_asset(self, asset_id: str) -> dict[str, Any] | None:
+        with self._lock:
+            row = self._connection.execute(
+                "SELECT * FROM audio_assets WHERE id = ?", (asset_id,)
+            ).fetchone()
+        return self._audio_asset_view(row) if row else None
+
+    def list_audio_assets(
+        self, room_id: str | None = None, limit: int = 100
+    ) -> list[dict[str, Any]]:
+        with self._lock:
+            if room_id is None:
+                rows = self._connection.execute(
+                    "SELECT * FROM audio_assets ORDER BY created_at DESC LIMIT ?",
+                    (limit,),
+                ).fetchall()
+            else:
+                rows = self._connection.execute(
+                    """SELECT * FROM audio_assets WHERE room_id = ?
+                       ORDER BY created_at DESC LIMIT ?""",
+                    (room_id, limit),
+                ).fetchall()
+        return [self._audio_asset_view(row) for row in rows]
+
+    def delete_audio_asset(self, asset_id: str) -> str | None:
+        with self._lock, self._connection:
+            row = self._connection.execute(
+                "SELECT path FROM audio_assets WHERE id = ?", (asset_id,)
+            ).fetchone()
+            if row:
+                self._connection.execute(
+                    "DELETE FROM audio_assets WHERE id = ?", (asset_id,)
+                )
+        return str(row["path"]) if row else None
+
+    def purge_expired_audio_assets(self) -> list[str]:
+        now = _now()
+        with self._lock, self._connection:
+            rows = self._connection.execute(
+                "SELECT path FROM audio_assets WHERE expires_at <= ?", (now,)
+            ).fetchall()
+            self._connection.execute(
+                "DELETE FROM audio_assets WHERE expires_at <= ?", (now,)
+            )
+        return [str(row["path"]) for row in rows]
 
     def room_source_state(self, room_id: str) -> dict[str, dict[str, Any]]:
         with self._lock:
@@ -469,5 +569,20 @@ class Store:
             "created_at": row["created_at"],
             "delivered_at": row["delivered_at"],
             "completed_at": row["completed_at"],
+            "expires_at": row["expires_at"],
+        }
+
+    @staticmethod
+    def _audio_asset_view(row: sqlite3.Row) -> dict[str, Any]:
+        return {
+            "id": row["id"],
+            "room_id": row["room_id"],
+            "kind": row["kind"],
+            "filename": row["filename"],
+            "content_type": row["content_type"],
+            "sha256": row["sha256"],
+            "size_bytes": row["size_bytes"],
+            "path": row["path"],
+            "created_at": row["created_at"],
             "expires_at": row["expires_at"],
         }

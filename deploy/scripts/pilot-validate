@@ -50,6 +50,7 @@ listen_port="$(python3 -c 'import tomllib; print(tomllib.load(open("/etc/pilot/r
 capture_device="${capture_device:-$(python3 -c 'import tomllib; print(tomllib.load(open("/etc/pilot/room.toml", "rb")).get("capture_alsa_device", "default"))')}"
 playback_device="${playback_device:-$(python3 -c 'import tomllib; print(tomllib.load(open("/etc/pilot/room.toml", "rb")).get("playback_alsa_device", "default"))')}"
 core_commands_enabled="$(python3 -c 'import tomllib; print(tomllib.load(open("/etc/pilot/room.toml", "rb")).get("core_commands_enabled", False))')"
+audio_cache_path="$(python3 -c 'import tomllib; print(tomllib.load(open("/etc/pilot/room.toml", "rb")).get("audio_cache_path", "/var/lib/pilot/audio"))')"
 
 has_capture_hardware() {
   arecord -l 2>/dev/null | grep -q '^card '
@@ -133,6 +134,9 @@ fi
 
 if [[ "$core_commands_enabled" == "True" ]]; then
   check "Pilot Core command channel connected" has_connected_core_commands
+  check "PipeWire audio player installed" command -v pw-play
+  check "audio delivery cache exists" test -d "$audio_cache_path"
+  check "audio delivery cache writable" "${pilot_cmd[@]}" test -w "$audio_cache_path"
 fi
 
 if ! "$audio_tests"; then

@@ -6,9 +6,20 @@ import os
 import secrets
 from typing import Any, Literal
 
-from fastapi import Depends, FastAPI, Header, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import (
+    Depends,
+    FastAPI,
+    Header,
+    HTTPException,
+    Query,
+    Request,
+    WebSocket,
+    WebSocketDisconnect,
+)
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field, model_validator
 
+from .audio_assets import AudioAssetError, AudioAssets
 from .config import Settings
 from .integrations import IntegrationRequestFailed, IntegrationUnavailable, Integrations
 from .orchestration import ResolutionError, RoomOrchestrator
@@ -120,6 +131,14 @@ class RoomMediaCommand(BaseModel):
         return self
 
 
+class RoomAudioCommand(BaseModel):
+    asset_id: str = Field(pattern=r"^[a-f0-9]{32}$")
+    device_id: str | None = None
+    volume: float = Field(default=1.0, ge=0, le=1)
+    critical: bool = False
+    expires_in_seconds: int = Field(default=30, ge=1, le=300)
+
+
 class EventHub:
     def __init__(self) -> None:
         self.clients: set[WebSocket] = set()
@@ -206,6 +225,12 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
     database = store or Store(settings.server.database_path, settings)
     orchestrator = RoomOrchestrator(registry, database)
     integrations = Integrations(settings.integrations)
+    audio_assets = AudioAssets(
+        database,
+        settings.server.audio_asset_path,
+        settings.server.audio_asset_max_bytes,
+        settings.server.audio_asset_retention_seconds,
+    )
     hub = EventHub()
     device_hub = DeviceHub()
 
@@ -215,7 +240,7 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
         if owns_store:
             database.close()
 
-    app = FastAPI(title="Pilot Core", version="0.4.0", lifespan=lifespan)
+    app = FastAPI(title="Pilot Core", version="0.5.0", lifespan=lifespan)
 
     async def queue_device_command(
         device_id: str, payload: dict[str, Any], expires_in_seconds: int
@@ -408,6 +433,158 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
             "target_player": target_player.as_dict() if target_player else None,
             "result": result,
         }
+
+    @app.post(
+        "/v1/rooms/{room_id}/audio-assets",
+        dependencies=[Depends(require_admin)],
+        status_code=201,
+    )
+    async def create_audio_asset(
+        room_id: str,
+        request: Request,
+        kind: Literal["assistant", "announcement"] = Query(),
+        filename: str = Query(default="speech", max_length=200),
+        retention_seconds: int | None = Query(default=None, ge=60, le=86_400),
+    ) -> dict[str, Any]:
+        try:
+            orchestrator.require_room(room_id)
+        except ResolutionError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from None
+        content_length = request.headers.get("content-length")
+        if content_length:
+            try:
+                if int(content_length) > settings.server.audio_asset_max_bytes:
+                    raise HTTPException(status_code=413, detail="audio asset is too large")
+            except ValueError:
+                raise HTTPException(status_code=400, detail="invalid content-length") from None
+        content = bytearray()
+        async for chunk in request.stream():
+            content.extend(chunk)
+            if len(content) > settings.server.audio_asset_max_bytes:
+                raise HTTPException(status_code=413, detail="audio asset is too large")
+        try:
+            asset = audio_assets.create(
+                room_id,
+                kind,
+                filename,
+                request.headers.get("content-type", ""),
+                bytes(content),
+                retention_seconds,
+            )
+        except AudioAssetError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from None
+        return audio_assets.public_view(asset)
+
+    @app.get(
+        "/v1/rooms/{room_id}/audio-assets",
+        dependencies=[Depends(require_admin)],
+    )
+    async def room_audio_assets(room_id: str, limit: int = 100) -> dict[str, Any]:
+        try:
+            orchestrator.require_room(room_id)
+        except ResolutionError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from None
+        return {
+            "assets": [
+                audio_assets.public_view(asset)
+                for asset in audio_assets.list(room_id, min(max(limit, 1), 500))
+            ]
+        }
+
+    @app.post(
+        "/v1/rooms/{room_id}/audio",
+        dependencies=[Depends(require_admin)],
+        status_code=201,
+    )
+    async def room_audio(
+        room_id: str, request: RoomAudioCommand
+    ) -> dict[str, Any]:
+        asset = audio_assets.get(request.asset_id)
+        if asset is None:
+            raise HTTPException(status_code=404, detail="audio asset not found")
+        if asset["room_id"] != room_id:
+            raise HTTPException(
+                status_code=409, detail="audio asset belongs to another room"
+            )
+        if request.critical and asset["kind"] != "announcement":
+            raise HTTPException(
+                status_code=422,
+                detail="only announcement assets may be critical",
+            )
+        try:
+            target = orchestrator.device(
+                room_id,
+                await device_hub.connected_ids(),
+                "audio",
+                request.device_id,
+            )
+            response_player = orchestrator.response_player(room_id)
+        except ResolutionError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from None
+        payload = {
+            "action": "play_audio",
+            "audio_asset_id": asset["id"],
+            "sha256": asset["sha256"],
+            "size_bytes": asset["size_bytes"],
+            "content_type": asset["content_type"],
+            "kind": asset["kind"],
+            "volume": request.volume,
+            "critical": request.critical,
+        }
+        command = await queue_device_command(
+            target.id, payload, request.expires_in_seconds
+        )
+        return {
+            "room_id": room_id,
+            "target": target.as_dict(),
+            "response_player": response_player.as_dict(),
+            "asset": audio_assets.public_view(asset),
+            "command": command,
+        }
+
+    @app.get("/v1/audio-assets/{asset_id}")
+    async def download_audio_asset(
+        asset_id: str,
+        x_pilot_device_id: str = Header(),
+        authorization: str | None = Header(default=None),
+    ) -> FileResponse:
+        token = _bearer(authorization)
+        if not database.authenticate_device(x_pilot_device_id, token):
+            raise HTTPException(status_code=401, detail="invalid device credentials")
+        asset = audio_assets.get(asset_id)
+        if asset is None:
+            raise HTTPException(status_code=404, detail="audio asset not found")
+        device = next(
+            (
+                item
+                for item in database.list_devices()
+                if item["id"] == x_pilot_device_id
+            ),
+            None,
+        )
+        if device is None or device["room_id"] != asset["room_id"]:
+            raise HTTPException(
+                status_code=403, detail="device cannot access this room's audio"
+            )
+        return FileResponse(
+            asset["path"],
+            media_type=asset["content_type"],
+            filename=asset["filename"],
+            headers={
+                "Cache-Control": "private, no-store",
+                "X-Pilot-SHA256": asset["sha256"],
+                "X-Content-Type-Options": "nosniff",
+            },
+        )
+
+    @app.delete(
+        "/v1/audio-assets/{asset_id}",
+        dependencies=[Depends(require_admin)],
+        status_code=204,
+    )
+    async def delete_audio_asset(asset_id: str) -> None:
+        if not audio_assets.delete(asset_id):
+            raise HTTPException(status_code=404, detail="audio asset not found")
 
     @app.get("/v1/players", dependencies=[Depends(require_admin)])
     async def players() -> dict[str, Any]:

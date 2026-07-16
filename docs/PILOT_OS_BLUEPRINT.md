@@ -1,6 +1,6 @@
 # Pilot OS Blueprint
 
-Version 0.8
+Version 0.9
 
 Last updated: 2026-07-17
 
@@ -167,6 +167,10 @@ Implemented foundation:
 - Music Assistant control/search adapter and Home Assistant conversation adapter
 - Container deployment with persistent storage and health checks
 - Deterministic registry revision for configuration change detection
+- Room-bound audio asset storage with expiry, authenticated device downloads,
+  and SHA-256/size manifests
+- Deterministic assistant and announcement dispatch to a room's response
+  endpoint
 
 Planned responsibilities:
 
@@ -191,12 +195,14 @@ Current responsibilities:
 - Loopback-only transport, volume, listening, assistant, announcement, and
   cancel controls
 - Self-expiring transient focus state and deterministic priority decisions
+- Authenticated, integrity-verified assistant and announcement downloads
+- Single-slot PipeWire speech playback with completion cleanup and cancellation
 - Reproducible deployment, validation, and rollback
 
 Planned responsibilities:
 
 - Audible acceptance and activation of local PipeWire gain enforcement
-- Logical echo-reference and announcement playback buses
+- Logical echo-reference and dedicated announcement playback buses
 - Bluetooth A2DP sink
 - Hardware controls, LEDs, and privacy state
 - Metrics and central event reporting
@@ -286,11 +292,16 @@ Target Pilot Core APIs:
 - `/assistant`
 - WebSockets for events and streaming transcripts
 
-Pilot Core 0.4 now implements authenticated `/v1/rooms`, `/v1/players`,
+Pilot Core 0.5 now implements authenticated `/v1/rooms`, `/v1/players`,
 `/v1/devices`, `/v1/media`, `/v1/assistant`, event ingestion/history, and a
 realtime event WebSocket. It also persists device commands and delivers them
 over authenticated outbound room-agent WebSockets. Meeting and memory APIs
 remain future phases.
+
+Pilot Core 0.5 adds `/v1/rooms/{room_id}/audio-assets`,
+`/v1/rooms/{room_id}/audio`, and the device-authenticated audio download path.
+The room agent verifies each manifest and owns playback state through completion
+or cancellation. Audio synthesis remains a separate next-stage integration.
 
 Room-level state, media, and endpoint-control APIs resolve configured targets
 deterministically. Connected capable devices are preferred with stable

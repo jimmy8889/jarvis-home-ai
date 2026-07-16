@@ -2,6 +2,16 @@
 
 ## 2026-07-17
 
+- Added Pilot Core 0.5 room-bound audio assets for pre-rendered assistant speech
+  and announcements, with bounded retention and file sizes.
+- Added per-device, same-room download authorization and SHA-256/size manifests;
+  room agents never receive arbitrary media URLs.
+- Added room-agent verified downloads, private caching, single-slot `pw-play`
+  lifecycle management, natural-completion cleanup, and cancellation.
+- Connected real assistant/announcement playback state to the existing source
+  reporting and audio-focus model while keeping live ducking disabled.
+- Added the `pilot-audio` upload/dispatch operator tool, reproducible room cache
+  configuration, tests, and the audio delivery activation runbook.
 - Added Pilot Core 0.4 deterministic room, player, and capable-device target
   resolution without requiring callers or LLMs to select infrastructure IDs.
 - Added joined room state containing sources, focus, health, connections,

@@ -1,6 +1,6 @@
 # Pilot Core command transport
 
-Pilot Core 0.3 delivers room controls over an authenticated, outbound WebSocket.
+Pilot Core 0.5 delivers room controls over an authenticated, outbound WebSocket.
 Room endpoints do not expose their loopback control API to the LAN and do not
 require inbound firewall rules.
 
@@ -93,3 +93,8 @@ deploy/scripts/pilot-command \
 8. Test pause and volume only when someone can verify the physical room.
 
 Live PipeWire gain enforcement remains a separate opt-in acceptance gate.
+
+Assistant and announcement audio use the same durable command path, but their
+audio bytes are downloaded separately using room-bound device authentication
+and verified against the command's size and SHA-256 manifest. See
+[AUDIO_DELIVERY.md](AUDIO_DELIVERY.md).

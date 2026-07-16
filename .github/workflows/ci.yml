@@ -38,6 +38,7 @@ jobs:
           deploy/scripts/pilot-register-device
           deploy/scripts/pilot-command
           deploy/scripts/pilot-media
+          deploy/scripts/pilot-audio
       - name: Test room agent
         run: python -m unittest discover -s apps/room-agent/tests -v
       - name: Test Pilot Core
@@ -70,6 +71,7 @@ jobs:
           deploy/scripts/pilot-register-device
           deploy/scripts/pilot-command
           deploy/scripts/pilot-media
+          deploy/scripts/pilot-audio
       - name: Check playbook syntax
         run: >-
           ansible-playbook

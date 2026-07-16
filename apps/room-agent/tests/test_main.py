@@ -22,6 +22,8 @@ class ControlApiTests(unittest.TestCase):
         state = ControlState()
         QuietHandler.settings = Settings(room_id="test-room")
         QuietHandler.control_state = state
+        QuietHandler.audio_playback = None
+        QuietHandler.command_client = None
         QuietHandler.controller = RoomController(
             state,
             runner=lambda command: subprocess.CompletedProcess(command, 0, "", ""),

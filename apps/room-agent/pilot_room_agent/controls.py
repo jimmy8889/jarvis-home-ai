@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import math
 import subprocess
-from threading import Lock
+from threading import Condition, Lock
 import time
 from typing import Any, Callable
 
@@ -49,6 +49,7 @@ class ControlState:
     def __init__(self, clock: Callable[[], float] | None = None) -> None:
         self._clock = clock or time.monotonic
         self._lock = Lock()
+        self._condition = Condition(self._lock)
         self._values = {name: False for name in TRANSIENT_STATES}
         self._expires_at: dict[str, float | None] = {
             name: None for name in TRANSIENT_STATES
@@ -69,7 +70,7 @@ class ControlState:
             ):
                 raise ControlError("ttl_seconds must be between 1 and 300")
 
-        with self._lock:
+        with self._condition:
             self._expire_locked()
             self._values[name] = active
             self._expires_at[name] = (
@@ -78,13 +79,15 @@ class ControlState:
                 else None
             )
             self._revision += 1
+            self._condition.notify_all()
 
     def clear(self) -> None:
-        with self._lock:
+        with self._condition:
             for name in TRANSIENT_STATES:
                 self._values[name] = False
                 self._expires_at[name] = None
             self._revision += 1
+            self._condition.notify_all()
 
     def snapshot(self) -> dict[str, Any]:
         with self._lock:
@@ -104,6 +107,19 @@ class ControlState:
             ),
         }
 
+    def wait_for_change(self, revision: int, timeout: float) -> int:
+        """Wait until state changes, returning the current revision."""
+        with self._condition:
+            self._expire_locked()
+            if self._revision == revision:
+                self._condition.wait(timeout)
+                self._expire_locked()
+            return self._revision
+
+    def wake_waiters(self) -> None:
+        with self._condition:
+            self._condition.notify_all()
+
     def _expire_locked(self) -> None:
         now = self._clock()
         changed = False
@@ -114,6 +130,7 @@ class ControlState:
                 changed = True
         if changed:
             self._revision += 1
+            self._condition.notify_all()
 
 
 class RoomController:
@@ -123,11 +140,13 @@ class RoomController:
         runner: Callable[[list[str]], subprocess.CompletedProcess[str]] | None = None,
         sendspin_bus_resolver: Callable[[], str | None] | None = None,
         airplay_bus_resolver: Callable[[], str | None] | None = None,
+        audio_player: Any | None = None,
     ) -> None:
         self.state = state
         self.runner = runner or self._run
         self.sendspin_bus_resolver = sendspin_bus_resolver or _sendspin_bus_name
         self.airplay_bus_resolver = airplay_bus_resolver or _airplay_bus_name
+        self.audio_player = audio_player
 
     @staticmethod
     def _run(command: list[str]) -> subprocess.CompletedProcess[str]:
@@ -170,9 +189,18 @@ class RoomController:
             detail = {"assistant_speaking": active}
         elif action in {"announcement_start", "announcement_end"}:
             detail = self._announcement(action, payload)
+        elif action == "play_audio":
+            if self.audio_player is None:
+                raise ControlError("audio delivery is unavailable")
+            detail = self.audio_player.play(payload)
         elif action == "cancel":
+            playback = (
+                self.audio_player.cancel()
+                if self.audio_player is not None
+                else {"audio_playback_stopped": False}
+            )
             self.state.clear()
-            detail = {"transient_state_cleared": True}
+            detail = {"transient_state_cleared": True, **playback}
         else:
             raise ControlError(f"unsupported action: {action}")
 

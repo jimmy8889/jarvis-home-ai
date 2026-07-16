@@ -60,6 +60,9 @@ Authenticated, durable Pilot Core-to-room command delivery is documented in
 Deterministic room state and room-level player/device routing are documented in
 [docs/ROOM_ORCHESTRATION.md](docs/ROOM_ORCHESTRATION.md).
 
+Room-bound, authenticated assistant and announcement playback is documented in
+[docs/AUDIO_DELIVERY.md](docs/AUDIO_DELIVERY.md).
+
 Staged Music Assistant playback is documented in
 [docs/MUSIC_ASSISTANT.md](docs/MUSIC_ASSISTANT.md).
 

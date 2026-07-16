@@ -18,7 +18,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=read-only
-ReadWritePaths=/var/lib/pilot
+ReadWritePaths=/var/lib/pilot {{ room_endpoint_audio_cache_path }}
 
 [Install]
 WantedBy=multi-user.target

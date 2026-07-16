@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
+import tempfile
 import unittest
 from unittest.mock import AsyncMock, patch
 
@@ -11,9 +13,11 @@ from pilot_core.config import IntegrationSettings, Player, Room, ServerSettings,
 from pilot_core.storage import Store
 
 
-def settings() -> Settings:
+def settings(audio_asset_path: str = "/tmp/pilot-core-test-audio") -> Settings:
     return Settings(
-        server=ServerSettings(database_path=":memory:"),
+        server=ServerSettings(
+            database_path=":memory:", audio_asset_path=audio_asset_path
+        ),
         integrations=IntegrationSettings(),
         rooms=(
             Room(
@@ -69,7 +73,8 @@ class ApiTests(unittest.TestCase):
     def setUp(self) -> None:
         os.environ["PILOT_CORE_ADMIN_TOKEN"] = "admin-test"
         os.environ["PILOT_CORE_BOOTSTRAP_TOKEN"] = "bootstrap-test"
-        config = settings()
+        self.audio_directory = tempfile.TemporaryDirectory()
+        config = settings(self.audio_directory.name)
         self.store = Store(":memory:", config)
         self.client = TestClient(create_app(config, self.store))
 
@@ -78,6 +83,7 @@ class ApiTests(unittest.TestCase):
         os.environ.pop("PILOT_CORE_BOOTSTRAP_TOKEN", None)
         self.client.close()
         self.store.close()
+        self.audio_directory.cleanup()
 
     def test_admin_api_requires_token(self) -> None:
         self.assertEqual(self.client.get("/v1/rooms").status_code, 401)
@@ -210,6 +216,142 @@ class ApiTests(unittest.TestCase):
             json={"action": "set_volume", "source": "room"},
         )
         self.assertEqual(response.status_code, 422)
+
+    def test_room_audio_asset_is_private_and_queues_verified_playback(self) -> None:
+        office_token = self.register_device()
+        upload = self.client.post(
+            "/v1/rooms/office/audio-assets",
+            params={"kind": "assistant", "filename": "reply.wav"},
+            headers={
+                "Authorization": "Bearer admin-test",
+                "Content-Type": "audio/wav",
+            },
+            content=b"RIFF-pilot-test",
+        )
+        self.assertEqual(upload.status_code, 201)
+        asset = upload.json()
+        self.assertNotIn("path", asset)
+
+        download = self.client.get(
+            f"/v1/audio-assets/{asset['id']}",
+            headers={
+                "Authorization": f"Bearer {office_token}",
+                "X-Pilot-Device-ID": "office-n150",
+            },
+        )
+        self.assertEqual(download.status_code, 200)
+        self.assertEqual(download.content, b"RIFF-pilot-test")
+        self.assertEqual(download.headers["x-pilot-sha256"], asset["sha256"])
+
+        queued = self.client.post(
+            "/v1/rooms/office/audio",
+            headers={"Authorization": "Bearer admin-test"},
+            json={"asset_id": asset["id"], "volume": 0.7},
+        )
+        self.assertEqual(queued.status_code, 201)
+        payload = queued.json()["command"]["payload"]
+        self.assertEqual(payload["action"], "play_audio")
+        self.assertEqual(payload["audio_asset_id"], asset["id"])
+        self.assertEqual(payload["sha256"], asset["sha256"])
+        self.assertEqual(payload["size_bytes"], len(b"RIFF-pilot-test"))
+        self.assertEqual(queued.json()["target"]["id"], "office-n150")
+
+    def test_audio_asset_cannot_cross_room_boundary(self) -> None:
+        office_token = self.register_device()
+        media_registration = self.client.post(
+            "/v1/devices/register",
+            headers={"Authorization": "Bearer bootstrap-test"},
+            json={
+                "device_id": "media-n150",
+                "room_id": "media-room",
+                "name": "Media N150",
+                "capabilities": ["audio"],
+            },
+        )
+        media_token = media_registration.json()["device_token"]
+        upload = self.client.post(
+            "/v1/rooms/office/audio-assets?kind=announcement",
+            headers={
+                "Authorization": "Bearer admin-test",
+                "Content-Type": "audio/flac",
+            },
+            content=b"fLaC-pilot-test",
+        )
+        asset_id = upload.json()["id"]
+
+        denied_download = self.client.get(
+            f"/v1/audio-assets/{asset_id}",
+            headers={
+                "Authorization": f"Bearer {media_token}",
+                "X-Pilot-Device-ID": "media-n150",
+            },
+        )
+        self.assertEqual(denied_download.status_code, 403)
+        denied_queue = self.client.post(
+            "/v1/rooms/media-room/audio",
+            headers={"Authorization": "Bearer admin-test"},
+            json={"asset_id": asset_id},
+        )
+        self.assertEqual(denied_queue.status_code, 409)
+
+        allowed_download = self.client.get(
+            f"/v1/audio-assets/{asset_id}",
+            headers={
+                "Authorization": f"Bearer {office_token}",
+                "X-Pilot-Device-ID": "office-n150",
+            },
+        )
+        self.assertEqual(allowed_download.status_code, 200)
+
+    def test_audio_upload_rejects_unsupported_content(self) -> None:
+        response = self.client.post(
+            "/v1/rooms/office/audio-assets?kind=assistant",
+            headers={
+                "Authorization": "Bearer admin-test",
+                "Content-Type": "application/octet-stream",
+            },
+            content=b"not-audio",
+        )
+        self.assertEqual(response.status_code, 422)
+
+    def test_assistant_asset_cannot_be_marked_critical(self) -> None:
+        self.register_device()
+        upload = self.client.post(
+            "/v1/rooms/office/audio-assets?kind=assistant",
+            headers={
+                "Authorization": "Bearer admin-test",
+                "Content-Type": "audio/wav",
+            },
+            content=b"RIFF-assistant",
+        )
+        response = self.client.post(
+            "/v1/rooms/office/audio",
+            headers={"Authorization": "Bearer admin-test"},
+            json={"asset_id": upload.json()["id"], "critical": True},
+        )
+        self.assertEqual(response.status_code, 422)
+
+    def test_deleted_audio_asset_is_no_longer_listed(self) -> None:
+        upload = self.client.post(
+            "/v1/rooms/office/audio-assets?kind=assistant",
+            headers={
+                "Authorization": "Bearer admin-test",
+                "Content-Type": "audio/wav",
+            },
+            content=b"RIFF-delete-test",
+        )
+        asset_id = upload.json()["id"]
+        deleted = self.client.delete(
+            f"/v1/audio-assets/{asset_id}",
+            headers={"Authorization": "Bearer admin-test"},
+        )
+        self.assertEqual(deleted.status_code, 204)
+        listing = self.client.get(
+            "/v1/rooms/office/audio-assets",
+            headers={"Authorization": "Bearer admin-test"},
+        )
+        self.assertEqual(listing.json()["assets"], [])
+        self.assertFalse(any(Path(self.audio_directory.name).iterdir()))
 
     def test_room_state_combines_registered_device_and_default_targets(self) -> None:
         token = self.register_device()

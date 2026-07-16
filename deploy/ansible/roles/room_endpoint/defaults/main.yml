@@ -51,6 +51,10 @@ room_endpoint_core_command_journal_path: /var/lib/pilot/commands.db
 room_endpoint_core_command_heartbeat_seconds: 20
 room_endpoint_core_command_reconnect_min_seconds: 2
 room_endpoint_core_command_reconnect_max_seconds: 30
+room_endpoint_audio_cache_path: /var/lib/pilot/audio
+room_endpoint_audio_max_bytes: 20000000
+room_endpoint_audio_download_timeout_seconds: 15
+room_endpoint_audio_cache_retention_seconds: 86400
 room_endpoint_audio_focus_enabled: false
 room_endpoint_audio_focus_duck_gain: 0.2
 room_endpoint_audio_focus_interval_seconds: 1
@@ -65,6 +69,7 @@ room_endpoint_packages:
   - libspa-0.2-bluetooth
   - pipewire
   - pipewire-alsa
+  - pipewire-bin
   - pipewire-pulse
   - python3
   - python3-venv

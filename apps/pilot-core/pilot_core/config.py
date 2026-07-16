@@ -10,6 +10,9 @@ class ServerSettings:
     listen_host: str = "127.0.0.1"
     listen_port: int = 8770
     database_path: str = "/var/lib/pilot-core/pilot.db"
+    audio_asset_path: str = "/var/lib/pilot-core/audio"
+    audio_asset_max_bytes: int = 20_000_000
+    audio_asset_retention_seconds: int = 3600
     admin_token_env: str = "PILOT_CORE_ADMIN_TOKEN"
     bootstrap_token_env: str = "PILOT_CORE_BOOTSTRAP_TOKEN"
 
@@ -161,6 +164,15 @@ def load_settings(path: str | Path) -> Settings:
         database_path=str(
             server_values.get("database_path", "/var/lib/pilot-core/pilot.db")
         ),
+        audio_asset_path=str(
+            server_values.get("audio_asset_path", "/var/lib/pilot-core/audio")
+        ),
+        audio_asset_max_bytes=int(
+            server_values.get("audio_asset_max_bytes", 20_000_000)
+        ),
+        audio_asset_retention_seconds=int(
+            server_values.get("audio_asset_retention_seconds", 3600)
+        ),
         admin_token_env=str(
             server_values.get("admin_token_env", "PILOT_CORE_ADMIN_TOKEN")
         ),
@@ -168,6 +180,12 @@ def load_settings(path: str | Path) -> Settings:
             server_values.get("bootstrap_token_env", "PILOT_CORE_BOOTSTRAP_TOKEN")
         ),
     )
+    if server.audio_asset_max_bytes < 1:
+        raise ValueError("server.audio_asset_max_bytes must be positive")
+    if not 60 <= server.audio_asset_retention_seconds <= 86_400:
+        raise ValueError(
+            "server.audio_asset_retention_seconds must be between 60 and 86400"
+        )
 
     integration_values = values.get("integrations", {})
     if not isinstance(integration_values, dict):

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import subprocess
+from threading import Thread
+import time
 import unittest
 
 from pilot_room_agent.controls import ControlError, ControlState, RoomController
@@ -27,6 +29,20 @@ class ControlStateTests(unittest.TestCase):
             state.focus_sources(),
             {"critical": True, "assistant": True},
         )
+
+    def test_wait_for_change_wakes_on_transient_update(self) -> None:
+        state = ControlState()
+        revision = state.snapshot()["revision"]
+        observed: list[int] = []
+        waiter = Thread(
+            target=lambda: observed.append(state.wait_for_change(revision, 1))
+        )
+        waiter.start()
+        time.sleep(0.01)
+        state.set("assistant_speaking", True, 30)
+        waiter.join(timeout=1)
+        self.assertFalse(waiter.is_alive())
+        self.assertGreater(observed[0], revision)
 
 
 class RoomControllerTests(unittest.TestCase):

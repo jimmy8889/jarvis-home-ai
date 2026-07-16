@@ -8,6 +8,7 @@ import os
 
 from .config import Settings, load_settings
 from .audio_focus import AudioFocusLoop
+from .audio_delivery import AudioFetcher, AudioPlayback
 from .command_client import CommandClient
 from .controls import ControlError, ControlState, RoomController
 from .reporter import EventReporter
@@ -19,6 +20,7 @@ class Handler(BaseHTTPRequestHandler):
     control_state = ControlState()
     controller = RoomController(control_state)
     command_client: CommandClient | None = None
+    audio_playback: AudioPlayback | None = None
 
     def _respond(self, status: HTTPStatus, payload: dict) -> None:
         body = json.dumps(payload, separators=(",", ":")).encode()
@@ -35,6 +37,11 @@ class Handler(BaseHTTPRequestHandler):
         if self.path in {"/readyz", "/v1/status"}:
             payload = collect_status(self.settings)
             payload["controls"] = self.control_state.snapshot()
+            payload["audio_delivery"] = (
+                self.audio_playback.status()
+                if self.audio_playback
+                else {"active": False, "enabled": False}
+            )
             payload["core_commands"] = (
                 self.command_client.status()
                 if self.command_client
@@ -79,7 +86,11 @@ def main() -> None:
     control_state = ControlState()
     Handler.settings = settings
     Handler.control_state = control_state
-    Handler.controller = RoomController(control_state)
+    audio_playback: AudioPlayback | None = None
+    if settings.core_commands_enabled:
+        audio_playback = AudioPlayback(control_state, AudioFetcher(settings))
+    Handler.audio_playback = audio_playback
+    Handler.controller = RoomController(control_state, audio_player=audio_playback)
     Handler.command_client = None
     reporter: EventReporter | None = None
     focus_loop: AudioFocusLoop | None = None
@@ -105,6 +116,8 @@ def main() -> None:
     finally:
         if command_client:
             command_client.stop()
+        if audio_playback:
+            audio_playback.close()
         if reporter:
             reporter.stop()
         if focus_loop:

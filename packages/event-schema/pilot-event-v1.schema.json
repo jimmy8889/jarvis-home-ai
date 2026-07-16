@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pilot.local/schemas/pilot-event-v1.schema.json",
+  "title": "Pilot Event Envelope v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["specversion", "id", "type", "source", "time", "trace_id", "privacy", "data"],
+  "properties": {
+    "specversion": {"const": "1.0"},
+    "id": {"type": "string", "minLength": 8},
+    "type": {"type": "string", "pattern": "^pilot\\.[a-z0-9_.-]+\\.v[0-9]+$"},
+    "source": {"type": "string", "minLength": 1},
+    "subject": {"type": ["string", "null"]},
+    "time": {"type": "string", "format": "date-time"},
+    "trace_id": {"type": "string", "minLength": 8},
+    "causation_id": {"type": ["string", "null"]},
+    "correlation_id": {"type": ["string", "null"]},
+    "room_id": {"type": ["string", "null"]},
+    "user_id": {"type": ["string", "null"]},
+    "privacy": {
+      "type": "string",
+      "enum": ["public", "household", "personal", "sensitive", "restricted"]
+    },
+    "retention": {
+      "type": "string",
+      "enum": ["ephemeral", "operational", "historical", "source-controlled"]
+    },
+    "data": {"type": "object"}
+  }
+}

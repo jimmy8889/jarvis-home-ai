@@ -4,6 +4,7 @@ import subprocess
 import unittest
 
 from pilot_room_agent.audio_focus import FocusEnforcer, decide, parse_stream_nodes
+from pilot_room_agent.controls import ControlState
 
 
 class AudioFocusTests(unittest.TestCase):
@@ -50,6 +51,16 @@ class AudioFocusTests(unittest.TestCase):
             {"assistant": 62},
         )
         self.assertEqual(commands, [])
+
+    def test_control_state_maps_listening_to_assistant_focus(self) -> None:
+        state = ControlState()
+        state.set("listening", True, 30)
+        decision = decide(
+            {**state.focus_sources(), "music": True, "airplay": False},
+            0.2,
+        )
+        self.assertEqual(decision.foreground, "assistant")
+        self.assertEqual(decision.gains["music"], 0.2)
 
 
 if __name__ == "__main__":

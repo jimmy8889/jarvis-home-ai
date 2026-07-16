@@ -8,12 +8,16 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from .config import Settings
+from .controls import ControlState
 from .status import collect_status
 
 
 class EventReporter:
-    def __init__(self, settings: Settings) -> None:
+    def __init__(
+        self, settings: Settings, control_state: ControlState | None = None
+    ) -> None:
         self.settings = settings
+        self.control_state = control_state or ControlState()
         self.stop_event = Event()
         self.thread = Thread(target=self._run, name="pilot-core-reporter", daemon=True)
         self.previous_sources: dict[str, bool] = {}
@@ -53,12 +57,18 @@ class EventReporter:
                 raise RuntimeError(f"Pilot Core returned HTTP {response.status}")
 
     @staticmethod
-    def source_states(status: dict[str, Any]) -> dict[str, bool]:
+    def source_states(
+        status: dict[str, Any], transient: dict[str, bool] | None = None
+    ) -> dict[str, bool]:
         airplay_state = status.get("airplay", {}).get("playback", {}).get("state")
         music_state = (
             status.get("music_assistant", {}).get("playback", {}).get("state")
         )
+        transient = transient or {"critical": False, "assistant": False}
         return {
+            "critical": transient.get("critical", False),
+            "assistant": transient.get("assistant", False),
+            "bluetooth": False,
             "airplay": airplay_state == "Playing",
             "music": music_state == "Playing",
         }
@@ -72,7 +82,7 @@ class EventReporter:
                 "uptime_seconds": status["uptime_seconds"],
             },
         )
-        sources = self.source_states(status)
+        sources = self.source_states(status, self.control_state.focus_sources())
         for source, active in sources.items():
             if self.previous_sources.get(source) == active:
                 continue

@@ -1,5 +1,19 @@
 # Changelog
 
+## 2026-07-17
+
+- Merged the Jarvis architecture and Pilot intelligence framework pull requests,
+  including execution, memory, skill, inference, world-state, planning, event,
+  knowledge, identity, and schema design documents.
+- Added room-agent 0.2 with loopback transport, room/source volume,
+  push-to-talk, assistant, announcement, and cancel controls.
+- Added self-expiring transient focus state so failed clients cannot leave room
+  audio permanently ducked.
+- Connected listening, assistant speech, and critical announcements to the
+  deterministic audio-focus policy without enabling live gain enforcement.
+- Extended outbound room reporting to cover all five priority sources.
+- Added control and focus tests and advanced the canonical blueprint to 0.6.
+
 ## 2026-07-16
 
 - Migrated the Office N150 from a Proxmox VM to native Debian 13 at the

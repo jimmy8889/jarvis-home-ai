@@ -162,6 +162,18 @@ def _sendspin_bus_name() -> str | None:
     return None
 
 
+def _airplay_bus_name() -> str | None:
+    target = "org.mpris.MediaPlayer2.ShairportSync"
+    listing = _command_status(["busctl", "--user", "list"])
+    if not listing["ok"]:
+        return None
+    for line in listing["detail"].splitlines():
+        name = line.split(maxsplit=1)[0] if line.split() else ""
+        if name == target:
+            return target
+    return None
+
+
 def collect_status(settings: Settings) -> dict[str, Any]:
     pipewire = _command_status(["wpctl", "status", "--name"])
     capture = _command_status(["arecord", "-l"])

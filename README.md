@@ -51,6 +51,8 @@ The room AirPlay receiver is documented in
 
 Audio source priority and the safely gated ducking engine are documented in
 [docs/AUDIO_FOCUS.md](docs/AUDIO_FOCUS.md).
+The same document describes the room agent's loopback-only transport, volume,
+push-to-talk, assistant, announcement, and cancel API.
 
 Staged Music Assistant playback is documented in
 [docs/MUSIC_ASSISTANT.md](docs/MUSIC_ASSISTANT.md).

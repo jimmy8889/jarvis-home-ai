@@ -8,12 +8,15 @@ import os
 
 from .config import Settings, load_settings
 from .audio_focus import AudioFocusLoop
+from .controls import ControlError, ControlState, RoomController
 from .reporter import EventReporter
 from .status import collect_status
 
 
 class Handler(BaseHTTPRequestHandler):
     settings = Settings()
+    control_state = ControlState()
+    controller = RoomController(control_state)
 
     def _respond(self, status: HTTPStatus, payload: dict) -> None:
         body = json.dumps(payload, separators=(",", ":")).encode()
@@ -29,10 +32,26 @@ class Handler(BaseHTTPRequestHandler):
             return
         if self.path in {"/readyz", "/v1/status"}:
             payload = collect_status(self.settings)
+            payload["controls"] = self.control_state.snapshot()
             status = HTTPStatus.OK if payload["ready"] else HTTPStatus.SERVICE_UNAVAILABLE
             self._respond(status, payload)
             return
         self._respond(HTTPStatus.NOT_FOUND, {"error": "not found"})
+
+    def do_POST(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler API
+        if self.path != "/v1/control":
+            self._respond(HTTPStatus.NOT_FOUND, {"error": "not found"})
+            return
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+            if length <= 0 or length > 16_384:
+                raise ControlError("request body must be between 1 and 16384 bytes")
+            payload = json.loads(self.rfile.read(length))
+            result = self.controller.execute(payload)
+        except (ControlError, json.JSONDecodeError, UnicodeDecodeError) as error:
+            self._respond(HTTPStatus.BAD_REQUEST, {"ok": False, "error": str(error)})
+            return
+        self._respond(HTTPStatus.OK, result.as_dict())
 
     def log_message(self, format: str, *args: object) -> None:
         print(f"room-agent: {self.address_string()} {format % args}", flush=True)
@@ -50,14 +69,17 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
     settings = load_settings(args.config)
+    control_state = ControlState()
     Handler.settings = settings
+    Handler.control_state = control_state
+    Handler.controller = RoomController(control_state)
     reporter: EventReporter | None = None
     focus_loop: AudioFocusLoop | None = None
     if settings.core_reporting_enabled:
-        reporter = EventReporter(settings)
+        reporter = EventReporter(settings, control_state)
         reporter.start()
     if settings.audio_focus_enabled:
-        focus_loop = AudioFocusLoop(settings)
+        focus_loop = AudioFocusLoop(settings, control_state)
         focus_loop.start()
     server = ThreadingHTTPServer((settings.listen_host, settings.listen_port), Handler)
     print(

@@ -1,8 +1,8 @@
 # Pilot OS Blueprint
 
-Version 0.5
+Version 0.6
 
-Last updated: 2026-07-16
+Last updated: 2026-07-17
 
 Status: Canonical architecture reference
 
@@ -186,12 +186,15 @@ Current responsibilities:
 - Home Assistant and Music Assistant connection status
 - Playback state visibility through MPRIS where available
 - Outbound authenticated health and source-state reporting to Pilot Core
+- Loopback-only transport, volume, listening, assistant, announcement, and
+  cancel controls
+- Self-expiring transient focus state and deterministic priority decisions
 - Reproducible deployment, validation, and rollback
 
 Planned responsibilities:
 
-- Logical audio buses and source arbitration
-- Ducking and announcements
+- Audible acceptance and activation of local PipeWire gain enforcement
+- Logical echo-reference and announcement playback buses
 - Bluetooth A2DP sink
 - Hardware controls, LEDs, and privacy state
 - Metrics and central event reporting
@@ -265,8 +268,10 @@ Current room-agent endpoints:
 - `GET /healthz`
 - `GET /readyz`
 - `GET /v1/status`
+- `POST /v1/control`
 
-The status model covers audio devices, PipeWire, Bluetooth policy, the Home
+The status model covers audio devices, PipeWire, transient control state,
+Bluetooth policy, the Home
 Assistant voice connection, AirPlay listener/playback, and Music Assistant
 Sendspin connectivity.
 
@@ -341,7 +346,7 @@ deployed integration, hardware boundary, or milestone status changes.
 
 ### Phase 1 — Office voice endpoint: operational
 
-- [x] Debian 13 VM
+- [x] Native Debian 13 appliance
 - [x] Stadium USB microphone
 - [x] FiiO K3 output
 - [x] Stable PipeWire defaults
@@ -356,8 +361,9 @@ deployed integration, hardware boundary, or milestone status changes.
 - [x] Sendspin reboot persistence and automatic reconnection
 - [ ] Audible Music Assistant playback acceptance test
 - [ ] TIDAL provider and local-library acceptance tests
-- [ ] Source arbitration and assistant ducking
-- [ ] Bluetooth A2DP sink after adapter passthrough
+- [x] Source-priority policy and local control/event foundation
+- [ ] Audible assistant ducking and gain-restoration acceptance test
+- [ ] Bluetooth A2DP sink
 
 ### Phase 3 — Media room
 
@@ -395,15 +401,16 @@ deployed integration, hardware boundary, or milestone status changes.
 1. Select `Pilot Office Music` in Music Assistant and prove audible playback.
 2. Validate TIDAL playback and a local lossless track.
 3. Deploy Pilot Core centrally and register the Office N150.
-4. Observe real AirPlay/Sendspin source identifiers and enable local gain
-   enforcement after the safe switching test.
-5. Add the dedicated Bluetooth adapter before enabling A2DP input.
+4. Deploy room-agent 0.2, then observe real AirPlay/Sendspin source identifiers
+   and enable local gain enforcement after the safe switching test.
+5. Validate the native Intel Bluetooth controller; add a dedicated adapter only
+   if its receiver behavior is inadequate.
 6. Train and deploy the **Hey Pilot** wake model.
 
 ## 15. Decision log
 
-- Use native Debian services for hardware-facing audio, even when Debian itself
-  runs as a Proxmox VM.
+- Use native Debian for latency-sensitive room endpoints and native services for
+  hardware-facing audio.
 - Pass individual USB devices, not the entire USB controller.
 - Keep GPU and HDMI passthrough out of the office baseline.
 - Run room audio services as the single lingering `pilot` user.
@@ -428,3 +435,7 @@ deployed integration, hardware boundary, or milestone status changes.
   persistent control-plane state, realtime event streaming, deterministic
   audio-focus decisions, HA/MA adapters, and a containerized Pilot Core
   deployment.
+- **0.5** — Added the intelligence framework covering world state, planning,
+  events, knowledge, identity, and consent-based preference learning.
+- **0.6** — Added the room-agent control surface, expiring interaction state,
+  and complete source-state reporting while retaining the audible safety gate.

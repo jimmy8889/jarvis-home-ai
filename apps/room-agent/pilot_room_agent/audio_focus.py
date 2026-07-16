@@ -7,6 +7,7 @@ from threading import Event, Thread
 from typing import Callable
 
 from .config import Settings
+from .controls import ControlState
 from .status import collect_status
 
 
@@ -110,8 +111,9 @@ class FocusEnforcer:
 
 
 class AudioFocusLoop:
-    def __init__(self, settings: Settings) -> None:
+    def __init__(self, settings: Settings, control_state: ControlState | None = None) -> None:
         self.settings = settings
+        self.control_state = control_state or ControlState()
         self.stop_event = Event()
         self.thread = Thread(target=self._run, name="pilot-audio-focus", daemon=True)
         self.enforcer = FocusEnforcer()
@@ -134,9 +136,10 @@ class AudioFocusLoop:
                     check=False,
                 )
                 nodes = parse_stream_nodes(output.stdout)
+                transient = self.control_state.focus_sources()
                 active = {
-                    "critical": False,
-                    "assistant": False,
+                    "critical": transient["critical"],
+                    "assistant": transient["assistant"],
                     "bluetooth": False,
                     "airplay": status.get("airplay", {})
                     .get("playback", {})

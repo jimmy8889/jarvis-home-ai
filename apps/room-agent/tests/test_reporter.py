@@ -13,13 +13,39 @@ class ReporterTests(unittest.TestCase):
         }
         self.assertEqual(
             EventReporter.source_states(status),
-            {"airplay": False, "music": True},
+            {
+                "critical": False,
+                "assistant": False,
+                "bluetooth": False,
+                "airplay": False,
+                "music": True,
+            },
+        )
+
+    def test_transient_focus_is_included(self) -> None:
+        self.assertEqual(
+            EventReporter.source_states(
+                {}, {"critical": True, "assistant": True}
+            ),
+            {
+                "critical": True,
+                "assistant": True,
+                "bluetooth": False,
+                "airplay": False,
+                "music": False,
+            },
         )
 
     def test_missing_playback_is_inactive(self) -> None:
         self.assertEqual(
             EventReporter.source_states({}),
-            {"airplay": False, "music": False},
+            {
+                "critical": False,
+                "assistant": False,
+                "bluetooth": False,
+                "airplay": False,
+                "music": False,
+            },
         )
 
 

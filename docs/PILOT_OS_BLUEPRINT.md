@@ -1,6 +1,6 @@
 # Pilot OS Blueprint
 
-Version 0.7
+Version 0.8
 
 Last updated: 2026-07-17
 
@@ -273,9 +273,8 @@ Current room-agent endpoints:
 - `POST /v1/control`
 
 The status model covers audio devices, PipeWire, transient control state,
-Bluetooth policy, the Home
-Assistant voice connection, AirPlay listener/playback, and Music Assistant
-Sendspin connectivity.
+Bluetooth policy, the Home Assistant voice connection, AirPlay
+listener/playback, and Music Assistant Sendspin connectivity.
 
 Target Pilot Core APIs:
 
@@ -287,11 +286,16 @@ Target Pilot Core APIs:
 - `/assistant`
 - WebSockets for events and streaming transcripts
 
-Pilot Core 0.3 now implements authenticated `/v1/rooms`, `/v1/players`,
+Pilot Core 0.4 now implements authenticated `/v1/rooms`, `/v1/players`,
 `/v1/devices`, `/v1/media`, `/v1/assistant`, event ingestion/history, and a
 realtime event WebSocket. It also persists device commands and delivers them
 over authenticated outbound room-agent WebSockets. Meeting and memory APIs
 remain future phases.
+
+Room-level state, media, and endpoint-control APIs resolve configured targets
+deterministically. Connected capable devices are preferred with stable
+tie-breaking, while offline commands remain queued for the selected room rather
+than leaking to a different room.
 
 ## 10. Data and security
 
@@ -399,6 +403,8 @@ deployed integration, hardware boundary, or milestone status changes.
 - [x] Music Assistant and Home Assistant API adapters
 - [x] Durable authenticated Core-to-room command delivery
 - [x] Reconnect-safe local command result journal
+- [x] Deterministic room/player/device target resolution
+- [x] Joined room state and room-level media/control APIs
 - [ ] Deploy Pilot Core on the selected central container host
 - [ ] Enable the registered office room-agent reporter
 
@@ -448,3 +454,5 @@ deployed integration, hardware boundary, or milestone status changes.
   and complete source-state reporting while retaining the audible safety gate.
 - **0.7** — Added durable authenticated Core-to-room commands, reconnect-safe
   idempotency, command status APIs, and deployment validation.
+- **0.8** — Added deterministic room-aware target resolution, joined room
+  state, and room-level media and endpoint-control APIs.

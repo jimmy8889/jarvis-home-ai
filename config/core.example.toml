@@ -16,6 +16,7 @@ id = "office"
 name = "Office"
 response_player_id = "office-assistant"
 default_music_player_id = "office-music"
+default_device_id = "pilot-office"
 # The room agent remains loopback-only. Pilot Core reaches it through the
 # device's authenticated outbound command WebSocket, not this legacy field.
 agent_url = ""

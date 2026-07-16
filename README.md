@@ -57,6 +57,9 @@ push-to-talk, assistant, announcement, and cancel API.
 Authenticated, durable Pilot Core-to-room command delivery is documented in
 [docs/COMMAND_TRANSPORT.md](docs/COMMAND_TRANSPORT.md).
 
+Deterministic room state and room-level player/device routing are documented in
+[docs/ROOM_ORCHESTRATION.md](docs/ROOM_ORCHESTRATION.md).
+
 Staged Music Assistant playback is documented in
 [docs/MUSIC_ASSISTANT.md](docs/MUSIC_ASSISTANT.md).
 

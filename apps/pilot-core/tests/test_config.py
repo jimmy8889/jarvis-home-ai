@@ -17,6 +17,7 @@ id = "office"
 name = "Office"
 response_player_id = "office-assistant"
 default_music_player_id = "office-music"
+default_device_id = "pilot-office"
 
 [[players]]
 id = "office-assistant"
@@ -45,6 +46,7 @@ class ConfigTests(unittest.TestCase):
         settings = self._load(VALID_CONFIG)
         self.assertEqual(settings.server.listen_port, 8770)
         self.assertEqual(settings.rooms[0].id, "office")
+        self.assertEqual(settings.rooms[0].default_device_id, "pilot-office")
         self.assertEqual(settings.players[1].protocol, "sendspin")
 
     def test_rejects_unknown_default_player(self) -> None:

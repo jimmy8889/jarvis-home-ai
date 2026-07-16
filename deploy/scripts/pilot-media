@@ -1,0 +1,75 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import sys
+from urllib.error import HTTPError, URLError
+from urllib.parse import quote
+from urllib.request import Request, urlopen
+
+
+ACTIONS = ("play", "pause", "stop", "set_volume", "play_media", "transfer")
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Control a room's resolved Music Assistant player"
+    )
+    parser.add_argument("--core-url", required=True)
+    parser.add_argument("--room-id", required=True)
+    parser.add_argument("--token-env", default="PILOT_CORE_ADMIN_TOKEN")
+    parser.add_argument("--player-id")
+    parser.add_argument("--target-room-id")
+    parser.add_argument("--target-player-id")
+    parser.add_argument("--media-uri")
+    parser.add_argument("--volume", type=int)
+    parser.add_argument("action", choices=ACTIONS)
+    return parser.parse_args()
+
+
+def main() -> int:
+    args = parse_args()
+    token = os.environ.get(args.token_env, "")
+    if not token:
+        print(f"{args.token_env} is not set", file=sys.stderr)
+        return 2
+    payload: dict[str, object] = {"action": args.action}
+    for field in (
+        "player_id",
+        "target_room_id",
+        "target_player_id",
+        "media_uri",
+        "volume",
+    ):
+        value = getattr(args, field)
+        if value is not None:
+            payload[field] = value
+
+    room_id = quote(args.room_id, safe="")
+    request = Request(
+        f"{args.core_url.rstrip('/')}/v1/rooms/{room_id}/media",
+        data=json.dumps(payload).encode(),
+        method="POST",
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+        },
+    )
+    try:
+        with urlopen(request, timeout=15) as response:
+            result = json.load(response)
+    except HTTPError as error:
+        detail = error.read().decode(errors="replace")
+        print(f"Pilot Core returned HTTP {error.code}: {detail}", file=sys.stderr)
+        return 1
+    except (OSError, URLError, ValueError) as error:
+        print(f"Pilot media command failed: {error}", file=sys.stderr)
+        return 1
+    print(json.dumps(result, indent=2, sort_keys=True))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

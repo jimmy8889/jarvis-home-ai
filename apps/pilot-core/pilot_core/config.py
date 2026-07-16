@@ -28,6 +28,7 @@ class Room:
     name: str
     response_player_id: str
     default_music_player_id: str
+    default_device_id: str = ""
     agent_url: str = ""
 
     def as_dict(self) -> dict[str, str]:
@@ -36,6 +37,7 @@ class Room:
             "name": self.name,
             "response_player_id": self.response_player_id,
             "default_music_player_id": self.default_music_player_id,
+            "default_device_id": self.default_device_id,
             "agent_url": self.agent_url,
         }
 
@@ -91,6 +93,7 @@ def _parse_room(value: dict[str, object]) -> Room:
             value.get("default_music_player_id"),
             f"room[{room_id}].default_music_player_id",
         ),
+        default_device_id=str(value.get("default_device_id", "")).strip(),
         agent_url=str(value.get("agent_url", "")).strip(),
     )
 

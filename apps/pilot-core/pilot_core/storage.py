@@ -46,6 +46,7 @@ class Store:
                     name TEXT NOT NULL,
                     response_player_id TEXT NOT NULL,
                     default_music_player_id TEXT NOT NULL,
+                    default_device_id TEXT NOT NULL DEFAULT '',
                     agent_url TEXT NOT NULL DEFAULT ''
                 );
                 CREATE TABLE IF NOT EXISTS players (
@@ -100,24 +101,36 @@ class Store:
                     ON device_commands(device_id, id DESC);
                 """
             )
+            room_columns = {
+                row["name"]
+                for row in self._connection.execute("PRAGMA table_info(rooms)")
+            }
+            if "default_device_id" not in room_columns:
+                self._connection.execute(
+                    """ALTER TABLE rooms ADD COLUMN default_device_id
+                       TEXT NOT NULL DEFAULT ''"""
+                )
 
     def sync_registry(self, settings: Settings) -> None:
         with self._lock, self._connection:
             for room in settings.rooms:
                 self._connection.execute(
                     """INSERT INTO rooms
-                       (id, name, response_player_id, default_music_player_id, agent_url)
-                       VALUES (?, ?, ?, ?, ?)
+                       (id, name, response_player_id, default_music_player_id,
+                        default_device_id, agent_url)
+                       VALUES (?, ?, ?, ?, ?, ?)
                        ON CONFLICT(id) DO UPDATE SET
                          name=excluded.name,
                          response_player_id=excluded.response_player_id,
                          default_music_player_id=excluded.default_music_player_id,
+                         default_device_id=excluded.default_device_id,
                          agent_url=excluded.agent_url""",
                     (
                         room.id,
                         room.name,
                         room.response_player_id,
                         room.default_music_player_id,
+                        room.default_device_id,
                         room.agent_url,
                     ),
                 )
@@ -191,12 +204,21 @@ class Store:
                 )
             return valid
 
-    def list_devices(self) -> list[dict[str, Any]]:
+    def list_devices(self, room_id: str | None = None) -> list[dict[str, Any]]:
         with self._lock:
-            rows = self._connection.execute(
-                """SELECT id, room_id, name, capabilities_json, created_at, last_seen_at
-                   FROM devices ORDER BY id"""
-            ).fetchall()
+            if room_id is None:
+                rows = self._connection.execute(
+                    """SELECT id, room_id, name, capabilities_json,
+                              created_at, last_seen_at
+                       FROM devices ORDER BY id"""
+                ).fetchall()
+            else:
+                rows = self._connection.execute(
+                    """SELECT id, room_id, name, capabilities_json,
+                              created_at, last_seen_at
+                       FROM devices WHERE room_id = ? ORDER BY id""",
+                    (room_id,),
+                ).fetchall()
         return [
             {
                 "id": row["id"],
@@ -208,6 +230,36 @@ class Store:
             }
             for row in rows
         ]
+
+    def room_source_state(self, room_id: str) -> dict[str, dict[str, Any]]:
+        with self._lock:
+            rows = self._connection.execute(
+                """SELECT source, active, updated_at FROM source_state
+                   WHERE room_id = ? ORDER BY source""",
+                (room_id,),
+            ).fetchall()
+        return {
+            row["source"]: {
+                "active": bool(row["active"]),
+                "updated_at": row["updated_at"],
+            }
+            for row in rows
+        }
+
+    def latest_device_health(self, device_id: str) -> dict[str, Any] | None:
+        with self._lock:
+            row = self._connection.execute(
+                """SELECT payload_json, created_at FROM events
+                   WHERE device_id = ? AND event_type = 'health'
+                   ORDER BY id DESC LIMIT 1""",
+                (device_id,),
+            ).fetchone()
+        if not row:
+            return None
+        return {
+            "payload": json.loads(row["payload_json"]),
+            "updated_at": row["created_at"],
+        }
 
     def record_event(
         self,

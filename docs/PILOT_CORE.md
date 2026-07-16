@@ -1,6 +1,6 @@
 # Pilot Core
 
-Pilot Core 0.3 is the authenticated control-plane foundation for Pilot OS. It
+Pilot Core 0.4 is the authenticated control-plane foundation for Pilot OS. It
 persists the canonical room/player registry, registered room devices, source
 state, event history, and durable device command queue in SQLite.
 
@@ -28,7 +28,11 @@ Public health endpoints:
 
 Administrator endpoints:
 
+- `GET /v1/state` for a joined all-room snapshot
 - `GET /v1/rooms` and `GET /v1/rooms/{room_id}`
+- `GET /v1/rooms/{room_id}/state`
+- `POST /v1/rooms/{room_id}/media`
+- `POST /v1/rooms/{room_id}/control`
 - `GET /v1/players` and `GET /v1/players/{player_id}`
 - `GET /v1/devices`
 - `GET /v1/events`
@@ -50,6 +54,9 @@ Provisioning and device endpoints:
 The command transport and its queued, delivered, terminal, expiry, reconnect,
 and idempotency behavior are documented in
 [COMMAND_TRANSPORT.md](COMMAND_TRANSPORT.md).
+
+Room target resolution and room-level state, media, and control contracts are
+documented in [ROOM_ORCHESTRATION.md](ROOM_ORCHESTRATION.md).
 
 The event stream carries health and source-state changes. Source events produce
 a deterministic focus decision using this priority:

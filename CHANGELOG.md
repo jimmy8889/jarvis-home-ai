@@ -2,6 +2,16 @@
 
 ## 2026-07-17
 
+- Added Pilot Core 0.4 deterministic room, player, and capable-device target
+  resolution without requiring callers or LLMs to select infrastructure IDs.
+- Added joined room state containing sources, focus, health, connections,
+  players, and resolved targets.
+- Added a single all-room state endpoint for deterministic “what is happening
+  where?” queries and future dashboards.
+- Added room-level media and endpoint-control APIs with controlled explicit
+  overrides and deterministic offline queuing.
+- Added room-aware `pilot-command` routing and the `pilot-media` operator tool.
+- Documented room orchestration and advanced the canonical blueprint to 0.8.
 - Added Pilot Core 0.3 durable device commands with queued, delivered,
   succeeded, failed, and expired states.
 - Added authenticated outbound room-agent WebSockets, heartbeat and reconnect

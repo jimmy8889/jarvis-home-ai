@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from pathlib import Path
+import sqlite3
+import tempfile
 import unittest
 
 from pilot_core.config import IntegrationSettings, Player, Room, ServerSettings, Settings
@@ -112,6 +115,31 @@ class StorageTests(unittest.TestCase):
             self.store.complete_command(
                 command["id"], "other-device", "succeeded", {"ok": True}
             )
+
+    def test_legacy_room_table_is_migrated_for_default_device(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "pilot.db"
+            connection = sqlite3.connect(path)
+            connection.execute(
+                """CREATE TABLE rooms (
+                       id TEXT PRIMARY KEY,
+                       name TEXT NOT NULL,
+                       response_player_id TEXT NOT NULL,
+                       default_music_player_id TEXT NOT NULL,
+                       agent_url TEXT NOT NULL DEFAULT ''
+                   )"""
+            )
+            connection.commit()
+            connection.close()
+
+            migrated = Store(str(path), settings())
+            migrated.close()
+            connection = sqlite3.connect(path)
+            columns = {
+                row[1] for row in connection.execute("PRAGMA table_info(rooms)")
+            }
+            connection.close()
+        self.assertIn("default_device_id", columns)
 
 
 if __name__ == "__main__":

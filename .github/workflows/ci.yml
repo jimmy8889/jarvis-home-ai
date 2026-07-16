@@ -31,7 +31,13 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e apps/pilot-core -e apps/room-agent ruff
       - name: Lint
-        run: ruff check apps/pilot-core apps/room-agent
+        run: >-
+          ruff check
+          apps/pilot-core
+          apps/room-agent
+          deploy/scripts/pilot-register-device
+          deploy/scripts/pilot-command
+          deploy/scripts/pilot-media
       - name: Test room agent
         run: python -m unittest discover -s apps/room-agent/tests -v
       - name: Test Pilot Core
@@ -63,6 +69,7 @@ jobs:
           python -m py_compile
           deploy/scripts/pilot-register-device
           deploy/scripts/pilot-command
+          deploy/scripts/pilot-media
       - name: Check playbook syntax
         run: >-
           ansible-playbook

@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field, model_validator
 
 from .config import Settings
 from .integrations import IntegrationRequestFailed, IntegrationUnavailable, Integrations
+from .orchestration import ResolutionError, RoomOrchestrator
 from .registry import Registry
 from .storage import Store
 
@@ -85,6 +86,38 @@ class DeviceCommandInput(BaseModel):
         return self.model_dump(
             exclude={"expires_in_seconds"}, exclude_none=True
         )
+
+
+class RoomControlInput(DeviceCommandInput):
+    device_id: str | None = None
+    capability: Literal["audio", "voice"] | None = None
+
+    def control_payload(self) -> dict[str, Any]:
+        return self.model_dump(
+            exclude={"expires_in_seconds", "device_id", "capability"},
+            exclude_none=True,
+        )
+
+
+class RoomMediaCommand(BaseModel):
+    action: Literal[
+        "play", "pause", "stop", "set_volume", "play_media", "transfer"
+    ]
+    player_id: str | None = None
+    media_uri: str | None = None
+    target_room_id: str | None = None
+    target_player_id: str | None = None
+    volume: int | None = Field(default=None, ge=0, le=100)
+
+    @model_validator(mode="after")
+    def validate_action_fields(self) -> "RoomMediaCommand":
+        if self.action == "set_volume" and self.volume is None:
+            raise ValueError("volume is required for set_volume")
+        if self.action == "play_media" and not self.media_uri:
+            raise ValueError("media_uri is required for play_media")
+        if self.action == "transfer" and not self.target_room_id:
+            raise ValueError("target_room_id is required for transfer")
+        return self
 
 
 class EventHub:
@@ -171,6 +204,7 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
     registry = Registry.from_settings(settings)
     owns_store = store is None
     database = store or Store(settings.server.database_path, settings)
+    orchestrator = RoomOrchestrator(registry, database)
     integrations = Integrations(settings.integrations)
     hub = EventHub()
     device_hub = DeviceHub()
@@ -181,7 +215,77 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
         if owns_store:
             database.close()
 
-    app = FastAPI(title="Pilot Core", version="0.3.0", lifespan=lifespan)
+    app = FastAPI(title="Pilot Core", version="0.4.0", lifespan=lifespan)
+
+    async def queue_device_command(
+        device_id: str, payload: dict[str, Any], expires_in_seconds: int
+    ) -> dict[str, Any]:
+        try:
+            command = database.create_command(
+                device_id, payload, expires_in_seconds
+            )
+        except KeyError:
+            raise HTTPException(status_code=404, detail="device not found") from None
+        if await device_hub.send(
+            device_id, {"type": "command", "command": command}
+        ):
+            database.mark_command_delivered(command["id"], device_id)
+            command = database.get_command(command["id"]) or command
+        return command
+
+    async def run_media_command(
+        player_id: str,
+        action: str,
+        volume: int | None = None,
+        media_uri: str | None = None,
+        target_player_id: str | None = None,
+    ) -> Any:
+        player = registry.players.get(player_id)
+        if not player:
+            raise HTTPException(status_code=404, detail="player not found")
+        external_id = player.external_id or player.id
+        target_external_id: str | None = None
+        if target_player_id is not None:
+            target = registry.players.get(target_player_id)
+            if target is None:
+                raise HTTPException(status_code=404, detail="target player not found")
+            target_external_id = target.external_id or target.id
+        command_map = {
+            "play": ("players/cmd/play", {"player_id": external_id}),
+            "pause": ("players/cmd/pause", {"player_id": external_id}),
+            "stop": ("players/cmd/stop", {"player_id": external_id}),
+            "set_volume": (
+                "players/cmd/volume_set",
+                {"player_id": external_id, "volume_level": volume},
+            ),
+            "play_media": (
+                "player_queues/play_media",
+                {"queue_id": external_id, "media": media_uri},
+            ),
+            "transfer": (
+                "player_queues/transfer",
+                {
+                    "source_queue_id": external_id,
+                    "target_queue_id": target_external_id,
+                    "auto_play": True,
+                },
+            ),
+        }
+        if action not in command_map:
+            raise HTTPException(status_code=422, detail="unsupported media action")
+        if action == "set_volume" and volume is None:
+            raise HTTPException(status_code=422, detail="volume is required")
+        if action == "play_media" and not media_uri:
+            raise HTTPException(status_code=422, detail="media_uri is required")
+        if action == "transfer" and not target_player_id:
+            raise HTTPException(status_code=422, detail="target_player_id is required")
+        rpc_command, args = command_map[action]
+        try:
+            return await integrations.music_assistant(rpc_command, args)
+        except IntegrationUnavailable as error:
+            raise HTTPException(status_code=503, detail=str(error)) from None
+        except IntegrationRequestFailed as error:
+            raise HTTPException(status_code=502, detail=str(error)) from None
 
     def require_admin(authorization: str | None = Header(default=None)) -> None:
         configured = os.environ.get(settings.server.admin_token_env, "")
@@ -210,6 +314,17 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
     async def rooms() -> dict[str, Any]:
         return {"rooms": registry.list_rooms()}
 
+    @app.get("/v1/state", dependencies=[Depends(require_admin)])
+    async def whole_home_state() -> dict[str, Any]:
+        connected = await device_hub.connected_ids()
+        return {
+            "registry_revision": registry.revision,
+            "rooms": {
+                room_id: orchestrator.room_state(room_id, connected)
+                for room_id in sorted(registry.rooms)
+            },
+        }
+
     @app.get("/v1/rooms/{room_id}", dependencies=[Depends(require_admin)])
     async def room(room_id: str) -> dict[str, Any]:
         if room_id not in registry.rooms:
@@ -217,6 +332,82 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
         payload = registry.room_view(room_id)
         payload["focus"] = database.room_focus(room_id)
         return payload
+
+    @app.get(
+        "/v1/rooms/{room_id}/state", dependencies=[Depends(require_admin)]
+    )
+    async def room_state(room_id: str) -> dict[str, Any]:
+        try:
+            return orchestrator.room_state(
+                room_id, await device_hub.connected_ids()
+            )
+        except ResolutionError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from None
+
+    @app.post(
+        "/v1/rooms/{room_id}/control",
+        dependencies=[Depends(require_admin)],
+        status_code=201,
+    )
+    async def room_control(
+        room_id: str, request: RoomControlInput
+    ) -> dict[str, Any]:
+        capability = request.capability or (
+            "voice"
+            if request.action
+            in {"start_listening", "stop_listening", "assistant_start", "assistant_end"}
+            else "audio"
+        )
+        try:
+            target = orchestrator.device(
+                room_id,
+                await device_hub.connected_ids(),
+                capability,
+                request.device_id,
+            )
+        except ResolutionError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from None
+        command = await queue_device_command(
+            target.id, request.control_payload(), request.expires_in_seconds
+        )
+        return {
+            "room_id": room_id,
+            "target": target.as_dict(),
+            "command": command,
+        }
+
+    @app.post(
+        "/v1/rooms/{room_id}/media",
+        dependencies=[Depends(require_admin)],
+    )
+    async def room_media(
+        room_id: str, request: RoomMediaCommand
+    ) -> dict[str, Any]:
+        try:
+            player = orchestrator.music_player(room_id, request.player_id)
+            target_player = (
+                orchestrator.music_player(
+                    request.target_room_id, request.target_player_id
+                )
+                if request.action == "transfer" and request.target_room_id
+                else None
+            )
+        except ResolutionError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from None
+        result = await run_media_command(
+            player.id,
+            request.action,
+            request.volume,
+            request.media_uri,
+            target_player.id if target_player else None,
+        )
+        return {
+            "room_id": room_id,
+            "player": player.as_dict(),
+            "target_room_id": request.target_room_id,
+            "target_player": target_player.as_dict() if target_player else None,
+            "result": result,
+        }
 
     @app.get("/v1/players", dependencies=[Depends(require_admin)])
     async def players() -> dict[str, Any]:
@@ -257,19 +448,9 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
     async def create_device_command(
         device_id: str, request: DeviceCommandInput
     ) -> dict[str, Any]:
-        payload = request.control_payload()
-        try:
-            command = database.create_command(
-                device_id, payload, request.expires_in_seconds
-            )
-        except KeyError:
-            raise HTTPException(status_code=404, detail="device not found") from None
-        if await device_hub.send(
-            device_id, {"type": "command", "command": command}
-        ):
-            database.mark_command_delivered(command["id"], device_id)
-            command = database.get_command(command["id"]) or command
-        return command
+        return await queue_device_command(
+            device_id, request.control_payload(), request.expires_in_seconds
+        )
 
     @app.get(
         "/v1/devices/{device_id}/commands",
@@ -432,51 +613,13 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
 
     @app.post("/v1/media", dependencies=[Depends(require_admin)])
     async def media(command: MediaCommand) -> Any:
-        player = registry.players.get(command.player_id)
-        if not player:
-            raise HTTPException(status_code=404, detail="player not found")
-        external_id = player.external_id or player.id
-        command_map = {
-            "play": ("players/cmd/play", {"player_id": external_id}),
-            "pause": ("players/cmd/pause", {"player_id": external_id}),
-            "stop": ("players/cmd/stop", {"player_id": external_id}),
-            "set_volume": (
-                "players/cmd/volume_set",
-                {"player_id": external_id, "volume_level": command.volume},
-            ),
-            "play_media": (
-                "player_queues/play_media",
-                {"queue_id": external_id, "media": command.media_uri},
-            ),
-            "transfer": (
-                "player_queues/transfer",
-                {
-                    "source_queue_id": external_id,
-                    "target_queue_id": (
-                        registry.players[command.target_player_id].external_id
-                        or command.target_player_id
-                        if command.target_player_id in registry.players
-                        else command.target_player_id
-                    ),
-                    "auto_play": True,
-                },
-            ),
-        }
-        if command.action not in command_map:
-            raise HTTPException(status_code=422, detail="unsupported media action")
-        if command.action == "set_volume" and command.volume is None:
-            raise HTTPException(status_code=422, detail="volume is required")
-        if command.action == "play_media" and not command.media_uri:
-            raise HTTPException(status_code=422, detail="media_uri is required")
-        if command.action == "transfer" and not command.target_player_id:
-            raise HTTPException(status_code=422, detail="target_player_id is required")
-        rpc_command, args = command_map[command.action]
-        try:
-            return await integrations.music_assistant(rpc_command, args)
-        except IntegrationUnavailable as error:
-            raise HTTPException(status_code=503, detail=str(error)) from None
-        except IntegrationRequestFailed as error:
-            raise HTTPException(status_code=502, detail=str(error)) from None
+        return await run_media_command(
+            command.player_id,
+            command.action,
+            command.volume,
+            command.media_uri,
+            command.target_player_id,
+        )
 
     @app.post("/v1/assistant", dependencies=[Depends(require_admin)])
     async def assistant(request: AssistantRequest) -> Any:

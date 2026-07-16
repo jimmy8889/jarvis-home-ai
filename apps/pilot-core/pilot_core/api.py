@@ -25,6 +25,7 @@ from .integrations import IntegrationRequestFailed, IntegrationUnavailable, Inte
 from .orchestration import ResolutionError, RoomOrchestrator
 from .registry import Registry
 from .storage import Store
+from .tts import LocalTTS, TTSRequestFailed, TTSUnavailable
 
 
 class DeviceRegistration(BaseModel):
@@ -51,8 +52,14 @@ class MediaCommand(BaseModel):
 class AssistantRequest(BaseModel):
     text: str = Field(min_length=1, max_length=4000)
     room_id: str
-    language: str = "en"
+    language: str = Field(default="en", min_length=2, max_length=35)
     conversation_id: str | None = None
+    speak: bool = False
+    voice: str | None = Field(default=None, min_length=1, max_length=128)
+    volume: float = Field(default=1.0, ge=0, le=1)
+    device_id: str | None = None
+    expires_in_seconds: int = Field(default=30, ge=1, le=300)
+    retention_seconds: int | None = Field(default=None, ge=60, le=86_400)
 
 
 class MediaSearch(BaseModel):
@@ -137,6 +144,24 @@ class RoomAudioCommand(BaseModel):
     volume: float = Field(default=1.0, ge=0, le=1)
     critical: bool = False
     expires_in_seconds: int = Field(default=30, ge=1, le=300)
+
+
+class RoomSpeakRequest(BaseModel):
+    text: str = Field(min_length=1, max_length=4000)
+    language: str | None = Field(default=None, min_length=2, max_length=35)
+    voice: str | None = Field(default=None, min_length=1, max_length=128)
+    kind: Literal["assistant", "announcement"] = "assistant"
+    device_id: str | None = None
+    volume: float = Field(default=1.0, ge=0, le=1)
+    critical: bool = False
+    expires_in_seconds: int = Field(default=30, ge=1, le=300)
+    retention_seconds: int | None = Field(default=None, ge=60, le=86_400)
+
+    @model_validator(mode="after")
+    def validate_critical_kind(self) -> "RoomSpeakRequest":
+        if self.critical and self.kind != "announcement":
+            raise ValueError("only announcements may be critical")
+        return self
 
 
 class EventHub:
@@ -231,6 +256,9 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
         settings.server.audio_asset_max_bytes,
         settings.server.audio_asset_retention_seconds,
     )
+    local_tts = LocalTTS(
+        settings.integrations, settings.server.audio_asset_max_bytes
+    )
     hub = EventHub()
     device_hub = DeviceHub()
 
@@ -240,7 +268,7 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
         if owns_store:
             database.close()
 
-    app = FastAPI(title="Pilot Core", version="0.5.0", lifespan=lifespan)
+    app = FastAPI(title="Pilot Core", version="0.6.0", lifespan=lifespan)
 
     async def queue_device_command(
         device_id: str, payload: dict[str, Any], expires_in_seconds: int
@@ -257,6 +285,100 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
             database.mark_command_delivered(command["id"], device_id)
             command = database.get_command(command["id"]) or command
         return command
+
+    async def audio_targets(
+        room_id: str, device_id: str | None
+    ) -> tuple[Any, Any]:
+        try:
+            target = orchestrator.device(
+                room_id,
+                await device_hub.connected_ids(),
+                "audio",
+                device_id,
+            )
+            response_player = orchestrator.response_player(room_id)
+        except ResolutionError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from None
+        return target, response_player
+
+    async def dispatch_audio_asset(
+        room_id: str,
+        asset: dict[str, Any],
+        target: Any,
+        response_player: Any,
+        volume: float,
+        critical: bool,
+        expires_in_seconds: int,
+    ) -> dict[str, Any]:
+        payload = {
+            "action": "play_audio",
+            "audio_asset_id": asset["id"],
+            "sha256": asset["sha256"],
+            "size_bytes": asset["size_bytes"],
+            "content_type": asset["content_type"],
+            "kind": asset["kind"],
+            "volume": volume,
+            "critical": critical,
+        }
+        command = await queue_device_command(
+            target.id, payload, expires_in_seconds
+        )
+        return {
+            "room_id": room_id,
+            "target": target.as_dict(),
+            "response_player": response_player.as_dict(),
+            "asset": audio_assets.public_view(asset),
+            "command": command,
+        }
+
+    async def synthesize_room_speech(
+        room_id: str,
+        text: str,
+        language: str | None,
+        voice: str | None,
+        kind: str,
+        device_id: str | None,
+        volume: float,
+        critical: bool,
+        expires_in_seconds: int,
+        retention_seconds: int | None,
+    ) -> dict[str, Any]:
+        target, response_player = await audio_targets(room_id, device_id)
+        try:
+            synthesized = await local_tts.synthesize(text, language, voice)
+        except TTSUnavailable as error:
+            raise HTTPException(status_code=503, detail=str(error)) from None
+        except TTSRequestFailed as error:
+            raise HTTPException(status_code=502, detail=str(error)) from None
+        try:
+            asset = audio_assets.create(
+                room_id,
+                kind,
+                synthesized.filename,
+                synthesized.content_type,
+                synthesized.content,
+                retention_seconds,
+            )
+        except AudioAssetError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from None
+        delivery = await dispatch_audio_asset(
+            room_id,
+            asset,
+            target,
+            response_player,
+            volume,
+            critical,
+            expires_in_seconds,
+        )
+        delivery["synthesis"] = synthesized.metadata()
+        return delivery
+
+    def assistant_speech(result: Any) -> str | None:
+        try:
+            speech = result["response"]["speech"]["plain"]["speech"]
+        except (KeyError, TypeError):
+            return None
+        return speech.strip() if isinstance(speech, str) and speech.strip() else None
 
     async def run_media_command(
         player_id: str,
@@ -333,6 +455,7 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
             "registry_revision": registry.revision,
             "room_count": len(registry.rooms),
             "player_count": len(registry.players),
+            "tts_configured": local_tts.status()["configured"],
         }
 
     @app.get("/v1/rooms", dependencies=[Depends(require_admin)])
@@ -511,36 +634,45 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
                 status_code=422,
                 detail="only announcement assets may be critical",
             )
-        try:
-            target = orchestrator.device(
-                room_id,
-                await device_hub.connected_ids(),
-                "audio",
-                request.device_id,
-            )
-            response_player = orchestrator.response_player(room_id)
-        except ResolutionError as error:
-            raise HTTPException(status_code=409, detail=str(error)) from None
-        payload = {
-            "action": "play_audio",
-            "audio_asset_id": asset["id"],
-            "sha256": asset["sha256"],
-            "size_bytes": asset["size_bytes"],
-            "content_type": asset["content_type"],
-            "kind": asset["kind"],
-            "volume": request.volume,
-            "critical": request.critical,
-        }
-        command = await queue_device_command(
-            target.id, payload, request.expires_in_seconds
+        target, response_player = await audio_targets(room_id, request.device_id)
+        return await dispatch_audio_asset(
+            room_id,
+            asset,
+            target,
+            response_player,
+            request.volume,
+            request.critical,
+            request.expires_in_seconds,
         )
-        return {
-            "room_id": room_id,
-            "target": target.as_dict(),
-            "response_player": response_player.as_dict(),
-            "asset": audio_assets.public_view(asset),
-            "command": command,
-        }
+
+    @app.get("/v1/tts", dependencies=[Depends(require_admin)])
+    async def tts_status() -> dict[str, Any]:
+        return local_tts.status()
+
+    @app.post(
+        "/v1/rooms/{room_id}/speak",
+        dependencies=[Depends(require_admin)],
+        status_code=201,
+    )
+    async def room_speak(
+        room_id: str, request: RoomSpeakRequest
+    ) -> dict[str, Any]:
+        try:
+            orchestrator.require_room(room_id)
+        except ResolutionError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from None
+        return await synthesize_room_speech(
+            room_id,
+            request.text,
+            request.language,
+            request.voice,
+            request.kind,
+            request.device_id,
+            request.volume,
+            request.critical,
+            request.expires_in_seconds,
+            request.retention_seconds,
+        )
 
     @app.get("/v1/audio-assets/{asset_id}")
     async def download_audio_asset(
@@ -812,6 +944,26 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
             raise HTTPException(status_code=503, detail=str(error)) from None
         except IntegrationRequestFailed as error:
             raise HTTPException(status_code=502, detail=str(error)) from None
-        return {"room_id": request.room_id, "result": response}
+        result: dict[str, Any] = {"room_id": request.room_id, "result": response}
+        if request.speak:
+            text = assistant_speech(response)
+            if not text:
+                raise HTTPException(
+                    status_code=502,
+                    detail="Home Assistant returned no speakable response",
+                )
+            result["speech_delivery"] = await synthesize_room_speech(
+                request.room_id,
+                text,
+                request.language,
+                request.voice,
+                "assistant",
+                request.device_id,
+                request.volume,
+                False,
+                request.expires_in_seconds,
+                request.retention_seconds,
+            )
+        return result
 
     return app

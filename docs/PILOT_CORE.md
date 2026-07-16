@@ -1,6 +1,6 @@
 # Pilot Core
 
-Pilot Core 0.4 is the authenticated control-plane foundation for Pilot OS. It
+Pilot Core 0.6 is the authenticated control-plane foundation for Pilot OS. It
 persists the canonical room/player registry, registered room devices, source
 state, event history, and durable device command queue in SQLite.
 
@@ -41,6 +41,10 @@ Administrator endpoints:
 - `POST /v1/media` for play, pause, stop, volume, URI playback, and transfer
 - `POST /v1/media/search`
 - `POST /v1/assistant`
+- `GET /v1/tts`
+- `POST /v1/rooms/{room_id}/speak`
+- `POST /v1/rooms/{room_id}/audio-assets`
+- `POST /v1/rooms/{room_id}/audio`
 - `POST /v1/devices/{device_id}/commands`
 - `GET /v1/devices/{device_id}/commands`
 - `GET /v1/commands/{command_id}`
@@ -54,6 +58,9 @@ Provisioning and device endpoints:
 The command transport and its queued, delivered, terminal, expiry, reconnect,
 and idempotency behavior are documented in
 [COMMAND_TRANSPORT.md](COMMAND_TRANSPORT.md).
+
+Local speech synthesis and secure room playback are documented in
+[LOCAL_TTS.md](LOCAL_TTS.md) and [AUDIO_DELIVERY.md](AUDIO_DELIVERY.md).
 
 Room target resolution and room-level state, media, and control contracts are
 documented in [ROOM_ORCHESTRATION.md](ROOM_ORCHESTRATION.md).

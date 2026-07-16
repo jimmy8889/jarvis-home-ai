@@ -1,6 +1,6 @@
 # Secure room audio delivery
 
-Pilot Core 0.5 can deliver pre-rendered assistant speech and announcements to a
+Pilot Core 0.6 can deliver pre-rendered assistant speech and announcements to a
 deterministically selected room endpoint. This closes the transport and
 playback part of the voice-response path without allowing room agents to fetch
 arbitrary URLs.
@@ -126,3 +126,6 @@ audible acceptance test can be performed in the physical room.
 
 The live Office endpoint is intentionally not upgraded or activated until the
 physical audible checks can be observed.
+
+Pilot Core can now create these assets from text through the local provider
+adapter described in [LOCAL_TTS.md](LOCAL_TTS.md).

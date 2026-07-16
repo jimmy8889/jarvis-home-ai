@@ -1,6 +1,6 @@
 # Pilot OS Blueprint
 
-Version 0.9
+Version 1.0
 
 Last updated: 2026-07-17
 
@@ -171,6 +171,9 @@ Implemented foundation:
   and SHA-256/size manifests
 - Deterministic assistant and announcement dispatch to a room's response
   endpoint
+- Bounded Home Assistant/Piper and OpenAI-compatible local TTS adapters
+- Optional spoken Home Assistant conversation responses routed to their
+  originating room
 
 Planned responsibilities:
 
@@ -292,16 +295,19 @@ Target Pilot Core APIs:
 - `/assistant`
 - WebSockets for events and streaming transcripts
 
-Pilot Core 0.5 now implements authenticated `/v1/rooms`, `/v1/players`,
+Pilot Core 0.6 now implements authenticated `/v1/rooms`, `/v1/players`,
 `/v1/devices`, `/v1/media`, `/v1/assistant`, event ingestion/history, and a
 realtime event WebSocket. It also persists device commands and delivers them
 over authenticated outbound room-agent WebSockets. Meeting and memory APIs
 remain future phases.
 
-Pilot Core 0.5 adds `/v1/rooms/{room_id}/audio-assets`,
+Pilot Core 0.5 added `/v1/rooms/{room_id}/audio-assets`,
 `/v1/rooms/{room_id}/audio`, and the device-authenticated audio download path.
 The room agent verifies each manifest and owns playback state through completion
-or cancellation. Audio synthesis remains a separate next-stage integration.
+or cancellation. Pilot Core 0.6 adds `/v1/tts` and
+`/v1/rooms/{room_id}/speak`, with Home Assistant/Piper and OpenAI-compatible
+local synthesis providers. `/v1/assistant` can optionally speak a Home
+Assistant conversation response through the request's originating room.
 
 Room-level state, media, and endpoint-control APIs resolve configured targets
 deterministically. Connected capable devices are preferred with stable
@@ -416,6 +422,8 @@ deployed integration, hardware boundary, or milestone status changes.
 - [x] Reconnect-safe local command result journal
 - [x] Deterministic room/player/device target resolution
 - [x] Joined room state and room-level media/control APIs
+- [x] Secure room-bound audio delivery
+- [x] Local TTS provider abstraction and room speech API
 - [ ] Deploy Pilot Core on the selected central container host
 - [ ] Enable the registered office room-agent reporter
 
@@ -425,7 +433,7 @@ deployed integration, hardware boundary, or milestone status changes.
 2. Validate TIDAL playback and a local lossless track.
 3. Deploy Pilot Core centrally, register the Office N150, and enable the
    command channel.
-4. Deploy room-agent 0.3, then observe real AirPlay/Sendspin source identifiers
+4. Deploy room-agent 0.4, then observe real AirPlay/Sendspin source identifiers
    and enable local gain enforcement after the safe switching test.
 5. Validate the native Intel Bluetooth controller; add a dedicated adapter only
    if its receiver behavior is inadequate.
@@ -467,3 +475,7 @@ deployed integration, hardware boundary, or milestone status changes.
   idempotency, command status APIs, and deployment validation.
 - **0.8** — Added deterministic room-aware target resolution, joined room
   state, and room-level media and endpoint-control APIs.
+- **0.9** — Added room-bound audio assets, authenticated same-room downloads,
+  integrity manifests, and managed room-agent speech playback.
+- **1.0** — Added bounded Home Assistant/Piper and OpenAI-compatible local TTS,
+  deterministic room speech routing, and optional spoken conversation results.

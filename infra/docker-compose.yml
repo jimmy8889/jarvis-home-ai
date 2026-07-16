@@ -12,6 +12,7 @@ services:
       PILOT_CORE_BOOTSTRAP_TOKEN: ${PILOT_CORE_BOOTSTRAP_TOKEN:?required}
       MUSIC_ASSISTANT_TOKEN: ${MUSIC_ASSISTANT_TOKEN:-}
       HOME_ASSISTANT_TOKEN: ${HOME_ASSISTANT_TOKEN:-}
+      PILOT_TTS_TOKEN: ${PILOT_TTS_TOKEN:-}
     volumes:
       - ../config/core.container.toml:/config/core.toml:ro
       - pilot-core-data:/data

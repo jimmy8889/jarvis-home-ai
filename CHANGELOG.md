@@ -2,6 +2,14 @@
 
 ## 2026-07-17
 
+- Added Pilot Core 0.6 local TTS synthesis with Home Assistant/Piper and
+  OpenAI-compatible providers.
+- Added bounded response streaming, content-type normalization, audio signature
+  validation, redirect denial, and same-origin Home Assistant proxy retrieval.
+- Added deterministic `/v1/rooms/{room_id}/speak` orchestration and optional
+  spoken Home Assistant conversation responses.
+- Added provider status, configuration validation, the `pilot-speak` operator
+  tool, tests, deployment examples, and the local TTS activation runbook.
 - Added Pilot Core 0.5 room-bound audio assets for pre-rendered assistant speech
   and announcements, with bounded retention and file sizes.
 - Added per-device, same-room download authorization and SHA-256/size manifests;

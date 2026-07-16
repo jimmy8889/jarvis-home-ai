@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 from pilot_core.api import create_app
 from pilot_core.config import IntegrationSettings, Player, Room, ServerSettings, Settings
 from pilot_core.storage import Store
+from pilot_core.tts import SynthesizedAudio
 
 
 def settings(audio_asset_path: str = "/tmp/pilot-core-test-audio") -> Settings:
@@ -352,6 +353,101 @@ class ApiTests(unittest.TestCase):
         )
         self.assertEqual(listing.json()["assets"], [])
         self.assertFalse(any(Path(self.audio_directory.name).iterdir()))
+
+    @patch("pilot_core.api.LocalTTS.synthesize", new_callable=AsyncMock)
+    def test_room_speak_synthesizes_and_queues_to_resolved_device(
+        self, synthesize
+    ) -> None:
+        self.register_device()
+        synthesize.return_value = SynthesizedAudio(
+            content=b"RIFF\x04\x00\x00\x00WAVEpilot",
+            content_type="audio/wav",
+            filename="speech.wav",
+            provider="home_assistant",
+            voice="default",
+            model="tts.piper",
+            language="en-AU",
+        )
+        response = self.client.post(
+            "/v1/rooms/office/speak",
+            headers={"Authorization": "Bearer admin-test"},
+            json={
+                "text": "Hello office",
+                "language": "en-AU",
+                "voice": "default",
+                "volume": 0.75,
+            },
+        )
+        self.assertEqual(response.status_code, 201)
+        result = response.json()
+        self.assertEqual(result["target"]["id"], "office-n150")
+        self.assertEqual(result["command"]["payload"]["action"], "play_audio")
+        self.assertEqual(result["command"]["payload"]["volume"], 0.75)
+        self.assertEqual(result["synthesis"]["provider"], "home_assistant")
+        synthesize.assert_awaited_once_with(
+            "Hello office", "en-AU", "default"
+        )
+
+    def test_room_speak_requires_configured_tts(self) -> None:
+        self.register_device()
+        response = self.client.post(
+            "/v1/rooms/office/speak",
+            headers={"Authorization": "Bearer admin-test"},
+            json={"text": "This should remain silent"},
+        )
+        self.assertEqual(response.status_code, 503)
+
+    def test_room_speak_rejects_critical_assistant(self) -> None:
+        response = self.client.post(
+            "/v1/rooms/office/speak",
+            headers={"Authorization": "Bearer admin-test"},
+            json={"text": "No", "critical": True},
+        )
+        self.assertEqual(response.status_code, 422)
+
+    @patch("pilot_core.api.LocalTTS.synthesize", new_callable=AsyncMock)
+    @patch(
+        "pilot_core.api.Integrations.home_assistant_conversation",
+        new_callable=AsyncMock,
+    )
+    def test_assistant_can_speak_home_assistant_response(
+        self, conversation, synthesize
+    ) -> None:
+        self.register_device()
+        conversation.return_value = {
+            "response": {
+                "speech": {
+                    "plain": {"speech": "The office light is now on."}
+                }
+            },
+            "conversation_id": "conversation-1",
+        }
+        synthesize.return_value = SynthesizedAudio(
+            content=b"RIFF\x04\x00\x00\x00WAVEpilot",
+            content_type="audio/wav",
+            filename="speech.wav",
+            provider="home_assistant",
+            voice="default",
+            model="tts.piper",
+            language="en",
+        )
+        response = self.client.post(
+            "/v1/assistant",
+            headers={"Authorization": "Bearer admin-test"},
+            json={
+                "text": "Turn on the office light",
+                "room_id": "office",
+                "speak": True,
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json()["speech_delivery"]["target"]["id"],
+            "office-n150",
+        )
+        synthesize.assert_awaited_once_with(
+            "The office light is now on.", "en", None
+        )
 
     def test_room_state_combines_registered_device_and_default_targets(self) -> None:
         token = self.register_device()

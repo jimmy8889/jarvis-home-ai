@@ -65,6 +65,32 @@ kind = "music"
         with self.assertRaisesRegex(ValueError, "duplicate player id"):
             self._load(duplicate)
 
+    def test_validates_local_tts_provider_configuration(self) -> None:
+        home_assistant = VALID_CONFIG.replace(
+            "[[rooms]]",
+            """[integrations]
+home_assistant_url = "http://homeassistant.local:8123"
+tts_provider = "home_assistant"
+tts_engine_id = "tts.piper"
+tts_format = "wav"
+
+[[rooms]]""",
+            1,
+        )
+        settings = self._load(home_assistant)
+        self.assertEqual(settings.integrations.tts_engine_id, "tts.piper")
+
+        invalid = VALID_CONFIG.replace(
+            "[[rooms]]",
+            """[integrations]
+tts_provider = "home_assistant"
+
+[[rooms]]""",
+            1,
+        )
+        with self.assertRaisesRegex(ValueError, "home_assistant_url"):
+            self._load(invalid)
+
 
 if __name__ == "__main__":
     unittest.main()

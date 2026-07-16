@@ -63,6 +63,9 @@ Deterministic room state and room-level player/device routing are documented in
 Room-bound, authenticated assistant and announcement playback is documented in
 [docs/AUDIO_DELIVERY.md](docs/AUDIO_DELIVERY.md).
 
+Local Home Assistant/Piper and OpenAI-compatible speech synthesis is documented
+in [docs/LOCAL_TTS.md](docs/LOCAL_TTS.md).
+
 Staged Music Assistant playback is documented in
 [docs/MUSIC_ASSISTANT.md](docs/MUSIC_ASSISTANT.md).
 

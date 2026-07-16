@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from hashlib import sha256
 import json
 from pathlib import Path
@@ -84,6 +84,20 @@ class Store:
                 );
                 CREATE INDEX IF NOT EXISTS events_room_created
                     ON events(room_id, created_at DESC);
+                CREATE TABLE IF NOT EXISTS device_commands (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    device_id TEXT NOT NULL REFERENCES devices(id),
+                    room_id TEXT NOT NULL REFERENCES rooms(id),
+                    payload_json TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    result_json TEXT,
+                    created_at TEXT NOT NULL,
+                    delivered_at TEXT,
+                    completed_at TEXT,
+                    expires_at TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS commands_device_created
+                    ON device_commands(device_id, id DESC);
                 """
             )
 
@@ -264,3 +278,144 @@ class Store:
             }
             for row in rows
         ]
+
+    def create_command(
+        self,
+        device_id: str,
+        payload: dict[str, Any],
+        ttl_seconds: int,
+    ) -> dict[str, Any]:
+        now = datetime.now(UTC)
+        expires_at = now + timedelta(seconds=ttl_seconds)
+        with self._lock, self._connection:
+            device = self._connection.execute(
+                "SELECT room_id FROM devices WHERE id = ?", (device_id,)
+            ).fetchone()
+            if not device:
+                raise KeyError(device_id)
+            cursor = self._connection.execute(
+                """INSERT INTO device_commands
+                   (device_id, room_id, payload_json, status, created_at, expires_at)
+                   VALUES (?, ?, ?, 'queued', ?, ?)""",
+                (
+                    device_id,
+                    device["room_id"],
+                    json.dumps(payload, separators=(",", ":")),
+                    now.isoformat(),
+                    expires_at.isoformat(),
+                ),
+            )
+            command_id = int(cursor.lastrowid)
+        command = self.get_command(command_id)
+        assert command is not None
+        return command
+
+    def get_command(self, command_id: int) -> dict[str, Any] | None:
+        with self._lock, self._connection:
+            self._expire_commands_locked()
+            row = self._connection.execute(
+                "SELECT * FROM device_commands WHERE id = ?", (command_id,)
+            ).fetchone()
+        return self._command_view(row) if row else None
+
+    def list_commands(
+        self, device_id: str | None = None, limit: int = 100
+    ) -> list[dict[str, Any]]:
+        with self._lock, self._connection:
+            self._expire_commands_locked()
+            if device_id is None:
+                rows = self._connection.execute(
+                    "SELECT * FROM device_commands ORDER BY id DESC LIMIT ?",
+                    (limit,),
+                ).fetchall()
+            else:
+                rows = self._connection.execute(
+                    """SELECT * FROM device_commands
+                       WHERE device_id = ? ORDER BY id DESC LIMIT ?""",
+                    (device_id, limit),
+                ).fetchall()
+        return [self._command_view(row) for row in rows]
+
+    def pending_commands(self, device_id: str) -> list[dict[str, Any]]:
+        with self._lock, self._connection:
+            self._expire_commands_locked()
+            rows = self._connection.execute(
+                """SELECT * FROM device_commands
+                   WHERE device_id = ? AND status IN ('queued', 'delivered')
+                   ORDER BY id""",
+                (device_id,),
+            ).fetchall()
+        return [self._command_view(row) for row in rows]
+
+    def mark_command_delivered(self, command_id: int, device_id: str) -> bool:
+        with self._lock, self._connection:
+            self._expire_commands_locked()
+            cursor = self._connection.execute(
+                """UPDATE device_commands
+                   SET status = 'delivered', delivered_at = ?
+                   WHERE id = ? AND device_id = ?
+                     AND status IN ('queued', 'delivered')""",
+                (_now(), command_id, device_id),
+            )
+        return cursor.rowcount == 1
+
+    def complete_command(
+        self,
+        command_id: int,
+        device_id: str,
+        status: str,
+        result: dict[str, Any],
+    ) -> dict[str, Any]:
+        if status not in {"succeeded", "failed"}:
+            raise ValueError("command status must be succeeded or failed")
+        with self._lock, self._connection:
+            self._expire_commands_locked()
+            existing = self._connection.execute(
+                "SELECT * FROM device_commands WHERE id = ? AND device_id = ?",
+                (command_id, device_id),
+            ).fetchone()
+            if not existing or existing["status"] == "expired":
+                raise KeyError(command_id)
+            if existing["status"] in {"succeeded", "failed"}:
+                return self._command_view(existing)
+            cursor = self._connection.execute(
+                """UPDATE device_commands
+                   SET status = ?, result_json = ?, completed_at = ?
+                   WHERE id = ? AND device_id = ?
+                     AND status IN ('queued', 'delivered')""",
+                (
+                    status,
+                    json.dumps(result, separators=(",", ":")),
+                    _now(),
+                    command_id,
+                    device_id,
+                ),
+            )
+            if cursor.rowcount != 1:
+                raise KeyError(command_id)
+        command = self.get_command(command_id)
+        assert command is not None
+        return command
+
+    def _expire_commands_locked(self) -> None:
+        self._connection.execute(
+            """UPDATE device_commands
+               SET status = 'expired', completed_at = ?
+               WHERE status IN ('queued', 'delivered') AND expires_at <= ?""",
+            (_now(), _now()),
+        )
+
+    @staticmethod
+    def _command_view(row: sqlite3.Row) -> dict[str, Any]:
+        return {
+            "id": row["id"],
+            "device_id": row["device_id"],
+            "room_id": row["room_id"],
+            "payload": json.loads(row["payload_json"]),
+            "status": row["status"],
+            "result": json.loads(row["result_json"]) if row["result_json"] else None,
+            "created_at": row["created_at"],
+            "delivered_at": row["delivered_at"],
+            "completed_at": row["completed_at"],
+            "expires_at": row["expires_at"],
+        }

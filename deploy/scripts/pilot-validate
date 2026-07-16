@@ -49,6 +49,7 @@ pilot_cmd=(
 listen_port="$(python3 -c 'import tomllib; print(tomllib.load(open("/etc/pilot/room.toml", "rb")).get("listen_port", 8765))')"
 capture_device="${capture_device:-$(python3 -c 'import tomllib; print(tomllib.load(open("/etc/pilot/room.toml", "rb")).get("capture_alsa_device", "default"))')}"
 playback_device="${playback_device:-$(python3 -c 'import tomllib; print(tomllib.load(open("/etc/pilot/room.toml", "rb")).get("playback_alsa_device", "default"))')}"
+core_commands_enabled="$(python3 -c 'import tomllib; print(tomllib.load(open("/etc/pilot/room.toml", "rb")).get("core_commands_enabled", False))')"
 
 has_capture_hardware() {
   arecord -l 2>/dev/null | grep -q '^card '
@@ -100,6 +101,11 @@ has_connected_music_assistant() {
     | grep -qE "[.:]${port}[[:space:]]"
 }
 
+has_connected_core_commands() {
+  curl --fail --silent "http://127.0.0.1:${listen_port}/v1/status" \
+    | python3 -c 'import json,sys; raise SystemExit(not json.load(sys.stdin)["core_commands"]["connected"])'
+}
+
 check "pilot user exists" id pilot
 check "lingering enabled" test -e /var/lib/systemd/linger/pilot
 check "PipeWire service active" "${pilot_cmd[@]}" systemctl --user is-active pipewire.service
@@ -123,6 +129,10 @@ fi
 if systemctl is-enabled --quiet pilot-sendspin.service 2>/dev/null; then
   check "Music Assistant player active" systemctl is-active pilot-sendspin.service
   check "Music Assistant connected" has_connected_music_assistant
+fi
+
+if [[ "$core_commands_enabled" == "True" ]]; then
+  check "Pilot Core command channel connected" has_connected_core_commands
 fi
 
 if ! "$audio_tests"; then

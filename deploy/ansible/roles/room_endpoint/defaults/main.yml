@@ -46,6 +46,11 @@ room_endpoint_core_device_id: "pilot-{{ room_endpoint_room_id }}"
 room_endpoint_core_device_token: ""
 room_endpoint_core_device_token_file: /etc/pilot/device-token
 room_endpoint_core_report_interval_seconds: 15
+room_endpoint_core_commands_enabled: false
+room_endpoint_core_command_journal_path: /var/lib/pilot/commands.db
+room_endpoint_core_command_heartbeat_seconds: 20
+room_endpoint_core_command_reconnect_min_seconds: 2
+room_endpoint_core_command_reconnect_max_seconds: 30
 room_endpoint_audio_focus_enabled: false
 room_endpoint_audio_focus_duck_gain: 0.2
 room_endpoint_audio_focus_interval_seconds: 1

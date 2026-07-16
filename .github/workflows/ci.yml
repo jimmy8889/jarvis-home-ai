@@ -59,7 +59,10 @@ jobs:
           bash -n deploy/scripts/pilot-rollback
           bash -n deploy/scripts/pilot-validate
       - name: Check Python deployment scripts
-        run: python -m py_compile deploy/scripts/pilot-register-device
+        run: >-
+          python -m py_compile
+          deploy/scripts/pilot-register-device
+          deploy/scripts/pilot-command
       - name: Check playbook syntax
         run: >-
           ansible-playbook

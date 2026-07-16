@@ -1,8 +1,8 @@
 # Pilot Core
 
-Pilot Core 0.2 is the authenticated control-plane foundation for Pilot OS. It
+Pilot Core 0.3 is the authenticated control-plane foundation for Pilot OS. It
 persists the canonical room/player registry, registered room devices, source
-state, and event history in SQLite.
+state, event history, and durable device command queue in SQLite.
 
 ## Security model
 
@@ -14,6 +14,8 @@ state, and event history in SQLite.
 - A device may publish events only for its assigned room.
 - Room agents connect outbound to Pilot Core. Their diagnostic API remains
   loopback-only.
+- Device commands use the same per-device identity and can only be completed by
+  the device to which they were assigned.
 - Secrets are environment variables or Ansible-provided files and never belong
   in repository configuration.
 
@@ -35,11 +37,19 @@ Administrator endpoints:
 - `POST /v1/media` for play, pause, stop, volume, URI playback, and transfer
 - `POST /v1/media/search`
 - `POST /v1/assistant`
+- `POST /v1/devices/{device_id}/commands`
+- `GET /v1/devices/{device_id}/commands`
+- `GET /v1/commands/{command_id}`
 
 Provisioning and device endpoints:
 
 - `POST /v1/devices/register` using the bootstrap token
 - `POST /v1/events` using device ID and device bearer token
+- `WS /v1/devices/ws?device_id=...` using device ID and device bearer token
+
+The command transport and its queued, delivered, terminal, expiry, reconnect,
+and idempotency behavior are documented in
+[COMMAND_TRANSPORT.md](COMMAND_TRANSPORT.md).
 
 The event stream carries health and source-state changes. Source events produce
 a deterministic focus decision using this priority:
@@ -74,5 +84,5 @@ PILOT_CORE_BOOTSTRAP_TOKEN=... \
 ```
 
 Store the returned device token in Ansible Vault and enable the
-`room_endpoint_core_reporting_*` variables. The role writes it to a `0600`
-file owned by the `pilot` service account.
+`room_endpoint_core_reporting_*` and `room_endpoint_core_commands_*` variables.
+The role writes it to a `0600` file owned by the `pilot` service account.

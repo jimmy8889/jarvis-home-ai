@@ -1,6 +1,6 @@
 # Pilot OS Blueprint
 
-Version 0.6
+Version 0.7
 
 Last updated: 2026-07-17
 
@@ -186,6 +186,8 @@ Current responsibilities:
 - Home Assistant and Music Assistant connection status
 - Playback state visibility through MPRIS where available
 - Outbound authenticated health and source-state reporting to Pilot Core
+- Authenticated outbound command socket with durable central queue, local
+  idempotency journal, heartbeats, and reconnect backoff
 - Loopback-only transport, volume, listening, assistant, announcement, and
   cancel controls
 - Self-expiring transient focus state and deterministic priority decisions
@@ -285,9 +287,11 @@ Target Pilot Core APIs:
 - `/assistant`
 - WebSockets for events and streaming transcripts
 
-Pilot Core 0.2 now implements authenticated `/v1/rooms`, `/v1/players`,
+Pilot Core 0.3 now implements authenticated `/v1/rooms`, `/v1/players`,
 `/v1/devices`, `/v1/media`, `/v1/assistant`, event ingestion/history, and a
-realtime event WebSocket. Meeting and memory APIs remain future phases.
+realtime event WebSocket. It also persists device commands and delivers them
+over authenticated outbound room-agent WebSockets. Meeting and memory APIs
+remain future phases.
 
 ## 10. Data and security
 
@@ -393,6 +397,8 @@ deployed integration, hardware boundary, or milestone status changes.
 - [x] Authenticated room-agent event transport
 - [x] Device registration and registry persistence
 - [x] Music Assistant and Home Assistant API adapters
+- [x] Durable authenticated Core-to-room command delivery
+- [x] Reconnect-safe local command result journal
 - [ ] Deploy Pilot Core on the selected central container host
 - [ ] Enable the registered office room-agent reporter
 
@@ -400,8 +406,9 @@ deployed integration, hardware boundary, or milestone status changes.
 
 1. Select `Pilot Office Music` in Music Assistant and prove audible playback.
 2. Validate TIDAL playback and a local lossless track.
-3. Deploy Pilot Core centrally and register the Office N150.
-4. Deploy room-agent 0.2, then observe real AirPlay/Sendspin source identifiers
+3. Deploy Pilot Core centrally, register the Office N150, and enable the
+   command channel.
+4. Deploy room-agent 0.3, then observe real AirPlay/Sendspin source identifiers
    and enable local gain enforcement after the safe switching test.
 5. Validate the native Intel Bluetooth controller; add a dedicated adapter only
    if its receiver behavior is inadequate.
@@ -439,3 +446,5 @@ deployed integration, hardware boundary, or milestone status changes.
   events, knowledge, identity, and consent-based preference learning.
 - **0.6** — Added the room-agent control surface, expiring interaction state,
   and complete source-state reporting while retaining the audible safety gate.
+- **0.7** — Added durable authenticated Core-to-room commands, reconnect-safe
+  idempotency, command status APIs, and deployment validation.

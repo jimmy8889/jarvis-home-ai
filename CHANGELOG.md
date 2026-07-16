@@ -2,6 +2,16 @@
 
 ## 2026-07-17
 
+- Added Pilot Core 0.3 durable device commands with queued, delivered,
+  succeeded, failed, and expired states.
+- Added authenticated outbound room-agent WebSockets, heartbeat and reconnect
+  handling, live connection visibility, and command-result event broadcasts.
+- Added a persistent room command journal that prevents execution replay after
+  reconnects or lost acknowledgements.
+- Added the `pilot-command` operator client and Ansible configuration for
+  command transport, dependency installation, credentials, and health checks.
+- Documented the command security, delivery, activation, and rollback model and
+  advanced the canonical blueprint to 0.7.
 - Merged the Jarvis architecture and Pilot intelligence framework pull requests,
   including execution, memory, skill, inference, world-state, planning, event,
   knowledge, identity, and schema design documents.

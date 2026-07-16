@@ -29,6 +29,11 @@ class Settings:
     core_device_id: str = ""
     core_device_token_file: str = "/etc/pilot/device-token"
     core_report_interval_seconds: int = 15
+    core_commands_enabled: bool = False
+    core_command_journal_path: str = "/var/lib/pilot/commands.db"
+    core_command_heartbeat_seconds: int = 20
+    core_command_reconnect_min_seconds: int = 2
+    core_command_reconnect_max_seconds: int = 30
     audio_focus_enabled: bool = False
     audio_focus_duck_gain: float = 0.2
     audio_focus_interval_seconds: int = 1

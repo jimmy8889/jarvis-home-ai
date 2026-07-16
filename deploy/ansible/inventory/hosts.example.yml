@@ -36,3 +36,7 @@ all:
           room_endpoint_sendspin_server_url: ws://192.0.2.20:8927/sendspin
           room_endpoint_sendspin_server_port: 8927
           room_endpoint_sendspin_audio_device: default
+          # Enable only after Pilot Core is deployed and this device is registered.
+          room_endpoint_core_reporting_enabled: false
+          room_endpoint_core_commands_enabled: false
+          room_endpoint_core_url: http://192.0.2.30:8770

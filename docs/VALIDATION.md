@@ -4,8 +4,8 @@
 
 Run `sudo pilot-hardware-inventory`. Confirm that the microphone and output
 device appear in `lsusb`, the microphone appears under `arecord -l`, and the DAC
-or speakers appear under `aplay -l`. If a device is absent here, fix Proxmox USB
-passthrough before changing PipeWire.
+or speakers appear under `aplay -l`. If a device is absent here, fix the native
+USB connection before changing PipeWire.
 
 ## Stage 2: service health
 
@@ -18,6 +18,8 @@ Run `sudo pilot-validate`. This silent test checks:
 - Linux Voice Assistant service, configured API socket, and an established Home
   Assistant connection, when enabled
 - Pilot AirPlay service and its configured RTSP socket, when enabled
+- Music Assistant Sendspin connectivity, when enabled
+- the authenticated Pilot Core command connection, when enabled
 
 ## Stage 3: microphone and speaker
 
@@ -45,7 +47,7 @@ device layer; it does not yet validate acoustic echo cancellation.
 
 ## Stage 4: reboot persistence
 
-Reboot the VM, wait for SSH, and rerun the silent and audible checks. Also run:
+Reboot the endpoint, wait for SSH, and rerun the silent and audible checks. Also run:
 
 ```bash
 systemctl is-enabled pilot-room-agent
@@ -59,6 +61,24 @@ sudo -u pilot XDG_RUNTIME_DIR=/run/user/$(id -u pilot) \
 Acceptance requires two consecutive clean reboots with the same devices, active
 services, successful capture and playback, and no USB/audio errors in the boot
 journal.
+
+## Stage 5: command transport
+
+After Pilot Core reports the room device as connected, start with a state-only
+command that cannot produce sound:
+
+```bash
+deploy/scripts/pilot-command \
+  --core-url http://PILOT_CORE_HOST:8770 \
+  --device-id pilot-office \
+  --wait 10 \
+  start_listening
+```
+
+Confirm it succeeds, then send `cancel`. Defer pause, playback, volume, and
+announcement commands until someone can observe the physical room. Repeating a
+completed command ID through reconnect testing must return the journaled result
+without executing the action twice.
 
 ## Troubleshooting evidence
 

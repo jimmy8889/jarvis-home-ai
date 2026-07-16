@@ -74,6 +74,45 @@ class StorageTests(unittest.TestCase):
                 "office-n150", "media-room", "health", {"ready": True}
             )
 
+    def test_command_lifecycle_is_persisted(self) -> None:
+        command = self.store.create_command(
+            "office-n150", {"action": "pause", "source": "music"}, 30
+        )
+        self.assertEqual(command["status"], "queued")
+        self.assertEqual(
+            self.store.pending_commands("office-n150")[0]["id"], command["id"]
+        )
+
+        self.assertTrue(
+            self.store.mark_command_delivered(command["id"], "office-n150")
+        )
+        completed = self.store.complete_command(
+            command["id"],
+            "office-n150",
+            "succeeded",
+            {"ok": True},
+        )
+        self.assertEqual(completed["status"], "succeeded")
+        self.assertEqual(completed["result"], {"ok": True})
+        self.assertEqual(self.store.pending_commands("office-n150"), [])
+        replayed = self.store.complete_command(
+            command["id"],
+            "office-n150",
+            "failed",
+            {"ok": False},
+        )
+        self.assertEqual(replayed["status"], "succeeded")
+        self.assertEqual(replayed["result"], {"ok": True})
+
+    def test_command_cannot_be_completed_by_another_device(self) -> None:
+        command = self.store.create_command(
+            "office-n150", {"action": "stop", "source": "music"}, 30
+        )
+        with self.assertRaises(KeyError):
+            self.store.complete_command(
+                command["id"], "other-device", "succeeded", {"ok": True}
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

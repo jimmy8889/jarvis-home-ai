@@ -20,6 +20,11 @@ release rollback does not automatically overwrite `/etc/pilot/room.toml`, since
 doing so could discard deliberate room-device selections. Restore a configuration
 archive manually only when the release rollback does not address the issue.
 
-The automation does not alter the Proxmox host or its passthrough configuration,
-so removing an individually passed-through USB device remains a separate,
-reversible Proxmox action.
+The command result journal is stored at `/var/lib/pilot/commands.db`, outside the
+release tree. It intentionally survives rollback so a command already executed
+by a newer release is not replayed by an older one after reconnect. Delete this
+journal only during a deliberate full device reset, never as a routine rollback
+step.
+
+The automation does not alter firmware, GPU, HDMI, or host USB configuration.
+Those hardware changes remain separate from a Pilot release rollback.

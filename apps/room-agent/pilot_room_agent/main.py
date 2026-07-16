@@ -8,6 +8,7 @@ import os
 
 from .config import Settings, load_settings
 from .audio_focus import AudioFocusLoop
+from .command_client import CommandClient
 from .controls import ControlError, ControlState, RoomController
 from .reporter import EventReporter
 from .status import collect_status
@@ -17,6 +18,7 @@ class Handler(BaseHTTPRequestHandler):
     settings = Settings()
     control_state = ControlState()
     controller = RoomController(control_state)
+    command_client: CommandClient | None = None
 
     def _respond(self, status: HTTPStatus, payload: dict) -> None:
         body = json.dumps(payload, separators=(",", ":")).encode()
@@ -33,6 +35,11 @@ class Handler(BaseHTTPRequestHandler):
         if self.path in {"/readyz", "/v1/status"}:
             payload = collect_status(self.settings)
             payload["controls"] = self.control_state.snapshot()
+            payload["core_commands"] = (
+                self.command_client.status()
+                if self.command_client
+                else {"enabled": False, "connected": False}
+            )
             status = HTTPStatus.OK if payload["ready"] else HTTPStatus.SERVICE_UNAVAILABLE
             self._respond(status, payload)
             return
@@ -73,14 +80,20 @@ def main() -> None:
     Handler.settings = settings
     Handler.control_state = control_state
     Handler.controller = RoomController(control_state)
+    Handler.command_client = None
     reporter: EventReporter | None = None
     focus_loop: AudioFocusLoop | None = None
+    command_client: CommandClient | None = None
     if settings.core_reporting_enabled:
         reporter = EventReporter(settings, control_state)
         reporter.start()
     if settings.audio_focus_enabled:
         focus_loop = AudioFocusLoop(settings, control_state)
         focus_loop.start()
+    if settings.core_commands_enabled:
+        command_client = CommandClient(settings, Handler.controller)
+        Handler.command_client = command_client
+        command_client.start()
     server = ThreadingHTTPServer((settings.listen_host, settings.listen_port), Handler)
     print(
         f"Pilot room-agent for {settings.room_id} listening on "
@@ -90,6 +103,8 @@ def main() -> None:
     try:
         server.serve_forever()
     finally:
+        if command_client:
+            command_client.stop()
         if reporter:
             reporter.stop()
         if focus_loop:

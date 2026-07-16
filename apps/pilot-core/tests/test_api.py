@@ -98,6 +98,95 @@ class ApiTests(unittest.TestCase):
             with self.client.websocket_connect("/v1/events/ws"):
                 pass
 
+    def register_device(self) -> str:
+        registration = self.client.post(
+            "/v1/devices/register",
+            headers={"Authorization": "Bearer bootstrap-test"},
+            json={
+                "device_id": "office-n150",
+                "room_id": "office",
+                "name": "Office N150",
+                "capabilities": ["audio", "voice"],
+            },
+        )
+        self.assertEqual(registration.status_code, 200)
+        return registration.json()["device_token"]
+
+    def test_queued_command_is_delivered_and_acknowledged(self) -> None:
+        token = self.register_device()
+        queued = self.client.post(
+            "/v1/devices/office-n150/commands",
+            headers={"Authorization": "Bearer admin-test"},
+            json={"action": "pause", "source": "music"},
+        )
+        self.assertEqual(queued.status_code, 201)
+        command_id = queued.json()["id"]
+
+        with self.client.websocket_connect(
+            "/v1/devices/ws?device_id=office-n150",
+            headers={"Authorization": f"Bearer {token}"},
+        ) as socket:
+            self.assertEqual(socket.receive_json()["type"], "hello")
+            message = socket.receive_json()
+            self.assertEqual(message["type"], "command")
+            self.assertEqual(message["command"]["id"], command_id)
+            socket.send_json(
+                {
+                    "type": "command_result",
+                    "command_id": command_id,
+                    "status": "succeeded",
+                    "result": {"ok": True},
+                }
+            )
+            self.assertEqual(socket.receive_json()["type"], "command_ack")
+
+        result = self.client.get(
+            f"/v1/commands/{command_id}",
+            headers={"Authorization": "Bearer admin-test"},
+        )
+        self.assertEqual(result.status_code, 200)
+        self.assertEqual(result.json()["status"], "succeeded")
+
+    def test_device_websocket_rejects_invalid_token(self) -> None:
+        self.register_device()
+        with self.assertRaises(Exception):
+            with self.client.websocket_connect(
+                "/v1/devices/ws?device_id=office-n150",
+                headers={"Authorization": "Bearer wrong"},
+            ):
+                pass
+
+    def test_online_device_receives_new_command_immediately(self) -> None:
+        token = self.register_device()
+        with self.client.websocket_connect(
+            "/v1/devices/ws?device_id=office-n150",
+            headers={"Authorization": f"Bearer {token}"},
+        ) as socket:
+            self.assertEqual(socket.receive_json()["type"], "hello")
+            devices = self.client.get(
+                "/v1/devices",
+                headers={"Authorization": "Bearer admin-test"},
+            )
+            self.assertTrue(devices.json()["devices"][0]["connected"])
+            created = self.client.post(
+                "/v1/devices/office-n150/commands",
+                headers={"Authorization": "Bearer admin-test"},
+                json={"action": "cancel"},
+            )
+            self.assertEqual(created.status_code, 201)
+            message = socket.receive_json()
+            self.assertEqual(message["command"]["id"], created.json()["id"])
+            self.assertEqual(created.json()["status"], "delivered")
+
+    def test_command_schema_rejects_missing_volume(self) -> None:
+        self.register_device()
+        response = self.client.post(
+            "/v1/devices/office-n150/commands",
+            headers={"Authorization": "Bearer admin-test"},
+            json={"action": "set_volume", "source": "room"},
+        )
+        self.assertEqual(response.status_code, 422)
+
     @patch("pilot_core.api.Integrations.music_assistant", new_callable=AsyncMock)
     def test_media_uses_provider_player_id(self, music_assistant) -> None:
         music_assistant.return_value = {"ok": True}

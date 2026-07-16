@@ -54,6 +54,9 @@ Audio source priority and the safely gated ducking engine are documented in
 The same document describes the room agent's loopback-only transport, volume,
 push-to-talk, assistant, announcement, and cancel API.
 
+Authenticated, durable Pilot Core-to-room command delivery is documented in
+[docs/COMMAND_TRANSPORT.md](docs/COMMAND_TRANSPORT.md).
+
 Staged Music Assistant playback is documented in
 [docs/MUSIC_ASSISTANT.md](docs/MUSIC_ASSISTANT.md).
 

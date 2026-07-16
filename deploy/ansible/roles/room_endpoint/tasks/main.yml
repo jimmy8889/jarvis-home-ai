@@ -183,6 +183,12 @@
     cmd: "python3 -m venv /opt/pilot/releases/{{ room_endpoint_release_id }}/.venv"
     creates: "/opt/pilot/releases/{{ room_endpoint_release_id }}/.venv/bin/python"
 
+- name: Install room-agent and runtime dependencies
+  ansible.builtin.pip:
+    name: >-
+      /opt/pilot/releases/{{ room_endpoint_release_id }}/apps/room-agent
+    virtualenv: "/opt/pilot/releases/{{ room_endpoint_release_id }}/.venv"
+
 - name: Render room configuration
   ansible.builtin.template:
     src: room.toml.j2
@@ -200,8 +206,10 @@
       - room_endpoint_core_device_token | length > 0
     fail_msg: >-
       Pilot Core URL, device ID, and device token are required when reporting
-      is enabled.
-  when: room_endpoint_core_reporting_enabled | bool
+      or commands are enabled.
+  when: >-
+    room_endpoint_core_reporting_enabled | bool or
+    room_endpoint_core_commands_enabled | bool
   no_log: true
 
 - name: Install Pilot Core device credential
@@ -211,7 +219,9 @@
     owner: "{{ room_endpoint_user }}"
     group: "{{ room_endpoint_user }}"
     mode: "0600"
-  when: room_endpoint_core_reporting_enabled | bool
+  when: >-
+    room_endpoint_core_reporting_enabled | bool or
+    room_endpoint_core_commands_enabled | bool
   notify: Restart Pilot room-agent
   no_log: true
 

@@ -13,6 +13,8 @@
   deterministic audio-focus policy without enabling live gain enforcement.
 - Extended outbound room reporting to cover all five priority sources.
 - Added control and focus tests and advanced the canonical blueprint to 0.6.
+- Added pull-request CI for service tests, Ruff, compilation, event-schema JSON,
+  deployment scripts, and Ansible syntax.
 
 ## 2026-07-16
 

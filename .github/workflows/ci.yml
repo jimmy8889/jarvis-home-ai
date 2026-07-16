@@ -1,0 +1,68 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  python:
+    name: Python services
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: |
+            apps/pilot-core/pyproject.toml
+            apps/room-agent/pyproject.toml
+      - name: Install services and checks
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e apps/pilot-core -e apps/room-agent ruff
+      - name: Lint
+        run: ruff check apps/pilot-core apps/room-agent
+      - name: Test room agent
+        run: python -m unittest discover -s apps/room-agent/tests -v
+      - name: Test Pilot Core
+        run: python -m unittest discover -s apps/pilot-core/tests -v
+      - name: Compile services
+        run: python -m compileall -q apps/pilot-core/pilot_core apps/room-agent/pilot_room_agent
+      - name: Validate event schema JSON
+        run: python -m json.tool packages/event-schema/pilot-event-v1.schema.json >/dev/null
+
+  deployment:
+    name: Deployment definitions
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install Ansible
+        run: python -m pip install ansible-core
+      - name: Check shell scripts
+        run: |
+          bash -n deploy/scripts/pilot-hardware-inventory
+          bash -n deploy/scripts/pilot-rollback
+          bash -n deploy/scripts/pilot-validate
+      - name: Check Python deployment scripts
+        run: python -m py_compile deploy/scripts/pilot-register-device
+      - name: Check playbook syntax
+        run: >-
+          ansible-playbook
+          -i deploy/ansible/inventory/hosts.example.yml
+          deploy/ansible/site.yml
+          --syntax-check

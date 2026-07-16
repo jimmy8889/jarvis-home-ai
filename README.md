@@ -6,16 +6,17 @@ Pilot OS is developed under the **Jarvis Home AI** project. The canonical,
 living architecture reference is
 [docs/PILOT_OS_BLUEPRINT.md](docs/PILOT_OS_BLUEPRINT.md).
 
-Pilot is a local-first platform for voice, audio, and home automation. The
-repository contains the deployed Debian room endpoint and the first Pilot Core
-orchestration service.
+Pilot is a local-first platform for voice, audio, home automation, media,
+meetings, and personal intelligence. The repository contains the deployed
+Debian room endpoint and the first secure Pilot Core orchestration service.
 
 The deployment deliberately does **not** configure Intel GPU or HDMI
 passthrough.
 
 ## Quick start
 
-1. Pass the required USB devices to the Debian VM in Proxmox.
+1. Install native Debian 13 on the room endpoint and connect the required USB
+   audio devices.
 2. Copy `deploy/ansible/inventory/hosts.example.yml` to `hosts.yml` and set the
    VM address and SSH user.
 3. From a workstation with Ansible installed:
@@ -65,8 +66,35 @@ cp infra/.env.example infra/.env
 docker compose -f infra/docker-compose.yml up -d --build
 ```
 
-The first office VM deployment is recorded in
-[docs/DEPLOYMENT-2026-07-15.md](docs/DEPLOYMENT-2026-07-15.md).
+The original office VM deployment and permanent native migration are recorded
+in [docs/DEPLOYMENT-2026-07-15.md](docs/DEPLOYMENT-2026-07-15.md) and
+[docs/DEPLOYMENT-2026-07-16-NATIVE.md](docs/DEPLOYMENT-2026-07-16-NATIVE.md).
+
+## Architecture research and decisions
+
+The open-source assistant feature review is documented in
+[docs/research/JARVIS_FEATURE_REVIEW.md](docs/research/JARVIS_FEATURE_REVIEW.md).
+
+Material design decisions are recorded under
+[docs/adr/](docs/adr/README.md). The initial ADRs cover execution modes,
+layered memory, the skill runtime, the unified inference gateway, and the
+separation of world state, knowledge, memory, planning, and execution.
+
+A proposed skill package is shown in
+[docs/schemas/skill-manifest.example.yaml](docs/schemas/skill-manifest.example.yaml).
+
+## Pilot intelligence framework
+
+The next architecture layer is described in
+[docs/architecture/PILOT_INTELLIGENCE_FRAMEWORK.md](docs/architecture/PILOT_INTELLIGENCE_FRAMEWORK.md).
+It defines:
+
+- a live, provenance-aware world model
+- a bounded planning and project engine
+- a versioned internal event bus
+- a knowledge graph and unified search service
+- identity, permissions, and consent-based preference learning
+- a shared event envelope schema under `packages/event-schema/`
 
 ## Repository layout
 
@@ -76,17 +104,20 @@ apps/pilot-core/       Central room and player registry API
 config/                Versioned example room configuration
 deploy/ansible/        Reproducible Debian 13 deployment
 deploy/scripts/        Inventory, validation, and rollback commands
-docs/                  Architecture and operator runbooks
+docs/                  Architecture, ADRs, research, and operator runbooks
+packages/              Shared schemas and future SDK packages
 systemd/               Service definitions
 infra/                 Central Pilot Core container deployment
 ```
 
 ## Safety boundaries
 
-- The playbook changes only the Debian guest.
+- The playbook changes only the targeted Debian room endpoint.
 - It never edits Proxmox, VFIO, IOMMU, GPU, HDMI, or host USB configuration.
 - Bluetooth is optional and remains disabled in configuration until requested.
 - Device selection is explicit; the deployment does not guess which sound card
   should become the default.
 - Each deployment is installed as a new release. `pilot-rollback` switches back
   to the preceding release and retains configuration backups.
+- LLMs may query filtered state and propose plans, but real actions always pass
+  through execution policy and the skill runtime.

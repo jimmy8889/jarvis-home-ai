@@ -1,0 +1,64 @@
+apiVersion: pilot.io/v1alpha1
+kind: Skill
+metadata:
+  id: music-assistant
+  name: Music Assistant
+  version: 0.1.0
+  description: Control music libraries, queues, players, and room handoff.
+
+runtime:
+  entrypoint: pilot_skills.music_assistant
+  platforms: [linux-amd64]
+  timeout_seconds: 15
+  health_check: /healthz
+
+execution:
+  permitted_modes: [controlled, smart, agent]
+  default_mode: controlled
+  max_agent_steps: 3
+
+permissions:
+  network:
+    allow:
+      - service: music-assistant
+  secrets:
+    - MUSIC_ASSISTANT_TOKEN
+  filesystem:
+    read: []
+    write: []
+  shell: false
+
+confirmation:
+  default: never
+  actions:
+    clear_queue: contextual
+    set_high_volume: always
+
+dependencies:
+  services:
+    - id: music-assistant
+      minimum_version: 2.0.0
+
+capabilities:
+  - music.search
+  - music.play
+  - music.pause
+  - music.handoff
+  - player.volume
+  - player.group
+
+actions:
+  - id: play_media
+    description: Play a resolved media item on a player.
+    risk: low
+    input_schema: schemas/play-media.input.json
+    output_schema: schemas/play-media.output.json
+  - id: move_playback
+    description: Move the active queue to another room.
+    risk: medium
+    input_schema: schemas/move-playback.input.json
+    output_schema: schemas/move-playback.output.json
+
+observability:
+  emit_trace_events: true
+  metrics_prefix: pilot_skill_music_assistant

@@ -4,9 +4,9 @@ Pilot OS is developed under the **Jarvis Home AI** project. The canonical,
 living architecture reference is
 [docs/PILOT_OS_BLUEPRINT.md](docs/PILOT_OS_BLUEPRINT.md).
 
-Pilot is a local-first platform for voice, audio, and home automation. The
-repository contains the deployed Debian room endpoint and the first Pilot Core
-room/player registry.
+Pilot is a local-first platform for voice, audio, home automation, media,
+meetings, and personal intelligence. The repository contains the deployed
+Debian room endpoint and the first Pilot Core room/player registry.
 
 The deployment deliberately does **not** configure Intel GPU or HDMI
 passthrough.
@@ -62,10 +62,24 @@ The open-source assistant feature review is documented in
 
 Material design decisions are recorded under
 [docs/adr/](docs/adr/README.md). The initial ADRs cover execution modes,
-layered memory, the skill runtime, and the unified inference gateway.
+layered memory, the skill runtime, the unified inference gateway, and the
+separation of world state, knowledge, memory, planning, and execution.
 
 A proposed skill package is shown in
 [docs/schemas/skill-manifest.example.yaml](docs/schemas/skill-manifest.example.yaml).
+
+## Pilot intelligence framework
+
+The next architecture layer is described in
+[docs/architecture/PILOT_INTELLIGENCE_FRAMEWORK.md](docs/architecture/PILOT_INTELLIGENCE_FRAMEWORK.md).
+It defines:
+
+- a live, provenance-aware world model
+- a bounded planning and project engine
+- a versioned internal event bus
+- a knowledge graph and unified search service
+- identity, permissions, and consent-based preference learning
+- a shared event envelope schema under `packages/event-schema/`
 
 ## Repository layout
 
@@ -76,6 +90,7 @@ config/                Versioned example room configuration
 deploy/ansible/        Reproducible Debian 13 deployment
 deploy/scripts/        Inventory, validation, and rollback commands
 docs/                  Architecture, ADRs, research, and operator runbooks
+packages/              Shared schemas and future SDK packages
 systemd/               Service definitions
 ```
 
@@ -88,3 +103,5 @@ systemd/               Service definitions
   should become the default.
 - Each deployment is installed as a new release. `pilot-rollback` switches back
   to the preceding release and retains configuration backups.
+- LLMs may query filtered state and propose plans, but real actions always pass
+  through execution policy and the skill runtime.

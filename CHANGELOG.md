@@ -16,6 +16,9 @@
   gate tied to the accepted room, capture device, K3 route, and speaker node.
 - Added secret, enrollment, deployment, diagnostic, backup, restore, validation,
   and activation operator tooling plus production runbooks and CI coverage.
+- Pinned the production container to UID/GID `10001` and made root-run secret
+  initialization grant that group read-only access without exposing host secret
+  files to other users.
 - Added Pilot Core 0.6 local TTS synthesis with Home Assistant/Piper and
   OpenAI-compatible providers.
 - Added bounded response streaming, content-type normalization, audio signature

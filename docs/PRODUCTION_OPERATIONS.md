@@ -26,6 +26,12 @@ printf '%s' "$MUSIC_ASSISTANT_TOKEN" | \
 deploy/scripts/pilot-secrets check
 ```
 
+When run as root on the central Linux host, the secret tool stores files as
+`root:10001` with mode `0640`; Pilot Core is pinned to UID/GID `10001`. The
+containing directory remains `0700`, so host users cannot traverse it while the
+non-root container process can read only the individually mounted files. On a
+non-root development machine the files remain mode `0600`.
+
 Do not place token values in shell command arguments, `infra/.env`, Git, or
 room configuration. `infra/.env` contains only the bind address, port, and local
 image tag. Bind to a trusted LAN or private overlay address; place a TLS reverse

@@ -3,7 +3,8 @@ FROM python:3.13-slim
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
-RUN useradd --system --uid 10001 --create-home pilot \
+RUN groupadd --gid 10001 pilot \
+    && useradd --system --uid 10001 --gid 10001 --create-home pilot \
     && mkdir -p /data \
     && chown pilot:pilot /data
 WORKDIR /app

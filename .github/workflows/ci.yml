@@ -91,11 +91,40 @@ jobs:
           deploy/scripts/pilot-core-restore
           deploy/scripts/pilot-secrets
           infra/pilot-core/volume_archive.py
-      - name: Check secret tooling and Compose definition
+      - name: Smoke-test production container and authenticated secrets
         run: |
-          deploy/scripts/pilot-secrets --directory infra/secrets init
-          deploy/scripts/pilot-secrets --directory infra/secrets check
+          cleanup() {
+            docker compose -f infra/docker-compose.yml down -v --remove-orphans || true
+            sudo rm -rf infra/secrets
+          }
+          trap cleanup EXIT
+          sudo deploy/scripts/pilot-secrets \
+            --directory infra/secrets \
+            --runtime-gid 10001 \
+            init
+          sudo deploy/scripts/pilot-secrets \
+            --directory infra/secrets \
+            --runtime-gid 10001 \
+            check
           docker compose -f infra/docker-compose.yml config --quiet
+          docker compose -f infra/docker-compose.yml build pilot-core
+          docker compose -f infra/docker-compose.yml up -d --no-build pilot-core
+          for attempt in {1..30}; do
+            if curl --fail --silent http://127.0.0.1:8770/readyz >/dev/null; then
+              break
+            fi
+            if [[ "$attempt" == 30 ]]; then
+              docker compose -f infra/docker-compose.yml logs pilot-core
+              exit 1
+            fi
+            sleep 1
+          done
+          admin_token="$(sudo cat infra/secrets/pilot_core_admin_token)"
+          curl --fail --silent \
+            -H "Authorization: Bearer ${admin_token}" \
+            http://127.0.0.1:8770/v1/integrations/diagnostics \
+            >/dev/null
+          unset admin_token
       - name: Check playbook syntax
         run: >-
           ansible-playbook

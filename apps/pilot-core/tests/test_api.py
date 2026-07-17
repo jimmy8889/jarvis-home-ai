@@ -97,6 +97,109 @@ class ApiTests(unittest.TestCase):
             "office", {room["id"] for room in response.json()["rooms"]}
         )
 
+    def test_dashboard_shell_and_assets_have_security_headers(self) -> None:
+        root = self.client.get("/", follow_redirects=False)
+        self.assertEqual(root.status_code, 307)
+        self.assertEqual(root.headers["location"], "/dashboard")
+
+        dashboard = self.client.get("/dashboard")
+        self.assertEqual(dashboard.status_code, 200)
+        self.assertIn("Pilot Core", dashboard.text)
+        self.assertEqual(dashboard.headers["cache-control"], "no-store")
+        self.assertIn(
+            "frame-ancestors 'none'",
+            dashboard.headers["content-security-policy"],
+        )
+        self.assertEqual(dashboard.headers["x-frame-options"], "DENY")
+
+        script = self.client.get("/dashboard/assets/app.js")
+        self.assertEqual(script.status_code, 200)
+        self.assertIn("sessionStorage", script.text)
+        self.assertEqual(
+            self.client.get("/dashboard/assets/not-allowed.js").status_code,
+            404,
+        )
+
+    def test_operations_requires_admin_and_handles_unenrolled_rooms(self) -> None:
+        self.assertEqual(self.client.get("/v1/operations").status_code, 401)
+        response = self.client.get(
+            "/v1/operations",
+            headers={"Authorization": "Bearer admin-test"},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers["cache-control"], "no-store")
+        payload = response.json()
+        self.assertEqual(payload["deployment"]["version"], "0.8.0")
+        self.assertEqual(payload["summary"]["room_count"], 2)
+        self.assertEqual(payload["summary"]["device_count"], 0)
+        self.assertEqual(payload["summary"]["armed_room_count"], 0)
+        self.assertEqual(payload["summary"]["unarmed_room_count"], 2)
+        self.assertTrue(payload["safety"]["audible_actions_gated"])
+        self.assertEqual(
+            set(payload["safety"]["unarmed_rooms"]),
+            {"office", "media-room"},
+        )
+        self.assertIn("home_assistant", payload["integrations"])
+        self.assertIn("music_assistant", payload["integrations"])
+        self.assertIn("tts", payload["integrations"])
+        self.assertEqual(
+            payload["integrations"]["tts"]["status"], "not_configured"
+        )
+
+    def test_operations_aggregates_health_commands_and_events(self) -> None:
+        token = self.register_device()
+        health = self.client.post(
+            "/v1/events",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "X-Pilot-Device-ID": "office-n150",
+            },
+            json={
+                "room_id": "office",
+                "type": "health",
+                "payload": {
+                    "ready": True,
+                    "uptime_seconds": 123,
+                    "audio_activation": {"allowed": False},
+                },
+            },
+        )
+        self.assertEqual(health.status_code, 200)
+        command = self.client.post(
+            "/v1/rooms/office/control",
+            headers={"Authorization": "Bearer admin-test"},
+            json={"action": "cancel"},
+        )
+        self.assertEqual(command.status_code, 201)
+
+        response = self.client.get(
+            "/v1/operations",
+            headers={"Authorization": "Bearer admin-test"},
+        )
+        payload = response.json()
+        self.assertEqual(payload["summary"]["device_count"], 1)
+        self.assertEqual(payload["summary"]["connected_device_count"], 0)
+        self.assertEqual(payload["summary"]["pending_command_count"], 1)
+        self.assertEqual(payload["rooms"]["office"]["devices"][0]["id"], "office-n150")
+        self.assertFalse(
+            payload["rooms"]["office"]["devices"][0]["health"]["payload"][
+                "audio_activation"
+            ]["allowed"]
+        )
+        self.assertEqual(payload["commands"][0]["payload"]["action"], "cancel")
+        self.assertEqual(payload["events"][0]["type"], "health")
+
+        commands = self.client.get(
+            "/v1/commands?limit=1",
+            headers={"Authorization": "Bearer admin-test"},
+        )
+        self.assertEqual(commands.status_code, 200)
+        self.assertEqual(len(commands.json()["commands"]), 1)
+        self.assertEqual(
+            commands.json()["commands"][0]["id"],
+            command.json()["command"]["id"],
+        )
+
     def test_register_and_publish_source_event(self) -> None:
         registration = self.client.post(
             "/v1/devices/register",

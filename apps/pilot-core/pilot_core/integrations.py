@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import time
 from typing import Any
 from uuid import uuid4
@@ -81,9 +82,13 @@ class Integrations:
     async def diagnostics(self) -> dict[str, Any]:
         """Run read-only provider checks without returning URLs or credentials."""
 
+        home_assistant, music_assistant = await asyncio.gather(
+            self._home_assistant_diagnostic(),
+            self._music_assistant_diagnostic(),
+        )
         return {
-            "home_assistant": await self._home_assistant_diagnostic(),
-            "music_assistant": await self._music_assistant_diagnostic(),
+            "home_assistant": home_assistant,
+            "music_assistant": music_assistant,
         }
 
     async def _home_assistant_diagnostic(self) -> dict[str, Any]:

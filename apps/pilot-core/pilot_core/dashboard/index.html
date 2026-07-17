@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="dark">
+    <meta
+      name="description"
+      content="Pilot Core operations dashboard for Jarvis Home AI."
+    >
+    <title>Pilot Core · Operations</title>
+    <link rel="stylesheet" href="/dashboard/assets/app.css">
+    <script src="/dashboard/assets/app.js" defer></script>
+  </head>
+  <body>
+    <div class="ambient-grid" aria-hidden="true"></div>
+    <header class="topbar">
+      <a class="brand" href="/dashboard" aria-label="Pilot Core dashboard">
+        <span class="brand-mark" aria-hidden="true">P</span>
+        <span>
+          <strong>Pilot Core</strong>
+          <small>Jarvis Home AI</small>
+        </span>
+      </a>
+      <div class="topbar-actions">
+        <span id="connection-pill" class="status-pill status-neutral">
+          <span class="status-dot"></span>
+          Awaiting access
+        </span>
+        <button id="refresh-button" class="button button-quiet" type="button" hidden>
+          Refresh
+        </button>
+        <button id="disconnect-button" class="button button-quiet" type="button" hidden>
+          Lock
+        </button>
+      </div>
+    </header>
+
+    <main>
+      <section id="access-panel" class="access-panel" aria-labelledby="access-title">
+        <div class="access-copy">
+          <p class="eyebrow">Private operations surface</p>
+          <h1 id="access-title">Your home intelligence, held locally.</h1>
+          <p>
+            Connect with the Pilot Core administrator token. It is kept only for
+            this browser tab and is cleared when the session closes.
+          </p>
+          <ul class="access-points" aria-label="Dashboard capabilities">
+            <li>Live room and device telemetry</li>
+            <li>Home Assistant and Music Assistant health</li>
+            <li>Fail-closed audio activation visibility</li>
+          </ul>
+        </div>
+        <form id="access-form" class="access-form">
+          <label for="token-input">Administrator token</label>
+          <div class="token-row">
+            <input
+              id="token-input"
+              name="token"
+              type="password"
+              autocomplete="off"
+              spellcheck="false"
+              required
+              aria-describedby="access-note"
+            >
+            <button class="button button-primary" type="submit">Open dashboard</button>
+          </div>
+          <p id="access-note" class="form-note">
+            Nothing is persisted to local storage, cookies, or Pilot Core.
+          </p>
+          <p id="access-error" class="form-error" role="alert" hidden></p>
+        </form>
+      </section>
+
+      <section id="dashboard" class="dashboard" hidden>
+        <section class="hero">
+          <div>
+            <p class="eyebrow">Operations / Home state</p>
+            <h1>One calm view of every room.</h1>
+            <p id="hero-subtitle" class="hero-subtitle">
+              Reading current state from Pilot Core.
+            </p>
+          </div>
+          <div class="hero-signal" aria-label="Pilot Core overall status">
+            <div id="hero-orbit" class="signal-orbit">
+              <span class="signal-core"></span>
+            </div>
+            <div>
+              <small>System posture</small>
+              <strong id="system-posture">Checking</strong>
+            </div>
+          </div>
+        </section>
+
+        <section class="metric-grid" aria-label="System summary">
+          <article class="metric-card">
+            <span class="metric-label">Rooms</span>
+            <strong id="metric-rooms">—</strong>
+            <small id="metric-rooms-detail">Registered spaces</small>
+          </article>
+          <article class="metric-card">
+            <span class="metric-label">Endpoints</span>
+            <strong id="metric-devices">—</strong>
+            <small id="metric-devices-detail">Connected devices</small>
+          </article>
+          <article class="metric-card">
+            <span class="metric-label">Integrations</span>
+            <strong id="metric-integrations">—</strong>
+            <small id="metric-integrations-detail">Healthy providers</small>
+          </article>
+          <article class="metric-card metric-safety">
+            <span class="metric-label">Audio safety</span>
+            <strong id="metric-safety">—</strong>
+            <small id="metric-safety-detail">Activation gate</small>
+          </article>
+        </section>
+
+        <section class="section-block" aria-labelledby="rooms-title">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Room fabric</p>
+              <h2 id="rooms-title">Live rooms</h2>
+            </div>
+            <span id="last-updated" class="timestamp">Not yet refreshed</span>
+          </div>
+          <div id="room-list" class="room-list"></div>
+        </section>
+
+        <section class="split-grid">
+          <article class="panel" aria-labelledby="integrations-title">
+            <div class="panel-heading">
+              <div>
+                <p class="eyebrow">Service boundary</p>
+                <h2 id="integrations-title">Integrations</h2>
+              </div>
+            </div>
+            <div id="integration-list" class="integration-list"></div>
+          </article>
+
+          <article class="panel safety-panel" aria-labelledby="safety-title">
+            <div class="panel-heading">
+              <div>
+                <p class="eyebrow">Fail closed</p>
+                <h2 id="safety-title">Audio activation</h2>
+              </div>
+              <span id="safety-badge" class="status-pill status-warning">
+                <span class="status-dot"></span>
+                Locked
+              </span>
+            </div>
+            <p id="safety-copy" class="panel-copy">
+              Loading the current activation state.
+            </p>
+            <div class="safety-rule"></div>
+            <dl class="definition-grid">
+              <div>
+                <dt>Audible actions</dt>
+                <dd id="audible-action-state">Blocked</dd>
+              </div>
+              <div>
+                <dt>Supervised rooms</dt>
+                <dd id="armed-room-count">0</dd>
+              </div>
+              <div>
+                <dt>Pending commands</dt>
+                <dd id="pending-command-count">0</dd>
+              </div>
+            </dl>
+          </article>
+        </section>
+
+        <section class="activity-grid">
+          <article class="panel" aria-labelledby="commands-title">
+            <div class="panel-heading">
+              <div>
+                <p class="eyebrow">Execution ledger</p>
+                <h2 id="commands-title">Recent commands</h2>
+              </div>
+              <span id="command-total" class="counter">0</span>
+            </div>
+            <div id="command-list" class="timeline"></div>
+          </article>
+
+          <article class="panel" aria-labelledby="events-title">
+            <div class="panel-heading">
+              <div>
+                <p class="eyebrow">Telemetry</p>
+                <h2 id="events-title">Recent events</h2>
+              </div>
+              <span id="event-total" class="counter">0</span>
+            </div>
+            <div id="event-list" class="timeline"></div>
+          </article>
+        </section>
+
+        <section class="deployment-strip" aria-label="Pilot Core deployment">
+          <div>
+            <span>Release</span>
+            <strong id="deployment-release">—</strong>
+          </div>
+          <div>
+            <span>Core version</span>
+            <strong id="deployment-version">—</strong>
+          </div>
+          <div>
+            <span>Uptime</span>
+            <strong id="deployment-uptime">—</strong>
+          </div>
+          <div>
+            <span>Registry</span>
+            <strong id="deployment-registry">—</strong>
+          </div>
+        </section>
+      </section>
+    </main>
+
+    <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+    <footer>
+      <span>Pilot Core keeps control local.</span>
+      <a href="/docs">API reference</a>
+    </footer>
+  </body>
+</html>

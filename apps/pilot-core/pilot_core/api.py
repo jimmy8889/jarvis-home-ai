@@ -2,7 +2,11 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
+import os
+from pathlib import Path
 import secrets
+import time
 from typing import Any, Literal
 
 from fastapi import (
@@ -16,9 +20,10 @@ from fastapi import (
     WebSocket,
     WebSocketDisconnect,
 )
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, RedirectResponse
 from pydantic import BaseModel, Field, model_validator
 
+from . import __version__
 from .audio_assets import AudioAssetError, AudioAssets
 from .config import Settings
 from .integrations import IntegrationRequestFailed, IntegrationUnavailable, Integrations
@@ -250,6 +255,8 @@ def _bearer(authorization: str | None) -> str:
 
 
 def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
+    started_at = datetime.now(UTC)
+    started_monotonic = time.monotonic()
     registry = Registry.from_settings(settings)
     owns_store = store is None
     database = store or Store(settings.server.database_path, settings)
@@ -266,6 +273,7 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
     )
     hub = EventHub()
     device_hub = DeviceHub()
+    dashboard_directory = Path(__file__).with_name("dashboard")
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
@@ -273,7 +281,27 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
         if owns_store:
             database.close()
 
-    app = FastAPI(title="Pilot Core", version="0.7.0", lifespan=lifespan)
+    app = FastAPI(title="Pilot Core", version=__version__, lifespan=lifespan)
+
+    def dashboard_file(name: str, media_type: str) -> FileResponse:
+        path = dashboard_directory / name
+        if not path.is_file():
+            raise HTTPException(status_code=404, detail="dashboard asset not found")
+        return FileResponse(
+            path,
+            media_type=media_type,
+            headers={
+                "Cache-Control": "no-store",
+                "Content-Security-Policy": (
+                    "default-src 'self'; script-src 'self'; style-src 'self'; "
+                    "connect-src 'self'; img-src 'self' data:; object-src 'none'; "
+                    "base-uri 'none'; frame-ancestors 'none'; form-action 'self'"
+                ),
+                "Referrer-Policy": "no-referrer",
+                "X-Content-Type-Options": "nosniff",
+                "X-Frame-Options": "DENY",
+            },
+        )
 
     async def queue_device_command(
         device_id: str, payload: dict[str, Any], expires_in_seconds: int
@@ -457,6 +485,26 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
     async def health() -> dict[str, str]:
         return {"status": "ok"}
 
+    @app.get("/", include_in_schema=False)
+    async def root() -> RedirectResponse:
+        return RedirectResponse("/dashboard", status_code=307)
+
+    @app.get("/dashboard", include_in_schema=False)
+    @app.get("/dashboard/", include_in_schema=False)
+    async def dashboard() -> FileResponse:
+        return dashboard_file("index.html", "text/html")
+
+    @app.get("/dashboard/assets/{asset_name}", include_in_schema=False)
+    async def dashboard_asset(asset_name: str) -> FileResponse:
+        allowed = {
+            "app.css": "text/css",
+            "app.js": "text/javascript",
+        }
+        media_type = allowed.get(asset_name)
+        if media_type is None:
+            raise HTTPException(status_code=404, detail="dashboard asset not found")
+        return dashboard_file(asset_name, media_type)
+
     @app.get("/readyz")
     async def ready() -> dict[str, Any]:
         return {
@@ -481,6 +529,90 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
                 room_id: orchestrator.room_state(room_id, connected)
                 for room_id in sorted(registry.rooms)
             },
+        }
+
+    @app.get("/v1/operations", dependencies=[Depends(require_admin)])
+    async def operations(response: Response) -> dict[str, Any]:
+        response.headers["Cache-Control"] = "no-store"
+        connected = await device_hub.connected_ids()
+        rooms_state = {
+            room_id: orchestrator.room_state(room_id, connected)
+            for room_id in sorted(registry.rooms)
+        }
+        diagnostics = await integrations.diagnostics()
+        tts_status = local_tts.status()
+        tts_status["status"] = (
+            "configured" if tts_status["configured"] else "not_configured"
+        )
+        diagnostics["tts"] = tts_status
+        devices = database.list_devices()
+        commands = database.list_commands(limit=50)
+        events = database.recent_events(limit=50)
+
+        armed_rooms: list[str] = []
+        unarmed_rooms: list[str] = []
+        for room_id, room_state_payload in rooms_state.items():
+            armed = any(
+                device.get("connected")
+                and (
+                    (device.get("health") or {})
+                    .get("payload", {})
+                    .get("audio_activation", {})
+                    .get("allowed")
+                    is True
+                )
+                for device in room_state_payload["devices"]
+            )
+            (armed_rooms if armed else unarmed_rooms).append(room_id)
+
+        configured_integrations = [
+            status
+            for status in diagnostics.values()
+            if status.get("configured") is True
+        ]
+        command_counts: dict[str, int] = {}
+        for command_payload in commands:
+            status = str(command_payload["status"])
+            command_counts[status] = command_counts.get(status, 0) + 1
+
+        return {
+            "generated_at": datetime.now(UTC).isoformat(),
+            "deployment": {
+                "version": __version__,
+                "release": os.environ.get("PILOT_CORE_RELEASE", "development"),
+                "started_at": started_at.isoformat(),
+                "uptime_seconds": round(time.monotonic() - started_monotonic, 3),
+                "legacy_bootstrap_enabled": settings.server.legacy_bootstrap_enabled,
+            },
+            "registry_revision": registry.revision,
+            "summary": {
+                "room_count": len(rooms_state),
+                "device_count": len(devices),
+                "connected_device_count": sum(
+                    device["id"] in connected for device in devices
+                ),
+                "configured_integration_count": len(configured_integrations),
+                "healthy_integration_count": sum(
+                    status.get("status") == "ok"
+                    for status in configured_integrations
+                ),
+                "armed_room_count": len(armed_rooms),
+                "unarmed_room_count": len(unarmed_rooms),
+                "pending_command_count": sum(
+                    command_counts.get(status, 0)
+                    for status in ("queued", "delivered")
+                ),
+            },
+            "safety": {
+                "audible_actions_gated": bool(unarmed_rooms),
+                "armed_rooms": armed_rooms,
+                "unarmed_rooms": unarmed_rooms,
+            },
+            "integrations": diagnostics,
+            "rooms": rooms_state,
+            "commands": commands,
+            "command_counts": command_counts,
+            "events": events,
         }
 
     @app.get("/v1/rooms/{room_id}", dependencies=[Depends(require_admin)])
@@ -829,6 +961,10 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
         if not result:
             raise HTTPException(status_code=404, detail="command not found")
         return result
+
+    @app.get("/v1/commands", dependencies=[Depends(require_admin)])
+    async def commands(limit: int = 100) -> dict[str, Any]:
+        return {"commands": database.list_commands(limit=min(max(limit, 1), 500))}
 
     @app.websocket("/v1/devices/ws")
     async def device_socket(socket: WebSocket, device_id: str) -> None:

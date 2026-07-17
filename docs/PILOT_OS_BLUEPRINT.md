@@ -1,6 +1,6 @@
 # Pilot OS Blueprint
 
-Version 1.3
+Version 1.4
 
 Last updated: 2026-07-17
 
@@ -90,7 +90,7 @@ Music streams: TCP 8097
 Sendspin server: TCP 8927
 Pilot Core: 10.0.1.64:8770
 Pilot Core host: debian-docker / Debian 12
-Pilot Core image: jarvis-home-ai/pilot-core:wsruntime-20260717
+Pilot Core image: jarvis-home-ai/pilot-core:dashboard-20260717.3
 ```
 
 The Home Assistant add-on is the preferred initial Music Assistant deployment.
@@ -98,7 +98,7 @@ It provides simple lifecycle management and close HA integration. A standalone
 container remains an option if independent uptime or resource isolation later
 becomes important.
 
-Pilot Core 0.7 is deployed as a hardened, non-root Docker service with a
+Pilot Core 0.8 is deployed as a hardened, non-root Docker service with a
 read-only root filesystem, all Linux capabilities dropped, file-backed secrets,
 and persistent state in the `infra_pilot-core-data` volume. The service passed
 LAN health/readiness, authenticated API, invalid-token, disabled legacy
@@ -106,7 +106,9 @@ bootstrap, container-restart persistence, backup-integrity, and log checks.
 Dedicated Home Assistant and Music Assistant credentials are installed through
 the root-owned file-backed secret store, and both read-only diagnostics are
 healthy. TTS remains deliberately unconfigured until the local speech provider
-is selected.
+is selected. A same-origin operations dashboard is available at `/dashboard`;
+its room, device, integration, safety, command, event, and deployment data
+remain protected by the existing administrator bearer token.
 
 ### Office room endpoint
 
@@ -194,6 +196,7 @@ Implemented foundation:
 - Short-lived, device-bound, single-use bootstrap grants
 - Read-only Home Assistant and Music Assistant integration diagnostics
 - Integrity-manifested central backup and guarded restore tooling
+- Authenticated operations snapshot and responsive central dashboard
 
 Planned responsibilities:
 
@@ -307,21 +310,17 @@ The status model covers audio devices, PipeWire, transient control state,
 Bluetooth policy, the Home Assistant voice connection, AirPlay
 listener/playback, and Music Assistant Sendspin connectivity.
 
-Target Pilot Core APIs:
+Target Pilot Core APIs not yet implemented:
 
-- `/rooms`
-- `/players`
-- `/devices`
 - `/meetings`
 - `/memory`
-- `/assistant`
-- WebSockets for events and streaming transcripts
+- WebSockets for streaming meeting transcripts
 
-Pilot Core 0.6 now implements authenticated `/v1/rooms`, `/v1/players`,
-`/v1/devices`, `/v1/media`, `/v1/assistant`, event ingestion/history, and a
-realtime event WebSocket. It also persists device commands and delivers them
-over authenticated outbound room-agent WebSockets. Meeting and memory APIs
-remain future phases.
+Pilot Core 0.8 implements authenticated `/v1/rooms`, `/v1/players`,
+`/v1/devices`, `/v1/media`, `/v1/assistant`, `/v1/operations`, event
+ingestion/history, a realtime event WebSocket, and the operations dashboard. It
+also persists device commands and delivers them over authenticated outbound
+room-agent WebSockets. Meeting and memory APIs remain future phases.
 
 Pilot Core 0.5 added `/v1/rooms/{room_id}/audio-assets`,
 `/v1/rooms/{room_id}/audio`, and the device-authenticated audio download path.
@@ -453,6 +452,7 @@ deployed integration, hardware boundary, or milestone status changes.
 - [x] Deploy Pilot Core on the central Docker host at `10.0.1.64:8770`
 - [x] Enable and verify the registered office room-agent reporter
 - [x] Verify authenticated command delivery and restart reconnection
+- [x] Deploy the authenticated Pilot Core operations dashboard
 
 ## 14. Immediate next steps
 
@@ -516,3 +516,6 @@ deployed integration, hardware boundary, or milestone status changes.
   commands, fixed the production WebSocket runtime, verified non-audible command
   delivery and restart reconnection, and retained the fail-closed K3 activation
   gate.
+- **1.4** — Added Pilot Core 0.8's authenticated operations snapshot and
+  responsive dashboard for rooms, devices, integrations, source focus, safety,
+  commands, events, and release state without enabling audible controls.

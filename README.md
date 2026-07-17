@@ -47,6 +47,11 @@ Production Pilot Core secrets, deployment, diagnostics, enrollment, backup,
 and restore are documented in
 [docs/PRODUCTION_OPERATIONS.md](docs/PRODUCTION_OPERATIONS.md).
 
+After deployment, the private operations dashboard is available at
+`http://PILOT_CORE_HOST:8770/dashboard`. Room state and controls remain
+protected by the Pilot Core administrator token; the first dashboard release
+offers telemetry and non-audible transient-state cancellation only.
+
 The physical acceptance receipt and fail-closed room playback gate are
 documented in [docs/SUPERVISED_ACTIVATION.md](docs/SUPERVISED_ACTIVATION.md).
 

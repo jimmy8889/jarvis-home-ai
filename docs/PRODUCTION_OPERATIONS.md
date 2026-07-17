@@ -1,6 +1,6 @@
 # Pilot Core production operations
 
-Pilot Core 0.7 provides a repeatable central deployment without enabling any
+Pilot Core 0.8 provides a repeatable central deployment without enabling any
 audible room action. The production Compose definition uses a read-only root
 filesystem, drops all Linux capabilities, prevents privilege escalation, limits
 process count and log growth, and stores persistent data in one named volume.
@@ -58,7 +58,26 @@ The deployment command:
 It does not synthesize speech, send room commands, change endpoint activation,
 or start media.
 
-## 3. Run diagnostics
+## 3. Open the operations dashboard
+
+From the trusted LAN, open:
+
+```text
+http://PILOT_CORE_HOST:8770/dashboard
+```
+
+Use the value in `infra/secrets/pilot_core_admin_token` as the administrator
+token. Do not copy that value into Git, notes, shell history, or URLs. The
+dashboard keeps it in tab-scoped `sessionStorage`; choosing **Lock** or closing
+the tab clears it.
+
+The dashboard is an operator view, not a public status page. The HTML, CSS, and
+JavaScript shell are public on the trusted bind address, but every operational
+payload and command requires the administrator bearer token. The dashboard
+does not expose audible actions. Its **Clear transient state** action sends only
+the existing non-audible `cancel` command.
+
+## 4. Run diagnostics
 
 ```bash
 deploy/scripts/pilot-core-diagnose \
@@ -76,7 +95,7 @@ After the Office endpoint is enrolled and connected, add
 `--require-armed-room office` to verify the endpoint has reported the matching
 activation marker.
 
-## 4. Enroll a device once
+## 5. Enroll a device once
 
 Reusable bootstrap registration is disabled in the container configuration.
 An administrator first issues a room- and device-bound grant with a maximum
@@ -113,7 +132,7 @@ Once installed, routine Ansible upgrades preserve the endpoint credential if no
 replacement token is supplied. New installations still require an explicit
 credential source.
 
-## 5. Back up and restore
+## 6. Back up and restore
 
 Create a consistent cold backup:
 

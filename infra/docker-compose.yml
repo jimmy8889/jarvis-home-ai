@@ -18,6 +18,7 @@ services:
     ports:
       - "${PILOT_CORE_BIND_ADDRESS:-127.0.0.1}:${PILOT_CORE_PORT:-8770}:8770"
     environment:
+      PILOT_CORE_RELEASE: "${PILOT_CORE_IMAGE_TAG:-local}"
       PILOT_CORE_ADMIN_TOKEN_FILE: /run/secrets/pilot_core_admin_token
       PILOT_CORE_BOOTSTRAP_TOKEN_FILE: /run/secrets/pilot_core_bootstrap_token
       MUSIC_ASSISTANT_TOKEN_FILE: /run/secrets/music_assistant_token

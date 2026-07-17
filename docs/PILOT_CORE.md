@@ -1,6 +1,6 @@
 # Pilot Core
 
-Pilot Core 0.7 is the authenticated control-plane foundation for Pilot OS. It
+Pilot Core 0.8 is the authenticated control-plane foundation for Pilot OS. It
 persists the canonical room/player registry, registered room devices, source
 state, event history, and durable device command queue in SQLite.
 
@@ -26,9 +26,11 @@ Public health endpoints:
 
 - `GET /healthz`
 - `GET /readyz`
+- `GET /dashboard` for the operations dashboard shell
 
 Administrator endpoints:
 
+- `GET /v1/operations` for the dashboard's joined operational snapshot
 - `GET /v1/state` for a joined all-room snapshot
 - `GET /v1/rooms` and `GET /v1/rooms/{room_id}`
 - `GET /v1/rooms/{room_id}/state`
@@ -50,6 +52,7 @@ Administrator endpoints:
 - `POST /v1/rooms/{room_id}/audio`
 - `POST /v1/devices/{device_id}/commands`
 - `GET /v1/devices/{device_id}/commands`
+- `GET /v1/commands`
 - `GET /v1/commands/{command_id}`
 
 Provisioning and device endpoints:
@@ -68,6 +71,30 @@ Local speech synthesis and secure room playback are documented in
 
 Room target resolution and room-level state, media, and control contracts are
 documented in [ROOM_ORCHESTRATION.md](ROOM_ORCHESTRATION.md).
+
+## Operations dashboard
+
+Open `http://PILOT_CORE_HOST:8770/dashboard` from the trusted LAN and enter the
+Pilot Core administrator token. The token is held only in the browser tab's
+`sessionStorage`; it is not written to cookies, durable browser storage, the
+server, or the repository.
+
+The dashboard polls the authenticated `/v1/operations` endpoint every 15
+seconds and shows:
+
+- connected room endpoints and their latest health;
+- deterministic source/focus state per room;
+- Home Assistant, Music Assistant, and local TTS readiness;
+- the supervised audio-activation gate;
+- recent device commands and events;
+- Pilot Core release, version, uptime, and registry revision.
+
+The only command exposed by this first operations surface is `cancel`, which
+clears transient listening, assistant, announcement, and source state. Audible
+playback, volume, speech, and home-control actions remain intentionally absent.
+Static dashboard responses are served with a same-origin content-security
+policy, no-store caching, referrer suppression, MIME sniffing protection, and
+framing disabled.
 
 The event stream carries health and source-state changes. Source events produce
 a deterministic focus decision using this priority:

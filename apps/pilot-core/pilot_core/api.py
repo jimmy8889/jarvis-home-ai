@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import asynccontextmanager
-import os
 import secrets
 from typing import Any, Literal
 
@@ -13,6 +12,7 @@ from fastapi import (
     HTTPException,
     Query,
     Request,
+    Response,
     WebSocket,
     WebSocketDisconnect,
 )
@@ -24,6 +24,7 @@ from .config import Settings
 from .integrations import IntegrationRequestFailed, IntegrationUnavailable, Integrations
 from .orchestration import ResolutionError, RoomOrchestrator
 from .registry import Registry
+from .secret_values import read_secret
 from .storage import Store
 from .tts import LocalTTS, TTSRequestFailed, TTSUnavailable
 
@@ -33,6 +34,10 @@ class DeviceRegistration(BaseModel):
     room_id: str = Field(min_length=1, max_length=128)
     name: str = Field(min_length=1, max_length=200)
     capabilities: list[str] = Field(default_factory=list, max_length=100)
+
+
+class BootstrapGrantRequest(DeviceRegistration):
+    expires_in_seconds: int = Field(default=600, ge=60, le=3600)
 
 
 class EventInput(BaseModel):
@@ -268,7 +273,7 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
         if owns_store:
             database.close()
 
-    app = FastAPI(title="Pilot Core", version="0.6.0", lifespan=lifespan)
+    app = FastAPI(title="Pilot Core", version="0.7.0", lifespan=lifespan)
 
     async def queue_device_command(
         device_id: str, payload: dict[str, Any], expires_in_seconds: int
@@ -435,12 +440,16 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
             raise HTTPException(status_code=502, detail=str(error)) from None
 
     def require_admin(authorization: str | None = Header(default=None)) -> None:
-        configured = os.environ.get(settings.server.admin_token_env, "")
+        configured = read_secret(settings.server.admin_token_env)
         if not configured or not secrets.compare_digest(_bearer(authorization), configured):
             raise HTTPException(status_code=401, detail="invalid admin token")
 
     def require_bootstrap(authorization: str | None = Header(default=None)) -> None:
-        configured = os.environ.get(settings.server.bootstrap_token_env, "")
+        if not settings.server.legacy_bootstrap_enabled:
+            raise HTTPException(
+                status_code=403, detail="legacy bootstrap registration is disabled"
+            )
+        configured = read_secret(settings.server.bootstrap_token_env)
         if not configured or not secrets.compare_digest(_bearer(authorization), configured):
             raise HTTPException(status_code=401, detail="invalid bootstrap token")
 
@@ -456,6 +465,7 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
             "room_count": len(registry.rooms),
             "player_count": len(registry.players),
             "tts_configured": local_tts.status()["configured"],
+            "legacy_bootstrap_enabled": settings.server.legacy_bootstrap_enabled,
         }
 
     @app.get("/v1/rooms", dependencies=[Depends(require_admin)])
@@ -736,8 +746,45 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
             device["connected"] = device["id"] in connected
         return {"devices": result}
 
+    @app.post(
+        "/v1/bootstrap-grants",
+        dependencies=[Depends(require_admin)],
+        status_code=201,
+    )
+    async def create_bootstrap_grant(
+        request: BootstrapGrantRequest,
+        response: Response,
+    ) -> dict[str, Any]:
+        response.headers["Cache-Control"] = "no-store"
+        try:
+            return database.create_bootstrap_grant(
+                request.device_id,
+                request.room_id,
+                request.name,
+                request.capabilities,
+                request.expires_in_seconds,
+            )
+        except KeyError:
+            raise HTTPException(status_code=404, detail="room not found") from None
+
+    @app.post("/v1/devices/bootstrap", status_code=201)
+    async def bootstrap_device(
+        response: Response,
+        authorization: str | None = Header(default=None),
+    ) -> dict[str, str]:
+        response.headers["Cache-Control"] = "no-store"
+        try:
+            return database.redeem_bootstrap_grant(_bearer(authorization))
+        except PermissionError:
+            raise HTTPException(
+                status_code=401, detail="invalid or expired bootstrap grant"
+            ) from None
+
     @app.post("/v1/devices/register", dependencies=[Depends(require_bootstrap)])
-    async def register(request: DeviceRegistration) -> dict[str, str]:
+    async def register(
+        request: DeviceRegistration, response: Response
+    ) -> dict[str, str]:
+        response.headers["Cache-Control"] = "no-store"
         try:
             token = database.register_device(
                 request.device_id,
@@ -882,7 +929,7 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
 
     @app.websocket("/v1/events/ws")
     async def event_socket(socket: WebSocket) -> None:
-        configured = os.environ.get(settings.server.admin_token_env, "")
+        configured = read_secret(settings.server.admin_token_env)
         authorization = socket.headers.get("authorization")
         token = authorization.removeprefix("Bearer ").strip() if authorization else ""
         if not configured or not secrets.compare_digest(token, configured):
@@ -903,6 +950,15 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
             raise HTTPException(status_code=503, detail=str(error)) from None
         except IntegrationRequestFailed as error:
             raise HTTPException(status_code=502, detail=str(error)) from None
+
+    @app.get(
+        "/v1/integrations/diagnostics",
+        dependencies=[Depends(require_admin)],
+    )
+    async def integration_diagnostics() -> dict[str, Any]:
+        diagnostics = await integrations.diagnostics()
+        diagnostics["tts"] = local_tts.status()
+        return {"integrations": diagnostics}
 
     @app.post("/v1/media/search", dependencies=[Depends(require_admin)])
     async def media_search(request: MediaSearch) -> Any:

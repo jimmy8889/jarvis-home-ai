@@ -28,3 +28,9 @@ step.
 
 The automation does not alter firmware, GPU, HDMI, or host USB configuration.
 Those hardware changes remain separate from a Pilot release rollback.
+
+Central Pilot Core has a separate data recovery path. Use
+`pilot-core-backup` for a cold integrity-manifested archive and
+`pilot-core-restore --yes` for a guarded restore. Restore automatically creates
+a pre-restore backup first. See
+[PRODUCTION_OPERATIONS.md](PRODUCTION_OPERATIONS.md).

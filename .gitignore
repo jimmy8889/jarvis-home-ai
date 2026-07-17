@@ -7,3 +7,5 @@ deploy/ansible/inventory/hosts.yml
 validation-*.log
 *.wav
 infra/.env
+infra/secrets/
+infra/backups/

@@ -38,6 +38,8 @@ class Settings:
     audio_max_bytes: int = 20_000_000
     audio_download_timeout_seconds: int = 15
     audio_cache_retention_seconds: int = 86_400
+    audio_activation_required: bool = True
+    audio_activation_state_path: str = "/etc/pilot/audio-activation.json"
     audio_focus_enabled: bool = False
     audio_focus_duck_gain: float = 0.2
     audio_focus_interval_seconds: int = 1

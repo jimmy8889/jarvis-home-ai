@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+exec /opt/pilot/current/.venv/bin/python \
+  -m pilot_room_agent.activation_cli "$@"

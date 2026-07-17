@@ -7,6 +7,7 @@ audio_asset_max_bytes = 20000000
 audio_asset_retention_seconds = 3600
 admin_token_env = "PILOT_CORE_ADMIN_TOKEN"
 bootstrap_token_env = "PILOT_CORE_BOOTSTRAP_TOKEN"
+legacy_bootstrap_enabled = false
 
 [integrations]
 music_assistant_url = "http://10.0.2.72:8095"

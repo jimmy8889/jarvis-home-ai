@@ -1,0 +1,70 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+repo_root="$(cd "${script_dir}/../.." && pwd)"
+compose_file="${repo_root}/infra/docker-compose.yml"
+core_url="http://127.0.0.1:8770"
+skip_backup=false
+image_tag=""
+
+usage() {
+  printf '%s\n' \
+    "Usage: pilot-core-deploy [--compose-file PATH] [--core-url URL]" \
+    "                         [--image-tag TAG] [--skip-backup]" \
+    "" \
+    "Builds an immutable image tag, starts Pilot Core, and runs silent checks."
+}
+
+while (($#)); do
+  case "$1" in
+    --compose-file) compose_file="$2"; shift ;;
+    --core-url) core_url="$2"; shift ;;
+    --image-tag) image_tag="$2"; shift ;;
+    --skip-backup) skip_backup=true ;;
+    -h|--help) usage; exit 0 ;;
+    *) printf 'Unknown option: %s\n' "$1" >&2; usage >&2; exit 2 ;;
+  esac
+  shift
+done
+
+if [[ -z "$image_tag" ]]; then
+  image_tag="$(git -C "$repo_root" rev-parse --short=12 HEAD)"
+fi
+if [[ ! "$image_tag" =~ ^[a-zA-Z0-9_.-]{1,64}$ ]]; then
+  printf '%s\n' 'Image tag contains unsupported characters.' >&2
+  exit 2
+fi
+
+"${script_dir}/pilot-secrets" check
+docker compose -f "$compose_file" config --quiet
+
+PILOT_CORE_IMAGE_TAG="$image_tag" \
+  docker compose -f "$compose_file" build --pull pilot-core
+
+if [[ "$skip_backup" != true ]] && \
+   docker compose -f "$compose_file" ps -a -q pilot-core | grep -q .; then
+  "${script_dir}/pilot-core-backup" \
+    --compose-file "$compose_file" \
+    --label "pre-deploy-${image_tag}" \
+    --tool-image "jarvis-home-ai/pilot-core:${image_tag}"
+fi
+
+PILOT_CORE_IMAGE_TAG="$image_tag" \
+  docker compose -f "$compose_file" up -d --no-build pilot-core
+
+ready=false
+for _ in $(seq 1 30); do
+  if curl --fail --silent "${core_url%/}/readyz" >/dev/null; then
+    ready=true
+    break
+  fi
+  sleep 2
+done
+if [[ "$ready" != true ]]; then
+  printf '%s\n' 'Pilot Core did not become ready; inspect container logs.' >&2
+  exit 1
+fi
+
+"${script_dir}/pilot-core-diagnose" --core-url "$core_url"
+printf 'Pilot Core image %s deployed with audible actions still gated.\n' "$image_tag"

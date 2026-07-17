@@ -2,6 +2,20 @@
 
 ## 2026-07-17
 
+- Added Pilot Core 0.7 production operations with file-backed Docker secrets,
+  a read-only capability-free container, immutable image tags, bounded logs,
+  and silent deployment diagnostics.
+- Added room- and device-bound, short-lived bootstrap grants that can be
+  redeemed exactly once; reusable bootstrap registration is disabled in the
+  production configuration.
+- Added read-only Home Assistant and Music Assistant connectivity diagnostics
+  that never invoke conversation, TTS, playback, volume, or home actions.
+- Added cold integrity-manifested central backups, guarded restores with archive
+  traversal/integrity checks, and an automatic pre-restore safety backup.
+- Added Room Agent 0.5 supervised activation receipts and a fail-closed playback
+  gate tied to the accepted room, capture device, K3 route, and speaker node.
+- Added secret, enrollment, deployment, diagnostic, backup, restore, validation,
+  and activation operator tooling plus production runbooks and CI coverage.
 - Added Pilot Core 0.6 local TTS synthesis with Home Assistant/Piper and
   OpenAI-compatible providers.
 - Added bounded response streaming, content-type normalization, audio signature

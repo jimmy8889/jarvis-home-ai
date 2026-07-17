@@ -40,10 +40,19 @@ jobs:
           deploy/scripts/pilot-media
           deploy/scripts/pilot-audio
           deploy/scripts/pilot-speak
+          deploy/scripts/pilot-bootstrap-device
+          deploy/scripts/pilot-core-backup
+          deploy/scripts/pilot-core-diagnose
+          deploy/scripts/pilot-core-restore
+          deploy/scripts/pilot-secrets
+          infra/pilot-core/volume_archive.py
+          infra/pilot-core/tests
       - name: Test room agent
         run: python -m unittest discover -s apps/room-agent/tests -v
       - name: Test Pilot Core
         run: python -m unittest discover -s apps/pilot-core/tests -v
+      - name: Test Pilot Core backup archive
+        run: python -m unittest discover -s infra/pilot-core/tests -v
       - name: Compile services
         run: python -m compileall -q apps/pilot-core/pilot_core apps/room-agent/pilot_room_agent
       - name: Validate event schema JSON
@@ -64,6 +73,8 @@ jobs:
       - name: Check shell scripts
         run: |
           bash -n deploy/scripts/pilot-hardware-inventory
+          bash -n deploy/scripts/pilot-activate
+          bash -n deploy/scripts/pilot-core-deploy
           bash -n deploy/scripts/pilot-rollback
           bash -n deploy/scripts/pilot-validate
       - name: Check Python deployment scripts
@@ -74,6 +85,17 @@ jobs:
           deploy/scripts/pilot-media
           deploy/scripts/pilot-audio
           deploy/scripts/pilot-speak
+          deploy/scripts/pilot-bootstrap-device
+          deploy/scripts/pilot-core-backup
+          deploy/scripts/pilot-core-diagnose
+          deploy/scripts/pilot-core-restore
+          deploy/scripts/pilot-secrets
+          infra/pilot-core/volume_archive.py
+      - name: Check secret tooling and Compose definition
+        run: |
+          deploy/scripts/pilot-secrets --directory infra/secrets init
+          deploy/scripts/pilot-secrets --directory infra/secrets check
+          docker compose -f infra/docker-compose.yml config --quiet
       - name: Check playbook syntax
         run: >-
           ansible-playbook

@@ -55,6 +55,38 @@ class StorageTests(unittest.TestCase):
         self.assertFalse(self.store.authenticate_device("office-n150", "wrong"))
         self.assertNotIn("token", self.store.list_devices()[0])
 
+    def test_bootstrap_grant_is_bound_and_single_use(self) -> None:
+        grant = self.store.create_bootstrap_grant(
+            "new-office", "office", "New Office", ["voice", "audio"], 600
+        )
+        registration = self.store.redeem_bootstrap_grant(
+            grant["bootstrap_token"]
+        )
+        self.assertEqual(registration["device_id"], "new-office")
+        self.assertTrue(
+            self.store.authenticate_device(
+                "new-office", registration["device_token"]
+            )
+        )
+        with self.assertRaises(PermissionError):
+            self.store.redeem_bootstrap_grant(grant["bootstrap_token"])
+
+    def test_new_grant_revokes_older_unused_grant_for_device(self) -> None:
+        first = self.store.create_bootstrap_grant(
+            "new-office", "office", "New Office", ["audio"], 600
+        )
+        second = self.store.create_bootstrap_grant(
+            "new-office", "office", "New Office", ["audio"], 600
+        )
+        with self.assertRaises(PermissionError):
+            self.store.redeem_bootstrap_grant(first["bootstrap_token"])
+        self.assertEqual(
+            self.store.redeem_bootstrap_grant(second["bootstrap_token"])[
+                "device_id"
+            ],
+            "new-office",
+        )
+
     def test_source_events_update_focus(self) -> None:
         self.store.record_event(
             "office-n150",

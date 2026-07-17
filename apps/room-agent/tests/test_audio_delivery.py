@@ -52,6 +52,25 @@ class FakeProcess:
         self.finished.set()
 
 
+class FakeActivationGate:
+    def __init__(self, allowed: bool = True) -> None:
+        self.allowed = allowed
+
+    def require(self) -> dict[str, object]:
+        if not self.allowed:
+            from pilot_room_agent.activation import ActivationError
+
+            raise ActivationError("room audio activation denied: not_armed")
+        return {"allowed": True, "reason": "test_acceptance"}
+
+    def status(self) -> dict[str, object]:
+        return {
+            "required": True,
+            "allowed": self.allowed,
+            "reason": "test_acceptance" if self.allowed else "not_armed",
+        }
+
+
 class AudioFetcherTests(unittest.TestCase):
     def test_fetch_authenticates_and_verifies_download(self) -> None:
         content = b"RIFF-secure-pilot-audio"
@@ -143,7 +162,10 @@ class AudioPlaybackTests(unittest.TestCase):
 
         self.state = ControlState()
         self.playback = AudioPlayback(
-            self.state, Fetcher(self.audio_path), popen=popen
+            self.state,
+            Fetcher(self.audio_path),
+            FakeActivationGate(),
+            popen=popen,
         )
 
     def tearDown(self) -> None:
@@ -187,3 +209,9 @@ class AudioPlaybackTests(unittest.TestCase):
         payload["critical"] = True
         with self.assertRaisesRegex(ControlError, "only announcements"):
             self.playback.play(payload)
+
+    def test_playback_is_rejected_before_fetch_when_not_armed(self) -> None:
+        self.playback.activation_gate = FakeActivationGate(False)
+        with self.assertRaisesRegex(ControlError, "not_armed"):
+            self.playback.play(self.payload())
+        self.assertEqual(self.commands, [])

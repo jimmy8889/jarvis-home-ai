@@ -15,6 +15,7 @@ class ServerSettings:
     audio_asset_retention_seconds: int = 3600
     admin_token_env: str = "PILOT_CORE_ADMIN_TOKEN"
     bootstrap_token_env: str = "PILOT_CORE_BOOTSTRAP_TOKEN"
+    legacy_bootstrap_enabled: bool = True
 
 
 @dataclass(frozen=True)
@@ -187,6 +188,9 @@ def load_settings(path: str | Path) -> Settings:
         ),
         bootstrap_token_env=str(
             server_values.get("bootstrap_token_env", "PILOT_CORE_BOOTSTRAP_TOKEN")
+        ),
+        legacy_bootstrap_enabled=bool(
+            server_values.get("legacy_bootstrap_enabled", True)
         ),
     )
     if server.audio_asset_max_bytes < 1:

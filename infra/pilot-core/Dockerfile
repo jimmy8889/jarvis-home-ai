@@ -8,6 +8,7 @@ RUN useradd --system --uid 10001 --create-home pilot \
     && chown pilot:pilot /data
 WORKDIR /app
 COPY apps/pilot-core /app/apps/pilot-core
+COPY infra/pilot-core/volume_archive.py /opt/pilot-tools/volume_archive.py
 RUN python -m pip install --no-cache-dir /app/apps/pilot-core
 
 USER pilot

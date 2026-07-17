@@ -19,6 +19,7 @@ class StatusTests(unittest.TestCase):
         status = collect_status(Settings(room_id="office"))
         self.assertTrue(status["ready"])
         self.assertEqual(status["room_id"], "office")
+        self.assertFalse(status["audio_activation"]["allowed"])
         self.assertEqual(command_status.call_count, 3)
 
     @patch("pilot_room_agent.status._command_status")

@@ -1,6 +1,6 @@
 # Pilot Core
 
-Pilot Core 0.6 is the authenticated control-plane foundation for Pilot OS. It
+Pilot Core 0.7 is the authenticated control-plane foundation for Pilot OS. It
 persists the canonical room/player registry, registered room devices, source
 state, event history, and durable device command queue in SQLite.
 
@@ -8,7 +8,8 @@ state, event history, and durable device command queue in SQLite.
 
 - An administrator bearer token protects room, player, device, media,
   assistant, and event-history APIs.
-- A separate bootstrap token can register or rotate a room device.
+- An administrator issues short-lived bootstrap grants bound to one room and
+  device. Each grant can be redeemed once.
 - Registration returns a random device token exactly once; only its SHA-256
   digest is stored.
 - A device may publish events only for its assigned room.
@@ -16,8 +17,8 @@ state, event history, and durable device command queue in SQLite.
   loopback-only.
 - Device commands use the same per-device identity and can only be completed by
   the device to which they were assigned.
-- Secrets are environment variables or Ansible-provided files and never belong
-  in repository configuration.
+- Production secrets are mounted as individual files and never appear in
+  Compose environment values or repository configuration.
 
 ## API
 
@@ -35,6 +36,8 @@ Administrator endpoints:
 - `POST /v1/rooms/{room_id}/control`
 - `GET /v1/players` and `GET /v1/players/{player_id}`
 - `GET /v1/devices`
+- `POST /v1/bootstrap-grants`
+- `GET /v1/integrations/diagnostics`
 - `GET /v1/events`
 - `WS /v1/events/ws`
 - `GET /v1/media`
@@ -51,7 +54,8 @@ Administrator endpoints:
 
 Provisioning and device endpoints:
 
-- `POST /v1/devices/register` using the bootstrap token
+- `POST /v1/devices/bootstrap` using a one-time bootstrap grant
+- `POST /v1/devices/register` is legacy-only and disabled in production
 - `POST /v1/events` using device ID and device bearer token
 - `WS /v1/devices/ws?device_id=...` using device ID and device bearer token
 
@@ -80,21 +84,26 @@ switching test establishes safe source identifiers and restoration behavior.
 
 ## Central deployment
 
-Use `infra/docker-compose.yml`. Copy `infra/.env.example` to the ignored
-`infra/.env`, generate strong admin/bootstrap tokens, and add long-lived Music
-Assistant and Home Assistant API tokens. Persistent state is stored in the
-`pilot-core-data` volume.
+Use `deploy/scripts/pilot-secrets init`, add long-lived integration tokens over
+standard input, then run `deploy/scripts/pilot-core-deploy`. Persistent state is
+stored in the `pilot-core-data` volume. Full operating and recovery procedures
+are in [PRODUCTION_OPERATIONS.md](PRODUCTION_OPERATIONS.md).
 
-Register the office endpoint with:
+Issue and redeem a one-time Office grant:
 
 ```bash
-PILOT_CORE_BOOTSTRAP_TOKEN=... \
-  deploy/scripts/pilot-register-device \
+deploy/scripts/pilot-bootstrap-device \
   --core-url http://PILOT_CORE_HOST:8770 \
   --device-id pilot-office \
   --room-id office \
   --name "Office N150" \
-  --capability audio --capability voice
+  --capability audio --capability voice \
+  --output /secure/path/office-bootstrap.json
+
+deploy/scripts/pilot-register-device \
+  --core-url http://PILOT_CORE_HOST:8770 \
+  --grant-file /secure/path/office-bootstrap.json \
+  --device-token-file /secure/path/office-device-token
 ```
 
 Store the returned device token in Ansible Vault and enable the

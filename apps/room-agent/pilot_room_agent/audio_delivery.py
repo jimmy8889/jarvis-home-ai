@@ -14,6 +14,7 @@ from urllib.parse import quote, urljoin
 from urllib.request import Request, urlopen
 
 from .config import Settings
+from .activation import ActivationError, ActivationGate
 from .controls import ControlError, ControlState
 
 
@@ -150,10 +151,12 @@ class AudioPlayback:
         self,
         state: ControlState,
         fetcher: AudioFetcher,
+        activation_gate: ActivationGate,
         popen: Callable[..., Any] | None = None,
     ) -> None:
         self.state = state
         self.fetcher = fetcher
+        self.activation_gate = activation_gate
         self.popen = popen or subprocess.Popen
         self.lock = Lock()
         self.process: Any | None = None
@@ -163,6 +166,10 @@ class AudioPlayback:
         self.started_at: str | None = None
 
     def play(self, payload: dict[str, Any]) -> dict[str, Any]:
+        try:
+            activation = self.activation_gate.require()
+        except ActivationError as error:
+            raise ControlError(str(error)) from None
         kind = payload.get("kind")
         if kind not in {"assistant", "announcement"}:
             raise ControlError("audio kind must be assistant or announcement")
@@ -210,6 +217,7 @@ class AudioPlayback:
             "critical": critical,
             "volume": float(volume),
             "started": True,
+            "activation": activation["reason"],
         }
 
     def cancel(self) -> dict[str, Any]:
@@ -232,6 +240,7 @@ class AudioPlayback:
                 "audio_asset_id": self.asset_id or None,
                 "kind": self.kind or None,
                 "started_at": self.started_at,
+                "activation": self.activation_gate.status(),
             }
 
     def _stop_locked(self) -> None:

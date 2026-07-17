@@ -8,6 +8,7 @@ import subprocess
 import time
 from typing import Any
 
+from .activation import ActivationGate
 from .config import Settings
 
 
@@ -293,4 +294,5 @@ def collect_status(settings: Settings) -> dict[str, Any]:
         "voice_satellite": voice_satellite,
         "airplay": airplay,
         "music_assistant": music_assistant,
+        "audio_activation": ActivationGate(settings).status(),
     }

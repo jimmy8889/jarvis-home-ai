@@ -127,5 +127,9 @@ audible acceptance test can be performed in the physical room.
 The live Office endpoint is intentionally not upgraded or activated until the
 physical audible checks can be observed.
 
+Room Agent 0.5 additionally refuses playback before download unless the exact
+room/output configuration has a valid supervised acceptance marker. See
+[SUPERVISED_ACTIVATION.md](SUPERVISED_ACTIVATION.md).
+
 Pilot Core can now create these assets from text through the local provider
 adapter described in [LOCAL_TTS.md](LOCAL_TTS.md).

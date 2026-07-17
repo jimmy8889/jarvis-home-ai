@@ -43,6 +43,13 @@ passthrough.
 See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) and
 [docs/VALIDATION.md](docs/VALIDATION.md) before deployment.
 
+Production Pilot Core secrets, deployment, diagnostics, enrollment, backup,
+and restore are documented in
+[docs/PRODUCTION_OPERATIONS.md](docs/PRODUCTION_OPERATIONS.md).
+
+The physical acceptance receipt and fail-closed room playback gate are
+documented in [docs/SUPERVISED_ACTIVATION.md](docs/SUPERVISED_ACTIVATION.md).
+
 Voice-satellite deployment is documented in
 [docs/VOICE_SATELLITE.md](docs/VOICE_SATELLITE.md).
 
@@ -75,9 +82,10 @@ The central room/player registry is documented in
 Pilot Core can be started centrally with Docker Compose:
 
 ```bash
+deploy/scripts/pilot-secrets init
 cp infra/.env.example infra/.env
-# Generate and insert strong tokens, then add HA/MA long-lived tokens.
-docker compose -f infra/docker-compose.yml up -d --build
+# Add HA/MA tokens through pilot-secrets, then deploy silently.
+deploy/scripts/pilot-core-deploy
 ```
 
 The original office VM deployment and permanent native migration are recorded

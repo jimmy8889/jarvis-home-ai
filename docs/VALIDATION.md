@@ -45,6 +45,16 @@ The test records speech, plays it back, and then records while replaying the
 same bounded sample. The last stage proves simultaneous input/output at the
 device layer; it does not yet validate acoustic echo cancellation.
 
+For the supervised production acceptance, create the one-hour arming receipt:
+
+```bash
+sudo pilot-validate --audio-tests \
+  --acceptance-receipt /var/lib/pilot/audio-acceptance.json
+```
+
+Follow [SUPERVISED_ACTIVATION.md](SUPERVISED_ACTIVATION.md) to arm the exact
+validated output. Until then, Core-delivered audio fails closed before download.
+
 ## Stage 4: reboot persistence
 
 Reboot the endpoint, wait for SSH, and rerun the silent and audible checks. Also run:

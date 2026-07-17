@@ -5,12 +5,14 @@ audio_tests=false
 duration=5
 capture_device=""
 playback_device=""
+acceptance_receipt=""
 
 usage() {
   printf '%s\n' \
     "Usage: pilot-validate [--audio-tests] [--duration SECONDS]" \
     "                      [--capture-device ALSA_DEVICE]" \
     "                      [--playback-device ALSA_DEVICE]" \
+    "                      [--acceptance-receipt PATH]" \
     "" \
     "Without --audio-tests, checks are non-destructive and silent."
 }
@@ -21,11 +23,17 @@ while (($#)); do
     --duration) duration="$2"; shift ;;
     --capture-device) capture_device="$2"; shift ;;
     --playback-device) playback_device="$2"; shift ;;
+    --acceptance-receipt) acceptance_receipt="$2"; shift ;;
     -h|--help) usage; exit 0 ;;
     *) printf 'Unknown option: %s\n' "$1" >&2; usage >&2; exit 2 ;;
   esac
   shift
 done
+
+if [[ -n "$acceptance_receipt" && "$audio_tests" != true ]]; then
+  printf '%s\n' '--acceptance-receipt requires --audio-tests' >&2
+  exit 2
+fi
 
 failures=0
 check() {
@@ -51,6 +59,8 @@ capture_device="${capture_device:-$(python3 -c 'import tomllib; print(tomllib.lo
 playback_device="${playback_device:-$(python3 -c 'import tomllib; print(tomllib.load(open("/etc/pilot/room.toml", "rb")).get("playback_alsa_device", "default"))')}"
 core_commands_enabled="$(python3 -c 'import tomllib; print(tomllib.load(open("/etc/pilot/room.toml", "rb")).get("core_commands_enabled", False))')"
 audio_cache_path="$(python3 -c 'import tomllib; print(tomllib.load(open("/etc/pilot/room.toml", "rb")).get("audio_cache_path", "/var/lib/pilot/audio"))')"
+room_id="$(python3 -c 'import tomllib; print(tomllib.load(open("/etc/pilot/room.toml", "rb")).get("room_id", "unconfigured"))')"
+speaker_node="$(python3 -c 'import tomllib; print(tomllib.load(open("/etc/pilot/room.toml", "rb")).get("speaker_node", ""))')"
 
 has_capture_hardware() {
   arecord -l 2>/dev/null | grep -q '^card '
@@ -184,4 +194,54 @@ else
 fi
 
 printf '\nValidation complete: %s failure(s).\n' "$failures"
+if [[ "$failures" -eq 0 && -n "$acceptance_receipt" ]]; then
+  python3 - \
+    "$acceptance_receipt" \
+    "$room_id" \
+    "$capture_device" \
+    "$playback_device" \
+    "$speaker_node" \
+    "$duration" <<'PY'
+from datetime import UTC, datetime
+import json
+import os
+from pathlib import Path
+import socket
+import sys
+import tempfile
+
+path = Path(sys.argv[1])
+payload = {
+    "schema_version": 1,
+    "room_id": sys.argv[2],
+    "created_at": datetime.now(UTC).isoformat(),
+    "hostname": socket.gethostname(),
+    "capture_device": sys.argv[3],
+    "playback_device": sys.argv[4],
+    "speaker_node": sys.argv[5],
+    "duration_seconds": int(sys.argv[6]),
+    "checks": [
+        "silent_validation",
+        "microphone_capture",
+        "speaker_playback",
+        "simultaneous_input_output",
+    ],
+}
+path.parent.mkdir(parents=True, exist_ok=True)
+with tempfile.NamedTemporaryFile(
+    mode="w", encoding="utf-8", dir=path.parent, prefix=f".{path.name}.", delete=False
+) as handle:
+    temporary = Path(handle.name)
+    json.dump(payload, handle, sort_keys=True, separators=(",", ":"))
+    handle.write("\n")
+    handle.flush()
+    os.fsync(handle.fileno())
+try:
+    os.chmod(temporary, 0o600)
+    os.replace(temporary, path)
+finally:
+    temporary.unlink(missing_ok=True)
+print(f"Acceptance receipt written to {path}.")
+PY
+fi
 exit "$failures"

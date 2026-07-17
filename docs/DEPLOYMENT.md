@@ -75,3 +75,7 @@ journalctl -u pilot-room-agent -b --no-pager
 ```
 
 Only after silent checks pass should `sudo pilot-validate --audio-tests` be run.
+Use `--acceptance-receipt` during the supervised audible run, then explicitly
+arm the matching configuration with `pilot-activate`. See
+[SUPERVISED_ACTIVATION.md](SUPERVISED_ACTIVATION.md). Core-delivered speech
+remains blocked until this is complete.

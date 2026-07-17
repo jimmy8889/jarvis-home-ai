@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 import os
 from pathlib import Path
 import tempfile
@@ -123,6 +124,61 @@ class ApiTests(unittest.TestCase):
         )
         self.assertEqual(event.status_code, 200)
         self.assertEqual(event.json()["focus"]["foreground"], "music")
+
+    def test_one_time_bootstrap_grant_registers_device_once(self) -> None:
+        grant_response = self.client.post(
+            "/v1/bootstrap-grants",
+            headers={"Authorization": "Bearer admin-test"},
+            json={
+                "device_id": "grant-office",
+                "room_id": "office",
+                "name": "Grant Office",
+                "capabilities": ["audio", "voice"],
+                "expires_in_seconds": 600,
+            },
+        )
+        self.assertEqual(grant_response.status_code, 201)
+        self.assertEqual(grant_response.headers["cache-control"], "no-store")
+        grant = grant_response.json()
+        self.assertEqual(grant["device_id"], "grant-office")
+
+        registered = self.client.post(
+            "/v1/devices/bootstrap",
+            headers={
+                "Authorization": f"Bearer {grant['bootstrap_token']}"
+            },
+        )
+        self.assertEqual(registered.status_code, 201)
+        self.assertEqual(registered.headers["cache-control"], "no-store")
+        self.assertEqual(registered.json()["device_id"], "grant-office")
+        replay = self.client.post(
+            "/v1/devices/bootstrap",
+            headers={
+                "Authorization": f"Bearer {grant['bootstrap_token']}"
+            },
+        )
+        self.assertEqual(replay.status_code, 401)
+
+    def test_legacy_bootstrap_endpoint_can_be_disabled(self) -> None:
+        config = settings(self.audio_directory.name)
+        config = replace(
+            config,
+            server=replace(config.server, legacy_bootstrap_enabled=False),
+        )
+        store = Store(":memory:", config)
+        with TestClient(create_app(config, store)) as client:
+            response = client.post(
+                "/v1/devices/register",
+                headers={"Authorization": "Bearer bootstrap-test"},
+                json={
+                    "device_id": "legacy-office",
+                    "room_id": "office",
+                    "name": "Legacy Office",
+                    "capabilities": ["audio"],
+                },
+            )
+        store.close()
+        self.assertEqual(response.status_code, 403)
 
     def test_websocket_requires_admin_token(self) -> None:
         with self.assertRaises(Exception):

@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-import os
 from typing import Any
 from urllib.parse import unquote, urljoin, urlsplit
 
 import httpx
 
 from .config import IntegrationSettings
+from .secret_values import read_secret
 
 
 FORMAT_CONTENT_TYPES = {
@@ -126,7 +126,7 @@ class LocalTTS:
         voice: str,
     ) -> SynthesizedAudio:
         base_url = self.settings.home_assistant_url.rstrip("/")
-        token = os.environ.get(self.settings.home_assistant_token_env, "")
+        token = read_secret(self.settings.home_assistant_token_env)
         if not base_url or not token or not self.settings.tts_engine_id:
             raise TTSUnavailable(
                 "Home Assistant URL, token, and TTS engine are required"
@@ -200,7 +200,7 @@ class LocalTTS:
         if parsed.scheme not in {"http", "https"} or not parsed.netloc:
             raise TTSUnavailable("OpenAI-compatible TTS URL is invalid")
         headers = {"Accept": FORMAT_CONTENT_TYPES[self.settings.tts_format]}
-        token = os.environ.get(self.settings.tts_token_env, "")
+        token = read_secret(self.settings.tts_token_env)
         if token:
             headers["Authorization"] = f"Bearer {token}"
         payload = {

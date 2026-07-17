@@ -68,6 +68,19 @@ class Store:
                     created_at TEXT NOT NULL,
                     last_seen_at TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS bootstrap_grants (
+                    id TEXT PRIMARY KEY,
+                    token_hash TEXT NOT NULL UNIQUE,
+                    device_id TEXT NOT NULL,
+                    room_id TEXT NOT NULL REFERENCES rooms(id),
+                    name TEXT NOT NULL,
+                    capabilities_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    expires_at TEXT NOT NULL,
+                    used_at TEXT
+                );
+                CREATE INDEX IF NOT EXISTS bootstrap_grants_expiry
+                    ON bootstrap_grants(expires_at);
                 CREATE TABLE IF NOT EXISTS source_state (
                     room_id TEXT NOT NULL REFERENCES rooms(id),
                     source TEXT NOT NULL,
@@ -204,6 +217,102 @@ class Store:
                 ),
             )
         return token
+
+    def create_bootstrap_grant(
+        self,
+        device_id: str,
+        room_id: str,
+        name: str,
+        capabilities: list[str],
+        ttl_seconds: int,
+    ) -> dict[str, Any]:
+        grant_id = secrets.token_hex(16)
+        token = secrets.token_urlsafe(32)
+        now = datetime.now(UTC)
+        expires_at = now + timedelta(seconds=ttl_seconds)
+        with self._lock, self._connection:
+            if not self._connection.execute(
+                "SELECT 1 FROM rooms WHERE id = ?", (room_id,)
+            ).fetchone():
+                raise KeyError(room_id)
+            self._connection.execute(
+                """UPDATE bootstrap_grants SET used_at = ?
+                   WHERE device_id = ? AND used_at IS NULL""",
+                (now.isoformat(), device_id),
+            )
+            self._connection.execute(
+                """INSERT INTO bootstrap_grants
+                   (id, token_hash, device_id, room_id, name,
+                    capabilities_json, created_at, expires_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    grant_id,
+                    _token_hash(token),
+                    device_id,
+                    room_id,
+                    name,
+                    json.dumps(sorted(set(capabilities))),
+                    now.isoformat(),
+                    expires_at.isoformat(),
+                ),
+            )
+        return {
+            "id": grant_id,
+            "bootstrap_token": token,
+            "device_id": device_id,
+            "room_id": room_id,
+            "name": name,
+            "capabilities": sorted(set(capabilities)),
+            "created_at": now.isoformat(),
+            "expires_at": expires_at.isoformat(),
+        }
+
+    def redeem_bootstrap_grant(self, token: str) -> dict[str, str]:
+        now = datetime.now(UTC)
+        device_token = secrets.token_urlsafe(32)
+        with self._lock, self._connection:
+            grant = self._connection.execute(
+                "SELECT * FROM bootstrap_grants WHERE token_hash = ?",
+                (_token_hash(token),),
+            ).fetchone()
+            if (
+                grant is None
+                or grant["used_at"] is not None
+                or datetime.fromisoformat(grant["expires_at"]) <= now
+            ):
+                raise PermissionError("invalid or expired bootstrap grant")
+            cursor = self._connection.execute(
+                """UPDATE bootstrap_grants SET used_at = ?
+                   WHERE id = ? AND used_at IS NULL AND expires_at > ?""",
+                (now.isoformat(), grant["id"], now.isoformat()),
+            )
+            if cursor.rowcount != 1:
+                raise PermissionError("invalid or expired bootstrap grant")
+            self._connection.execute(
+                """INSERT INTO devices
+                   (id, room_id, name, token_hash, capabilities_json,
+                    created_at, last_seen_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(id) DO UPDATE SET
+                     room_id=excluded.room_id,
+                     name=excluded.name,
+                     token_hash=excluded.token_hash,
+                     capabilities_json=excluded.capabilities_json,
+                     last_seen_at=excluded.last_seen_at""",
+                (
+                    grant["device_id"],
+                    grant["room_id"],
+                    grant["name"],
+                    _token_hash(device_token),
+                    grant["capabilities_json"],
+                    now.isoformat(),
+                    now.isoformat(),
+                ),
+            )
+        return {
+            "device_id": str(grant["device_id"]),
+            "device_token": device_token,
+        }
 
     def authenticate_device(self, device_id: str, token: str) -> bool:
         with self._lock, self._connection:

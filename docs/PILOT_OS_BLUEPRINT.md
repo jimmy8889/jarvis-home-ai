@@ -1,6 +1,6 @@
 # Pilot OS Blueprint
 
-Version 1.0
+Version 1.1
 
 Last updated: 2026-07-17
 
@@ -174,6 +174,10 @@ Implemented foundation:
 - Bounded Home Assistant/Piper and OpenAI-compatible local TTS adapters
 - Optional spoken Home Assistant conversation responses routed to their
   originating room
+- File-backed container secrets and hardened read-only central deployment
+- Short-lived, device-bound, single-use bootstrap grants
+- Read-only Home Assistant and Music Assistant integration diagnostics
+- Integrity-manifested central backup and guarded restore tooling
 
 Planned responsibilities:
 
@@ -201,6 +205,8 @@ Current responsibilities:
 - Authenticated, integrity-verified assistant and announcement downloads
 - Single-slot PipeWire speech playback with completion cleanup and cancellation
 - Reproducible deployment, validation, and rollback
+- Fail-closed supervised playback activation tied to the accepted audio
+  configuration
 
 Planned responsibilities:
 
@@ -424,6 +430,10 @@ deployed integration, hardware boundary, or milestone status changes.
 - [x] Joined room state and room-level media/control APIs
 - [x] Secure room-bound audio delivery
 - [x] Local TTS provider abstraction and room speech API
+- [x] Hardened central deployment and file-backed secret handling
+- [x] One-time device enrollment grants
+- [x] Silent integration diagnostics and central backup/restore tooling
+- [x] Supervised room playback activation gate
 - [ ] Deploy Pilot Core on the selected central container host
 - [ ] Enable the registered office room-agent reporter
 
@@ -431,10 +441,10 @@ deployed integration, hardware boundary, or milestone status changes.
 
 1. Select `Pilot Office Music` in Music Assistant and prove audible playback.
 2. Validate TIDAL playback and a local lossless track.
-3. Deploy Pilot Core centrally, register the Office N150, and enable the
-   command channel.
-4. Deploy room-agent 0.4, then observe real AirPlay/Sendspin source identifiers
-   and enable local gain enforcement after the safe switching test.
+3. Deploy Pilot Core 0.7 centrally, issue a one-time Office enrollment grant,
+   and enable the command channel.
+4. Deploy room-agent 0.5, complete the supervised K3 acceptance receipt, and
+   explicitly arm room playback.
 5. Validate the native Intel Bluetooth controller; add a dedicated adapter only
    if its receiver behavior is inadequate.
 6. Train and deploy the **Hey Pilot** wake model.
@@ -479,3 +489,6 @@ deployed integration, hardware boundary, or milestone status changes.
   integrity manifests, and managed room-agent speech playback.
 - **1.0** — Added bounded Home Assistant/Piper and OpenAI-compatible local TTS,
   deterministic room speech routing, and optional spoken conversation results.
+- **1.1** — Added hardened file-backed central deployment, one-time enrollment,
+  silent integration diagnostics, integrity-manifested backup/restore, and a
+  fail-closed supervised room playback activation gate.

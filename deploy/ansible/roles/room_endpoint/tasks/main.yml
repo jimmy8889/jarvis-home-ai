@@ -365,6 +365,7 @@
     mode: "0755"
   loop:
     - pilot-hardware-inventory
+    - pilot-activate
     - pilot-rollback
     - pilot-validate
 

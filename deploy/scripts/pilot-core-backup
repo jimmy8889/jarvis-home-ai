@@ -1,0 +1,127 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import argparse
+from datetime import UTC, datetime
+from hashlib import sha256
+import os
+from pathlib import Path
+import re
+import subprocess
+
+
+def repository_root() -> Path:
+    return Path(__file__).resolve().parents[2]
+
+
+def run(command: list[str], capture: bool = False) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        command,
+        check=True,
+        text=True,
+        capture_output=capture,
+    )
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        description="Create a cold, integrity-manifested Pilot Core backup"
+    )
+    parser.add_argument(
+        "--compose-file",
+        type=Path,
+        default=repository_root() / "infra" / "docker-compose.yml",
+    )
+    parser.add_argument(
+        "--output-directory",
+        type=Path,
+        default=repository_root() / "infra" / "backups",
+    )
+    parser.add_argument("--label", default="scheduled")
+    parser.add_argument(
+        "--tool-image",
+        help="Container image containing volume_archive.py; defaults to the current image",
+    )
+    args = parser.parse_args()
+    if not re.fullmatch(r"[a-zA-Z0-9_.-]{1,64}", args.label):
+        raise SystemExit("backup label contains unsupported characters")
+    compose_file = args.compose_file.resolve()
+    output_directory = args.output_directory.resolve()
+    output_directory.mkdir(parents=True, exist_ok=True)
+    os.chmod(output_directory, 0o700)
+    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    archive = output_directory / f"pilot-core-{stamp}-{args.label}.tar.gz"
+    compose = ["docker", "compose", "-f", str(compose_file)]
+    run([*compose, "config", "--quiet"])
+    container_id = run(
+        [*compose, "ps", "-a", "-q", "pilot-core"], capture=True
+    ).stdout.strip()
+    if not container_id:
+        raise SystemExit("Pilot Core container does not exist; no data volume selected")
+    running = (
+        run(
+            ["docker", "inspect", "--format", "{{.State.Running}}", container_id],
+            capture=True,
+        ).stdout.strip()
+        == "true"
+    )
+    current_image = run(
+        ["docker", "inspect", "--format", "{{.Image}}", container_id],
+        capture=True,
+    ).stdout.strip()
+    volume_name = run(
+        [
+            "docker",
+            "inspect",
+            "--format",
+            "{{range .Mounts}}{{if eq .Destination \"/data\"}}{{.Name}}{{end}}{{end}}",
+            container_id,
+        ],
+        capture=True,
+    ).stdout.strip()
+    if not volume_name:
+        raise SystemExit("Pilot Core /data named volume could not be resolved")
+    tool_image = args.tool_image or current_image
+    if running:
+        run([*compose, "stop", "pilot-core"])
+    try:
+        run(
+            [
+                "docker",
+                "run",
+                "--rm",
+                "--user",
+                "0:0",
+                "-v",
+                f"{volume_name}:/data:ro",
+                "-v",
+                f"{output_directory}:/backup",
+                "--entrypoint",
+                "python",
+                tool_image,
+                "/opt/pilot-tools/volume_archive.py",
+                "backup",
+                "--source",
+                "/data",
+                "--archive",
+                f"/backup/{archive.name}",
+                "--owner-uid",
+                str(os.getuid()),
+                "--owner-gid",
+                str(os.getgid()),
+            ]
+        )
+    finally:
+        if running:
+            run([*compose, "start", "pilot-core"])
+    digest = sha256(archive.read_bytes()).hexdigest()
+    checksum = archive.with_suffix(archive.suffix + ".sha256")
+    checksum.write_text(f"{digest}  {archive.name}\n", encoding="utf-8")
+    os.chmod(checksum, 0o600)
+    print(f"Pilot Core backup created: {archive}")
+    print(f"SHA-256: {digest}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

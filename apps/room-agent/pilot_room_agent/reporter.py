@@ -81,6 +81,7 @@ class EventReporter:
             {
                 "ready": status["ready"],
                 "uptime_seconds": status["uptime_seconds"],
+                "audio_activation": status["audio_activation"],
             },
         )
         sources = self.source_states(status, self.control_state.focus_sources())

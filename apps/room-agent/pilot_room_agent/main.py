@@ -9,6 +9,7 @@ import os
 from .config import Settings, load_settings
 from .audio_focus import AudioFocusLoop
 from .audio_delivery import AudioFetcher, AudioPlayback
+from .activation import ActivationGate
 from .command_client import CommandClient
 from .controls import ControlError, ControlState, RoomController
 from .reporter import EventReporter
@@ -88,7 +89,11 @@ def main() -> None:
     Handler.control_state = control_state
     audio_playback: AudioPlayback | None = None
     if settings.core_commands_enabled:
-        audio_playback = AudioPlayback(control_state, AudioFetcher(settings))
+        audio_playback = AudioPlayback(
+            control_state,
+            AudioFetcher(settings),
+            ActivationGate(settings),
+        )
     Handler.audio_playback = audio_playback
     Handler.controller = RoomController(control_state, audio_player=audio_playback)
     Handler.command_client = None

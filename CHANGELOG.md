@@ -2,6 +2,18 @@
 
 ## 2026-07-17
 
+- Added Pilot Core 0.10 authenticated observability with derived endpoint
+  freshness, provider/player checks, actionable alerts, and Prometheus-format
+  metrics; the dashboard now renders the same attention model.
+- Added a strictly read-only Media Room acceptance harness that verifies the
+  accepted Denon/Shield identities and fail-closed control state without
+  sending media or Home Assistant mutations.
+- Added Pilot TV 0.1 as a buildable NVIDIA Shield application using Kotlin and
+  Compose for TV, with process-memory credentials, private-LAN address policy,
+  operations refresh, room/player state, and now-playing views.
+- Added the local meeting-intelligence foundation: bounded atomic recording
+  ingestion, integrity metadata, meeting lifecycle, timestamped transcripts,
+  and evidence-linked decisions and action items.
 - Added Pilot Core 0.7 production operations with file-backed Docker secrets,
   a read-only capability-free container, immutable image tags, bounded logs,
   and silent deployment diagnostics.

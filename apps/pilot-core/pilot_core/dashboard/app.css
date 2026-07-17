@@ -517,6 +517,12 @@ h2 {
   margin-bottom: 18px;
 }
 
+.section-heading-actions {
+  align-items: center;
+  display: flex;
+  gap: 0.75rem;
+}
+
 .timestamp,
 .counter {
   color: var(--muted);

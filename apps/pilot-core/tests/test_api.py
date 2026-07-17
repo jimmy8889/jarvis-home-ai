@@ -10,7 +10,13 @@ from unittest.mock import AsyncMock, patch
 from fastapi.testclient import TestClient
 
 from pilot_core.api import create_app
-from pilot_core.config import IntegrationSettings, Player, Room, ServerSettings, Settings
+from pilot_core.config import (
+    IntegrationSettings,
+    Player,
+    Room,
+    ServerSettings,
+    Settings,
+)
 from pilot_core.storage import Store
 from pilot_core.tts import SynthesizedAudio
 
@@ -18,7 +24,9 @@ from pilot_core.tts import SynthesizedAudio
 def settings(audio_asset_path: str = "/tmp/pilot-core-test-audio") -> Settings:
     return Settings(
         server=ServerSettings(
-            database_path=":memory:", audio_asset_path=audio_asset_path
+            database_path=":memory:",
+            audio_asset_path=audio_asset_path,
+            meeting_asset_path=str(Path(audio_asset_path) / "meetings"),
         ),
         integrations=IntegrationSettings(),
         rooms=(
@@ -93,9 +101,113 @@ class ApiTests(unittest.TestCase):
             "/v1/rooms", headers={"Authorization": "Bearer admin-test"}
         )
         self.assertEqual(response.status_code, 200)
-        self.assertIn(
-            "office", {room["id"] for room in response.json()["rooms"]}
+        self.assertIn("office", {room["id"] for room in response.json()["rooms"]})
+
+    def test_meeting_ingestion_transcript_and_analysis_are_local_and_reviewable(
+        self,
+    ) -> None:
+        headers = {"Authorization": "Bearer admin-test"}
+        created = self.client.post(
+            "/v1/meetings",
+            headers=headers,
+            json={
+                "title": "Office planning",
+                "language": "en-AU",
+                "started_at": "2026-07-17T09:00:00+10:00",
+            },
         )
+        self.assertEqual(created.status_code, 201)
+        meeting_id = created.json()["id"]
+        self.assertEqual(created.json()["status"], "created")
+
+        recording_bytes = b"RIFF\x10\x00\x00\x00WAVEfmt "
+        uploaded = self.client.put(
+            f"/v1/meetings/{meeting_id}/recording",
+            headers={
+                **headers,
+                "Content-Type": "audio/wav",
+                "X-Pilot-Filename": "../../planning.wav",
+            },
+            content=recording_bytes,
+        )
+        self.assertEqual(uploaded.status_code, 201)
+        self.assertEqual(uploaded.json()["filename"], "planning.wav")
+        self.assertNotIn("path", uploaded.json())
+        self.assertEqual(uploaded.json()["size_bytes"], len(recording_bytes))
+
+        transcript = self.client.put(
+            f"/v1/meetings/{meeting_id}/transcript",
+            headers=headers,
+            json={
+                "segments": [
+                    {
+                        "speaker_label": "Speaker 1",
+                        "start_ms": 0,
+                        "end_ms": 2400,
+                        "text": "Rachael will prepare pricing by Friday.",
+                        "confidence": 0.94,
+                    }
+                ]
+            },
+        )
+        self.assertEqual(transcript.status_code, 200)
+        self.assertEqual(transcript.json()["status"], "transcribed")
+        segment_id = transcript.json()["transcript"][0]["id"]
+
+        analysis = self.client.put(
+            f"/v1/meetings/{meeting_id}/analysis",
+            headers=headers,
+            json={
+                "summary": "The team assigned the pricing work.",
+                "decisions": [
+                    {
+                        "summary": "Pricing is due Friday.",
+                        "segment_ids": [segment_id],
+                    }
+                ],
+                "action_items": [
+                    {
+                        "task": "Prepare pricing",
+                        "owner": "Rachael",
+                        "due_at": "2026-07-18T17:00:00+10:00",
+                        "confidence": 0.91,
+                        "segment_ids": [segment_id],
+                    }
+                ],
+            },
+        )
+        self.assertEqual(analysis.status_code, 200)
+        payload = analysis.json()
+        self.assertEqual(payload["status"], "ready")
+        self.assertEqual(payload["action_items"][0]["owner"], "Rachael")
+        self.assertEqual(payload["decisions"][0]["segment_ids"], [segment_id])
+        self.assertNotIn("path", payload["recording"])
+
+        listing = self.client.get("/v1/meetings", headers=headers)
+        self.assertEqual(listing.status_code, 200)
+        self.assertTrue(listing.json()["meetings"][0]["has_recording"])
+        self.assertEqual(listing.json()["meetings"][0]["transcript_segment_count"], 1)
+        self.assertEqual(listing.json()["meetings"][0]["action_item_count"], 1)
+
+        downloaded = self.client.get(
+            f"/v1/meetings/{meeting_id}/recording", headers=headers
+        )
+        self.assertEqual(downloaded.status_code, 200)
+        self.assertEqual(downloaded.content, recording_bytes)
+
+    def test_meeting_recording_rejects_unsupported_content(self) -> None:
+        headers = {"Authorization": "Bearer admin-test"}
+        meeting_id = self.client.post(
+            "/v1/meetings",
+            headers=headers,
+            json={"title": "Unsafe upload"},
+        ).json()["id"]
+        response = self.client.put(
+            f"/v1/meetings/{meeting_id}/recording",
+            headers={**headers, "Content-Type": "application/octet-stream"},
+            content=b"not audio",
+        )
+        self.assertEqual(response.status_code, 422)
 
     def test_dashboard_shell_and_assets_have_security_headers(self) -> None:
         root = self.client.get("/", follow_redirects=False)
@@ -129,7 +241,7 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.headers["cache-control"], "no-store")
         payload = response.json()
-        self.assertEqual(payload["deployment"]["version"], "0.9.0")
+        self.assertEqual(payload["deployment"]["version"], "0.10.0")
         self.assertEqual(payload["summary"]["room_count"], 2)
         self.assertEqual(payload["summary"]["device_count"], 0)
         self.assertEqual(payload["summary"]["armed_room_count"], 0)
@@ -143,9 +255,27 @@ class ApiTests(unittest.TestCase):
         self.assertIn("music_assistant", payload["integrations"])
         self.assertIn("tts", payload["integrations"])
         self.assertIn("players", payload["media"])
-        self.assertEqual(
-            payload["integrations"]["tts"]["status"], "not_configured"
+        self.assertEqual(payload["integrations"]["tts"]["status"], "not_configured")
+        self.assertIn(payload["observability"]["status"], {"guarded", "degraded"})
+
+        self.assertEqual(self.client.get("/v1/observability").status_code, 401)
+        observability = self.client.get(
+            "/v1/observability",
+            headers={"Authorization": "Bearer admin-test"},
         )
+        self.assertEqual(observability.status_code, 200)
+        self.assertEqual(observability.headers["cache-control"], "no-store")
+        self.assertIn("alerts", observability.json())
+
+        self.assertEqual(self.client.get("/v1/metrics").status_code, 401)
+        metrics = self.client.get(
+            "/v1/metrics",
+            headers={"Authorization": "Bearer admin-test"},
+        )
+        self.assertEqual(metrics.status_code, 200)
+        self.assertEqual(metrics.headers["cache-control"], "no-store")
+        self.assertIn("pilot_core_up 1", metrics.text)
+        self.assertNotIn("admin-test", metrics.text)
 
     def test_operations_aggregates_health_commands_and_events(self) -> None:
         token = self.register_device()
@@ -248,18 +378,14 @@ class ApiTests(unittest.TestCase):
 
         registered = self.client.post(
             "/v1/devices/bootstrap",
-            headers={
-                "Authorization": f"Bearer {grant['bootstrap_token']}"
-            },
+            headers={"Authorization": f"Bearer {grant['bootstrap_token']}"},
         )
         self.assertEqual(registered.status_code, 201)
         self.assertEqual(registered.headers["cache-control"], "no-store")
         self.assertEqual(registered.json()["device_id"], "grant-office")
         replay = self.client.post(
             "/v1/devices/bootstrap",
-            headers={
-                "Authorization": f"Bearer {grant['bootstrap_token']}"
-            },
+            headers={"Authorization": f"Bearer {grant['bootstrap_token']}"},
         )
         self.assertEqual(replay.status_code, 401)
 
@@ -544,9 +670,7 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(result["command"]["payload"]["action"], "play_audio")
         self.assertEqual(result["command"]["payload"]["volume"], 0.75)
         self.assertEqual(result["synthesis"]["provider"], "home_assistant")
-        synthesize.assert_awaited_once_with(
-            "Hello office", "en-AU", "default"
-        )
+        synthesize.assert_awaited_once_with("Hello office", "en-AU", "default")
 
     def test_room_speak_requires_configured_tts(self) -> None:
         self.register_device()
@@ -576,9 +700,7 @@ class ApiTests(unittest.TestCase):
         self.register_device()
         conversation.return_value = {
             "response": {
-                "speech": {
-                    "plain": {"speech": "The office light is now on."}
-                }
+                "speech": {"plain": {"speech": "The office light is now on."}}
             },
             "conversation_id": "conversation-1",
         }
@@ -605,9 +727,7 @@ class ApiTests(unittest.TestCase):
             response.json()["speech_delivery"]["target"]["id"],
             "office-n150",
         )
-        synthesize.assert_awaited_once_with(
-            "The office light is now on.", "en", None
-        )
+        synthesize.assert_awaited_once_with("The office light is now on.", "en", None)
 
     def test_room_state_combines_registered_device_and_default_targets(self) -> None:
         token = self.register_device()
@@ -630,9 +750,7 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         state = response.json()
         self.assertEqual(state["focus"]["foreground"], "music")
-        self.assertEqual(
-            state["targets"]["default_music_player"]["id"], "office-music"
-        )
+        self.assertEqual(state["targets"]["default_music_player"]["id"], "office-music")
         self.assertEqual(state["devices"][0]["id"], "office-n150")
         whole_home = self.client.get(
             "/v1/state", headers={"Authorization": "Bearer admin-test"}
@@ -680,9 +798,7 @@ class ApiTests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["player"]["id"], "office-music")
-        self.assertEqual(
-            response.json()["target_player"]["id"], "media-music"
-        )
+        self.assertEqual(response.json()["target_player"]["id"], "media-music")
         music_assistant.assert_awaited_once_with(
             "player_queues/transfer",
             {
@@ -706,9 +822,7 @@ class ApiTests(unittest.TestCase):
         )
 
     @patch("pilot_core.api.Integrations.music_assistant", new_callable=AsyncMock)
-    def test_control_disabled_player_is_read_only(
-        self, music_assistant
-    ) -> None:
+    def test_control_disabled_player_is_read_only(self, music_assistant) -> None:
         config = settings(self.audio_directory.name)
         config = replace(
             config,
@@ -787,9 +901,7 @@ class ApiTests(unittest.TestCase):
         )
         self.assertEqual(room_response.status_code, 200)
         self.assertEqual(room_response.headers["cache-control"], "no-store")
-        self.assertEqual(
-            room_response.json()["players"]["media-music"]["status"], "ok"
-        )
+        self.assertEqual(room_response.json()["players"]["media-music"]["status"], "ok")
 
         player_response = self.client.get(
             "/v1/players/media-music/state",
@@ -797,9 +909,7 @@ class ApiTests(unittest.TestCase):
         )
         self.assertEqual(player_response.status_code, 200)
         self.assertEqual(player_response.headers["cache-control"], "no-store")
-        self.assertEqual(
-            player_response.json()["effective"]["volume_percent"], 35
-        )
+        self.assertEqual(player_response.json()["effective"]["volume_percent"], 35)
         self.assertEqual(self.client.get("/v1/media/state").status_code, 401)
 
 

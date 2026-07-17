@@ -65,3 +65,22 @@ Media Room control stays locked until an in-person acceptance session:
    behaviour is understood.
 
 An N150-to-HDMI endpoint remains deferred. Native HEOS will be evaluated first.
+
+## Acceptance harness
+
+`deploy/scripts/pilot-media-room-acceptance` performs the discovery phase
+without sending a receiver, Shield, playback, power, source, group, or volume
+command. It checks Pilot Core readiness, central observability, Music Assistant
+and Home Assistant state, the exact accepted Denon/Shield provider identities,
+and the current control gate.
+
+On the Pilot Core host:
+
+```bash
+deploy/scripts/pilot-media-room-acceptance \
+  --token-file infra/secrets/pilot_core_admin_token
+```
+
+The default `discovery` phase requires both Media Room players to remain
+read-only. The later `--phase control-ready` check is useful only after
+in-person receiver tests have deliberately enabled the accepted player paths.

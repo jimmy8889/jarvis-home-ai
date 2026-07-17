@@ -59,12 +59,8 @@ class IntegrationDiagnosticTests(unittest.IsolatedAsyncioTestCase):
         )
         integrations = Integrations(settings, httpx.MockTransport(handler))
         result = await integrations.diagnostics()
-        self.assertEqual(
-            result["home_assistant"]["status"], "credential_missing"
-        )
-        self.assertEqual(
-            result["music_assistant"]["status"], "credential_missing"
-        )
+        self.assertEqual(result["home_assistant"]["status"], "credential_missing")
+        self.assertEqual(result["music_assistant"]["status"], "credential_missing")
         self.assertFalse(called)
 
     async def test_home_assistant_state_rejects_invalid_entity_path(self) -> None:

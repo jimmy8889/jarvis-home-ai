@@ -13,6 +13,8 @@ class ServerSettings:
     audio_asset_path: str = "/var/lib/pilot-core/audio"
     audio_asset_max_bytes: int = 20_000_000
     audio_asset_retention_seconds: int = 3600
+    meeting_asset_path: str = "/var/lib/pilot-core/meetings"
+    meeting_asset_max_bytes: int = 2_000_000_000
     admin_token_env: str = "PILOT_CORE_ADMIN_TOKEN"
     bootstrap_token_env: str = "PILOT_CORE_BOOTSTRAP_TOKEN"
     legacy_bootstrap_enabled: bool = True
@@ -155,7 +157,9 @@ def _validate_references(rooms: tuple[Room, ...], players: tuple[Player, ...]) -
         ):
             player = players_by_id.get(player_id)
             if player is None:
-                raise ValueError(f"room {room.id} {field} references unknown player {player_id}")
+                raise ValueError(
+                    f"room {room.id} {field} references unknown player {player_id}"
+                )
             if player.room_id != room.id:
                 raise ValueError(
                     f"room {room.id} {field} references player {player_id} "
@@ -186,6 +190,12 @@ def load_settings(path: str | Path) -> Settings:
         audio_asset_retention_seconds=int(
             server_values.get("audio_asset_retention_seconds", 3600)
         ),
+        meeting_asset_path=str(
+            server_values.get("meeting_asset_path", "/var/lib/pilot-core/meetings")
+        ),
+        meeting_asset_max_bytes=int(
+            server_values.get("meeting_asset_max_bytes", 2_000_000_000)
+        ),
         admin_token_env=str(
             server_values.get("admin_token_env", "PILOT_CORE_ADMIN_TOKEN")
         ),
@@ -198,6 +208,8 @@ def load_settings(path: str | Path) -> Settings:
     )
     if server.audio_asset_max_bytes < 1:
         raise ValueError("server.audio_asset_max_bytes must be positive")
+    if server.meeting_asset_max_bytes < 1:
+        raise ValueError("server.meeting_asset_max_bytes must be positive")
     if not 60 <= server.audio_asset_retention_seconds <= 86_400:
         raise ValueError(
             "server.audio_asset_retention_seconds must be between 60 and 86400"
@@ -211,42 +223,30 @@ def load_settings(path: str | Path) -> Settings:
             integration_values.get("music_assistant_url", "")
         ).rstrip("/"),
         music_assistant_token_env=str(
-            integration_values.get(
-                "music_assistant_token_env", "MUSIC_ASSISTANT_TOKEN"
-            )
+            integration_values.get("music_assistant_token_env", "MUSIC_ASSISTANT_TOKEN")
         ),
-        home_assistant_url=str(
-            integration_values.get("home_assistant_url", "")
-        ).rstrip("/"),
+        home_assistant_url=str(integration_values.get("home_assistant_url", "")).rstrip(
+            "/"
+        ),
         home_assistant_token_env=str(
-            integration_values.get(
-                "home_assistant_token_env", "HOME_ASSISTANT_TOKEN"
-            )
+            integration_values.get("home_assistant_token_env", "HOME_ASSISTANT_TOKEN")
         ),
         tts_provider=str(integration_values.get("tts_provider", "")).strip(),
         tts_url=str(integration_values.get("tts_url", "")).rstrip("/"),
-        tts_token_env=str(
-            integration_values.get("tts_token_env", "PILOT_TTS_TOKEN")
-        ),
+        tts_token_env=str(integration_values.get("tts_token_env", "PILOT_TTS_TOKEN")),
         tts_engine_id=str(integration_values.get("tts_engine_id", "")).strip(),
         tts_model=str(integration_values.get("tts_model", "tts-1")).strip(),
         tts_voice=str(integration_values.get("tts_voice", "default")).strip(),
         tts_format=str(integration_values.get("tts_format", "wav")).strip(),
         tts_language=str(integration_values.get("tts_language", "en")).strip(),
-        tts_timeout_seconds=int(
-            integration_values.get("tts_timeout_seconds", 60)
-        ),
+        tts_timeout_seconds=int(integration_values.get("tts_timeout_seconds", 60)),
     )
     if integrations.tts_provider not in {"", "home_assistant", "openai"}:
-        raise ValueError(
-            "integrations.tts_provider must be home_assistant or openai"
-        )
+        raise ValueError("integrations.tts_provider must be home_assistant or openai")
     if integrations.tts_format not in {"wav", "flac", "mp3", "ogg", "aac"}:
         raise ValueError("integrations.tts_format is unsupported")
     if not 1 <= integrations.tts_timeout_seconds <= 300:
-        raise ValueError(
-            "integrations.tts_timeout_seconds must be between 1 and 300"
-        )
+        raise ValueError("integrations.tts_timeout_seconds must be between 1 and 300")
     if integrations.tts_provider == "home_assistant":
         if not integrations.home_assistant_url:
             raise ValueError(

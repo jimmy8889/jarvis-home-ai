@@ -3,6 +3,11 @@ __pycache__/
 *.py[cod]
 .pytest_cache/
 *.egg-info/
+.gradle/
+.kotlin/
+**/build/
+.idea/
+local.properties
 deploy/ansible/inventory/hosts.yml
 validation-*.log
 *.wav

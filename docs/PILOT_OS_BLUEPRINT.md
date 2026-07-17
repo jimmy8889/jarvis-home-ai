@@ -1,6 +1,6 @@
 # Pilot OS Blueprint
 
-Version 1.5
+Version 1.6
 
 Last updated: 2026-07-17
 
@@ -90,7 +90,7 @@ Music streams: TCP 8097
 Sendspin server: TCP 8927
 Pilot Core: 10.0.1.64:8770
 Pilot Core host: debian-docker / Debian 12
-Pilot Core image: jarvis-home-ai/pilot-core:media-state-20260717
+Pilot Core image: jarvis-home-ai/pilot-core:core-0.10.0-20260717.1
 ```
 
 The Home Assistant add-on is the preferred initial Music Assistant deployment.
@@ -98,7 +98,7 @@ It provides simple lifecycle management and close HA integration. A standalone
 container remains an option if independent uptime or resource isolation later
 becomes important.
 
-Pilot Core 0.9 is deployed as a hardened, non-root Docker service with a
+Pilot Core 0.10 is deployed as a hardened, non-root Docker service with a
 read-only root filesystem, all Linux capabilities dropped, file-backed secrets,
 and persistent state in the `infra_pilot-core-data` volume. The service passed
 LAN health/readiness, authenticated API, invalid-token, disabled legacy
@@ -117,6 +117,12 @@ registered through Music Assistant player
 `upb0713734fca0742d2bf2125b59cbf3b1` at `10.0.1.101`. Pilot Core normalizes
 their live provider state while `control_enabled = false` rejects every media
 mutation before it reaches Music Assistant, HEOS, or Home Assistant.
+
+The 0.10 deployment adds derived observability and Prometheus-format metrics,
+the read-only Media Room acceptance harness, and the first durable
+meeting-ingestion/review schema. Its post-deployment diagnostics and Media Room
+discovery checks passed without an audible or provider mutation, and every
+existing room/player control gate remains in place.
 
 ### Office room endpoint
 
@@ -216,6 +222,12 @@ Planned responsibilities:
 - Memory and meeting search
 - REST and realtime APIs
 
+New 0.10 foundations:
+
+- authenticated health, freshness, alert, and metrics surfaces
+- bounded local meeting recording ingestion
+- timestamped transcripts and evidence-linked decisions/actions
+
 ### Room agent
 
 Current responsibilities:
@@ -250,6 +262,12 @@ Planned responsibilities:
 - macOS: dictation, push-to-talk, AI compose, and menu bar controls
 - iOS: meeting recording, remote assistant, and notifications
 - Shield TV: dashboard, media browser, assistant overlay, and home controls
+
+Pilot TV 0.1 now exists as a buildable Kotlin/Compose for TV application. It
+reads the authenticated operations snapshot, renders rooms, integrations,
+safety, endpoints, players, and now-playing state, and stores its administrator
+credential only in process memory. Media and Home Assistant mutations remain
+absent until in-person acceptance.
 
 ## 7. Voice and AI pipeline
 

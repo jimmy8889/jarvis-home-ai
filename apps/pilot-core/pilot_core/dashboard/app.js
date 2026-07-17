@@ -197,8 +197,14 @@ const renderSummary = (payload) => {
   const allIntegrationsHealthy =
     summary.configured_integration_count > 0 &&
     summary.healthy_integration_count === summary.configured_integration_count;
-  let posture = "Attention";
-  if (allDevicesConnected && allIntegrationsHealthy) {
+  const observedStatus = payload.observability?.status;
+  let posture = {
+    healthy: "Nominal",
+    guarded: "Guarded",
+    degraded: "Attention",
+    critical: "Critical",
+  }[observedStatus] || "Attention";
+  if (!observedStatus && allDevicesConnected && allIntegrationsHealthy) {
     posture = payload.safety.audible_actions_gated ? "Guarded" : "Nominal";
   }
   text("#system-posture", posture);
@@ -212,6 +218,49 @@ const renderSummary = (payload) => {
       `refreshed ${formatRelative(payload.generated_at)}`,
   );
   text("#last-updated", `Updated ${formatTime(payload.generated_at)}`);
+};
+
+const renderObservability = (payload) => {
+  const observability = payload.observability || {
+    status: "unknown",
+    alerts: [],
+  };
+  const statusElement = document.querySelector("#observability-status");
+  const kind = {
+    healthy: "good",
+    guarded: "warning",
+    degraded: "warning",
+    critical: "bad",
+  }[observability.status] || "neutral";
+  statusElement.className = `status-pill status-${kind}`;
+  clear(statusElement);
+  statusElement.append(node("span", "status-dot"));
+  statusElement.append(
+    document.createTextNode(titleCase(observability.status)),
+  );
+
+  const list = document.querySelector("#alert-list");
+  clear(list);
+  text("#alert-total", observability.alerts.length);
+  if (!observability.alerts.length) {
+    list.append(node("p", "timeline-empty", "No active alerts."));
+    return;
+  }
+  observability.alerts.forEach((alert) => {
+    const alertKind = {
+      critical: "bad",
+      warning: "warning",
+      info: "",
+    }[alert.severity] || "";
+    list.append(
+      timelineRow(
+        alertKind,
+        alert.title,
+        alert.detail,
+        observability.generated_at,
+      ),
+    );
+  });
 };
 
 const renderRooms = (payload) => {
@@ -476,6 +525,7 @@ const render = (payload) => {
   renderRooms(payload);
   renderIntegrations(payload);
   renderSafety(payload);
+  renderObservability(payload);
   renderCommands(payload);
   renderEvents(payload);
   renderDeployment(payload);

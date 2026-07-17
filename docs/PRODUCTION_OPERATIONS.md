@@ -1,6 +1,6 @@
 # Pilot Core production operations
 
-Pilot Core 0.9 provides a repeatable central deployment without enabling any
+Pilot Core 0.10 provides a repeatable central deployment without enabling any
 audible room action. The production Compose definition uses a read-only root
 filesystem, drops all Linux capabilities, prevents privilege escalation, limits
 process count and log growth, and stores persistent data in one named volume.
@@ -71,6 +71,19 @@ token. Do not copy that value into Git, notes, shell history, or URLs. The
 dashboard keeps it in tab-scoped `sessionStorage`; choosing **Lock** or closing
 the tab clears it.
 
+On the deployed Docker server the full path is:
+
+```text
+/opt/jarvis-home-ai/infra/secrets/pilot_core_admin_token
+```
+
+Read it from a trusted terminal without placing the value in a command argument:
+
+```bash
+ssh root@10.0.1.64 \
+  'sudo cat /opt/jarvis-home-ai/infra/secrets/pilot_core_admin_token'
+```
+
 The dashboard is an operator view, not a public status page. The HTML, CSS, and
 JavaScript shell are public on the trusted bind address, but every operational
 payload and command requires the administrator bearer token. The dashboard
@@ -82,6 +95,9 @@ Media Room player state is read through `/v1/media/state`,
 registry entries are intentionally configured with `control_enabled = false`.
 Do not enable them remotely: complete the acceptance sequence in
 [MEDIA_ROOM.md](MEDIA_ROOM.md) while the receiver can be observed.
+
+Authenticated health alerts and Prometheus-format gauges are documented in
+[OBSERVABILITY.md](OBSERVABILITY.md).
 
 ## 4. Run diagnostics
 

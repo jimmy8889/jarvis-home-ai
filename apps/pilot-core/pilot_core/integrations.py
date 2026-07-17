@@ -32,9 +32,7 @@ class Integrations:
         self.settings = settings
         self.transport = transport
 
-    async def music_assistant(
-        self, command: str, args: dict[str, Any]
-    ) -> Any:
+    async def music_assistant(self, command: str, args: dict[str, Any]) -> Any:
         if not self.settings.music_assistant_url:
             raise IntegrationUnavailable("Music Assistant URL is not configured")
         token = read_secret(self.settings.music_assistant_token_env)
@@ -53,7 +51,9 @@ class Integrations:
                 response.raise_for_status()
                 return response.json()
         except (httpx.HTTPError, ValueError) as error:
-            raise IntegrationRequestFailed(f"Music Assistant request failed: {error}") from error
+            raise IntegrationRequestFailed(
+                f"Music Assistant request failed: {error}"
+            ) from error
 
     async def home_assistant_conversation(
         self,
@@ -81,7 +81,9 @@ class Integrations:
                 response.raise_for_status()
                 return response.json()
         except (httpx.HTTPError, ValueError) as error:
-            raise IntegrationRequestFailed(f"Home Assistant request failed: {error}") from error
+            raise IntegrationRequestFailed(
+                f"Home Assistant request failed: {error}"
+            ) from error
 
     async def home_assistant_state(self, entity_id: str) -> dict[str, Any]:
         if not _ENTITY_ID.fullmatch(entity_id):

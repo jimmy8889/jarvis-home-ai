@@ -68,9 +68,7 @@ class HomeAssistantTTSTests(unittest.IsolatedAsyncioTestCase):
         def handler(request: httpx.Request) -> httpx.Response:
             return httpx.Response(
                 200,
-                json={
-                    "path": "http://attacker.invalid/api/tts_proxy/speech.wav"
-                },
+                json={"path": "http://attacker.invalid/api/tts_proxy/speech.wav"},
             )
 
         settings = IntegrationSettings(
@@ -130,9 +128,7 @@ class OpenAITTSTests(unittest.IsolatedAsyncioTestCase):
         tts = LocalTTS(settings, 1_000_000, httpx.MockTransport(handler))
         result = await tts.synthesize("Local speech", voice="af_sky")
 
-        self.assertEqual(
-            observed["url"], "http://tts.local:8000/v1/audio/speech"
-        )
+        self.assertEqual(observed["url"], "http://tts.local:8000/v1/audio/speech")
         self.assertEqual(
             observed["payload"],
             {

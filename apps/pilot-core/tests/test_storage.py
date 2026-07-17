@@ -5,7 +5,13 @@ import sqlite3
 import tempfile
 import unittest
 
-from pilot_core.config import IntegrationSettings, Player, Room, ServerSettings, Settings
+from pilot_core.config import (
+    IntegrationSettings,
+    Player,
+    Room,
+    ServerSettings,
+    Settings,
+)
 from pilot_core.storage import Store
 
 
@@ -59,14 +65,10 @@ class StorageTests(unittest.TestCase):
         grant = self.store.create_bootstrap_grant(
             "new-office", "office", "New Office", ["voice", "audio"], 600
         )
-        registration = self.store.redeem_bootstrap_grant(
-            grant["bootstrap_token"]
-        )
+        registration = self.store.redeem_bootstrap_grant(grant["bootstrap_token"])
         self.assertEqual(registration["device_id"], "new-office")
         self.assertTrue(
-            self.store.authenticate_device(
-                "new-office", registration["device_token"]
-            )
+            self.store.authenticate_device("new-office", registration["device_token"])
         )
         with self.assertRaises(PermissionError):
             self.store.redeem_bootstrap_grant(grant["bootstrap_token"])
@@ -81,9 +83,7 @@ class StorageTests(unittest.TestCase):
         with self.assertRaises(PermissionError):
             self.store.redeem_bootstrap_grant(first["bootstrap_token"])
         self.assertEqual(
-            self.store.redeem_bootstrap_grant(second["bootstrap_token"])[
-                "device_id"
-            ],
+            self.store.redeem_bootstrap_grant(second["bootstrap_token"])["device_id"],
             "new-office",
         )
 
@@ -118,9 +118,7 @@ class StorageTests(unittest.TestCase):
             self.store.pending_commands("office-n150")[0]["id"], command["id"]
         )
 
-        self.assertTrue(
-            self.store.mark_command_delivered(command["id"], "office-n150")
-        )
+        self.assertTrue(self.store.mark_command_delivered(command["id"], "office-n150"))
         completed = self.store.complete_command(
             command["id"],
             "office-n150",
@@ -167,9 +165,7 @@ class StorageTests(unittest.TestCase):
             migrated = Store(str(path), settings())
             migrated.close()
             connection = sqlite3.connect(path)
-            columns = {
-                row[1] for row in connection.execute("PRAGMA table_info(rooms)")
-            }
+            columns = {row[1] for row in connection.execute("PRAGMA table_info(rooms)")}
             connection.close()
         self.assertIn("default_device_id", columns)
 
@@ -204,14 +200,11 @@ class StorageTests(unittest.TestCase):
             migrated.close()
             connection = sqlite3.connect(path)
             columns = {
-                row[1]
-                for row in connection.execute("PRAGMA table_info(players)")
+                row[1] for row in connection.execute("PRAGMA table_info(players)")
             }
             policies = {
                 row[0]: row[1]
-                for row in connection.execute(
-                    "SELECT id, control_enabled FROM players"
-                )
+                for row in connection.execute("SELECT id, control_enabled FROM players")
             }
             connection.close()
         self.assertIn("control_enabled", columns)

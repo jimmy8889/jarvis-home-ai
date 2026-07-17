@@ -127,6 +127,75 @@ class Store:
                 );
                 CREATE INDEX IF NOT EXISTS audio_assets_room_created
                     ON audio_assets(room_id, created_at DESC);
+                CREATE TABLE IF NOT EXISTS meetings (
+                    id TEXT PRIMARY KEY,
+                    title TEXT NOT NULL,
+                    language TEXT NOT NULL,
+                    source_device_id TEXT,
+                    started_at TEXT NOT NULL,
+                    ended_at TEXT,
+                    status TEXT NOT NULL,
+                    summary TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS meetings_started
+                    ON meetings(started_at DESC);
+                CREATE TABLE IF NOT EXISTS meeting_recordings (
+                    meeting_id TEXT PRIMARY KEY REFERENCES meetings(id)
+                        ON DELETE CASCADE,
+                    filename TEXT NOT NULL,
+                    content_type TEXT NOT NULL,
+                    sha256 TEXT NOT NULL,
+                    size_bytes INTEGER NOT NULL,
+                    path TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS meeting_participants (
+                    id TEXT PRIMARY KEY,
+                    meeting_id TEXT NOT NULL REFERENCES meetings(id)
+                        ON DELETE CASCADE,
+                    display_name TEXT,
+                    speaker_label TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    UNIQUE(meeting_id, speaker_label)
+                );
+                CREATE TABLE IF NOT EXISTS transcript_segments (
+                    id TEXT PRIMARY KEY,
+                    meeting_id TEXT NOT NULL REFERENCES meetings(id)
+                        ON DELETE CASCADE,
+                    sequence INTEGER NOT NULL,
+                    speaker_label TEXT,
+                    start_ms INTEGER NOT NULL,
+                    end_ms INTEGER NOT NULL,
+                    text TEXT NOT NULL,
+                    confidence REAL,
+                    created_at TEXT NOT NULL,
+                    UNIQUE(meeting_id, sequence)
+                );
+                CREATE INDEX IF NOT EXISTS transcript_meeting_sequence
+                    ON transcript_segments(meeting_id, sequence);
+                CREATE TABLE IF NOT EXISTS meeting_decisions (
+                    id TEXT PRIMARY KEY,
+                    meeting_id TEXT NOT NULL REFERENCES meetings(id)
+                        ON DELETE CASCADE,
+                    summary TEXT NOT NULL,
+                    segment_ids_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS meeting_action_items (
+                    id TEXT PRIMARY KEY,
+                    meeting_id TEXT NOT NULL REFERENCES meetings(id)
+                        ON DELETE CASCADE,
+                    task TEXT NOT NULL,
+                    owner TEXT,
+                    due_at TEXT,
+                    status TEXT NOT NULL,
+                    confidence REAL,
+                    segment_ids_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
                 """
             )
             room_columns = {
@@ -332,7 +401,9 @@ class Store:
             row = self._connection.execute(
                 "SELECT token_hash FROM devices WHERE id = ?", (device_id,)
             ).fetchone()
-            valid = bool(row and secrets.compare_digest(row["token_hash"], _token_hash(token)))
+            valid = bool(
+                row and secrets.compare_digest(row["token_hash"], _token_hash(token))
+            )
             if valid:
                 self._connection.execute(
                     "UPDATE devices SET last_seen_at = ? WHERE id = ?",
@@ -552,6 +623,328 @@ class Store:
             }
             for row in rows
         ]
+
+    def create_meeting(
+        self,
+        title: str,
+        language: str,
+        started_at: str,
+        source_device_id: str | None,
+    ) -> dict[str, Any]:
+        meeting_id = secrets.token_hex(16)
+        now = _now()
+        with self._lock, self._connection:
+            self._connection.execute(
+                """INSERT INTO meetings
+                   (id, title, language, source_device_id, started_at, status,
+                    created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, 'created', ?, ?)""",
+                (
+                    meeting_id,
+                    title,
+                    language,
+                    source_device_id,
+                    started_at,
+                    now,
+                    now,
+                ),
+            )
+        meeting = self.get_meeting(meeting_id)
+        assert meeting is not None
+        return meeting
+
+    def list_meetings(
+        self, limit: int = 50, status: str | None = None
+    ) -> list[dict[str, Any]]:
+        query = """
+            SELECT m.*,
+                   EXISTS(
+                     SELECT 1 FROM meeting_recordings r
+                     WHERE r.meeting_id = m.id
+                   ) AS has_recording,
+                   (
+                     SELECT COUNT(*) FROM transcript_segments s
+                     WHERE s.meeting_id = m.id
+                   ) AS transcript_segment_count,
+                   (
+                     SELECT COUNT(*) FROM meeting_action_items a
+                     WHERE a.meeting_id = m.id
+                   ) AS action_item_count
+            FROM meetings m
+        """
+        params: list[Any] = []
+        if status is not None:
+            query += " WHERE m.status = ?"
+            params.append(status)
+        query += " ORDER BY m.started_at DESC LIMIT ?"
+        params.append(limit)
+        with self._lock:
+            rows = self._connection.execute(query, params).fetchall()
+        return [self._meeting_summary(row) for row in rows]
+
+    def get_meeting(self, meeting_id: str) -> dict[str, Any] | None:
+        with self._lock:
+            row = self._connection.execute(
+                "SELECT * FROM meetings WHERE id = ?", (meeting_id,)
+            ).fetchone()
+            if row is None:
+                return None
+            recording = self._connection.execute(
+                """SELECT * FROM meeting_recordings
+                   WHERE meeting_id = ?""",
+                (meeting_id,),
+            ).fetchone()
+            participants = self._connection.execute(
+                """SELECT id, display_name, speaker_label, created_at
+                   FROM meeting_participants
+                   WHERE meeting_id = ? ORDER BY speaker_label""",
+                (meeting_id,),
+            ).fetchall()
+            segments = self._connection.execute(
+                """SELECT id, sequence, speaker_label, start_ms, end_ms, text,
+                          confidence, created_at
+                   FROM transcript_segments
+                   WHERE meeting_id = ? ORDER BY sequence""",
+                (meeting_id,),
+            ).fetchall()
+            decisions = self._connection.execute(
+                """SELECT id, summary, segment_ids_json, created_at
+                   FROM meeting_decisions
+                   WHERE meeting_id = ? ORDER BY created_at, id""",
+                (meeting_id,),
+            ).fetchall()
+            actions = self._connection.execute(
+                """SELECT id, task, owner, due_at, status, confidence,
+                          segment_ids_json, created_at, updated_at
+                   FROM meeting_action_items
+                   WHERE meeting_id = ? ORDER BY created_at, id""",
+                (meeting_id,),
+            ).fetchall()
+        return {
+            **self._meeting_row(row),
+            "recording": self._recording_view(recording) if recording else None,
+            "participants": [dict(item) for item in participants],
+            "transcript": [dict(item) for item in segments],
+            "decisions": [
+                {
+                    "id": item["id"],
+                    "summary": item["summary"],
+                    "segment_ids": json.loads(item["segment_ids_json"]),
+                    "created_at": item["created_at"],
+                }
+                for item in decisions
+            ],
+            "action_items": [
+                {
+                    "id": item["id"],
+                    "task": item["task"],
+                    "owner": item["owner"],
+                    "due_at": item["due_at"],
+                    "status": item["status"],
+                    "confidence": item["confidence"],
+                    "segment_ids": json.loads(item["segment_ids_json"]),
+                    "created_at": item["created_at"],
+                    "updated_at": item["updated_at"],
+                }
+                for item in actions
+            ],
+        }
+
+    def get_meeting_recording(self, meeting_id: str) -> dict[str, Any] | None:
+        with self._lock:
+            row = self._connection.execute(
+                """SELECT * FROM meeting_recordings
+                   WHERE meeting_id = ?""",
+                (meeting_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        return {
+            **self._recording_view(row),
+            "path": row["path"],
+        }
+
+    def set_meeting_recording(
+        self,
+        meeting_id: str,
+        filename: str,
+        content_type: str,
+        digest: str,
+        size_bytes: int,
+        path: str,
+    ) -> dict[str, Any]:
+        now = _now()
+        with self._lock, self._connection:
+            if not self._connection.execute(
+                "SELECT 1 FROM meetings WHERE id = ?", (meeting_id,)
+            ).fetchone():
+                raise KeyError(meeting_id)
+            self._connection.execute(
+                """INSERT INTO meeting_recordings
+                   (meeting_id, filename, content_type, sha256, size_bytes,
+                    path, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(meeting_id) DO UPDATE SET
+                     filename=excluded.filename,
+                     content_type=excluded.content_type,
+                     sha256=excluded.sha256,
+                     size_bytes=excluded.size_bytes,
+                     path=excluded.path,
+                     created_at=excluded.created_at""",
+                (
+                    meeting_id,
+                    filename,
+                    content_type,
+                    digest,
+                    size_bytes,
+                    path,
+                    now,
+                ),
+            )
+            self._connection.execute(
+                """UPDATE meetings SET status = 'recorded', updated_at = ?
+                   WHERE id = ?""",
+                (now, meeting_id),
+            )
+        meeting = self.get_meeting(meeting_id)
+        assert meeting is not None and meeting["recording"] is not None
+        return meeting["recording"]
+
+    def replace_transcript(
+        self, meeting_id: str, segments: list[dict[str, Any]]
+    ) -> dict[str, Any]:
+        now = _now()
+        with self._lock, self._connection:
+            if not self._connection.execute(
+                "SELECT 1 FROM meetings WHERE id = ?", (meeting_id,)
+            ).fetchone():
+                raise KeyError(meeting_id)
+            self._connection.execute(
+                "DELETE FROM transcript_segments WHERE meeting_id = ?",
+                (meeting_id,),
+            )
+            for sequence, segment in enumerate(segments):
+                self._connection.execute(
+                    """INSERT INTO transcript_segments
+                       (id, meeting_id, sequence, speaker_label, start_ms,
+                        end_ms, text, confidence, created_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        secrets.token_hex(16),
+                        meeting_id,
+                        sequence,
+                        segment.get("speaker_label"),
+                        segment["start_ms"],
+                        segment["end_ms"],
+                        segment["text"],
+                        segment.get("confidence"),
+                        now,
+                    ),
+                )
+            self._connection.execute(
+                """UPDATE meetings SET status = 'transcribed', updated_at = ?
+                   WHERE id = ?""",
+                (now, meeting_id),
+            )
+        meeting = self.get_meeting(meeting_id)
+        assert meeting is not None
+        return meeting
+
+    def replace_meeting_analysis(
+        self,
+        meeting_id: str,
+        summary: str,
+        decisions: list[dict[str, Any]],
+        action_items: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        now = _now()
+        with self._lock, self._connection:
+            if not self._connection.execute(
+                "SELECT 1 FROM meetings WHERE id = ?", (meeting_id,)
+            ).fetchone():
+                raise KeyError(meeting_id)
+            self._connection.execute(
+                "DELETE FROM meeting_decisions WHERE meeting_id = ?",
+                (meeting_id,),
+            )
+            self._connection.execute(
+                "DELETE FROM meeting_action_items WHERE meeting_id = ?",
+                (meeting_id,),
+            )
+            for decision in decisions:
+                self._connection.execute(
+                    """INSERT INTO meeting_decisions
+                       (id, meeting_id, summary, segment_ids_json, created_at)
+                       VALUES (?, ?, ?, ?, ?)""",
+                    (
+                        secrets.token_hex(16),
+                        meeting_id,
+                        decision["summary"],
+                        json.dumps(decision.get("segment_ids") or []),
+                        now,
+                    ),
+                )
+            for action in action_items:
+                self._connection.execute(
+                    """INSERT INTO meeting_action_items
+                       (id, meeting_id, task, owner, due_at, status, confidence,
+                        segment_ids_json, created_at, updated_at)
+                       VALUES (?, ?, ?, ?, ?, 'open', ?, ?, ?, ?)""",
+                    (
+                        secrets.token_hex(16),
+                        meeting_id,
+                        action["task"],
+                        action.get("owner"),
+                        action.get("due_at"),
+                        action.get("confidence"),
+                        json.dumps(action.get("segment_ids") or []),
+                        now,
+                        now,
+                    ),
+                )
+            self._connection.execute(
+                """UPDATE meetings
+                   SET summary = ?, status = 'ready', updated_at = ?
+                   WHERE id = ?""",
+                (summary, now, meeting_id),
+            )
+        meeting = self.get_meeting(meeting_id)
+        assert meeting is not None
+        return meeting
+
+    @staticmethod
+    def _meeting_row(row: sqlite3.Row) -> dict[str, Any]:
+        return {
+            "id": row["id"],
+            "title": row["title"],
+            "language": row["language"],
+            "source_device_id": row["source_device_id"],
+            "started_at": row["started_at"],
+            "ended_at": row["ended_at"],
+            "status": row["status"],
+            "summary": row["summary"],
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+        }
+
+    @classmethod
+    def _meeting_summary(cls, row: sqlite3.Row) -> dict[str, Any]:
+        return {
+            **cls._meeting_row(row),
+            "has_recording": bool(row["has_recording"]),
+            "transcript_segment_count": row["transcript_segment_count"],
+            "action_item_count": row["action_item_count"],
+        }
+
+    @staticmethod
+    def _recording_view(row: sqlite3.Row) -> dict[str, Any]:
+        return {
+            "filename": row["filename"],
+            "content_type": row["content_type"],
+            "sha256": row["sha256"],
+            "size_bytes": row["size_bytes"],
+            "created_at": row["created_at"],
+        }
 
     def create_command(
         self,

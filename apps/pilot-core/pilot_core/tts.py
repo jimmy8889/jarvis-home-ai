@@ -77,9 +77,7 @@ class LocalTTS:
             "configured": bool(provider),
             "provider": provider or None,
             "engine_id": (
-                self.settings.tts_engine_id
-                if provider == "home_assistant"
-                else None
+                self.settings.tts_engine_id if provider == "home_assistant" else None
             ),
             "model": self.settings.tts_model if provider == "openai" else None,
             "voice": self.settings.tts_voice or None,
@@ -236,15 +234,15 @@ class LocalTTS:
         method: str = "GET",
         json: dict[str, Any] | None = None,
     ) -> tuple[bytes, str, str]:
-        async with client.stream(
-            method, url, headers=headers, json=json
-        ) as response:
+        async with client.stream(method, url, headers=headers, json=json) as response:
             response.raise_for_status()
             declared_length = response.headers.get("content-length")
             if declared_length:
                 try:
                     if int(declared_length) > self.max_bytes:
-                        raise TTSRequestFailed("synthesized audio exceeds the size limit")
+                        raise TTSRequestFailed(
+                            "synthesized audio exceeds the size limit"
+                        )
                 except ValueError:
                     raise TTSRequestFailed(
                         "TTS provider returned an invalid content length"
@@ -277,11 +275,7 @@ class LocalTTS:
             "flac": content.startswith(b"fLaC"),
             "ogg": content.startswith(b"OggS"),
             "mp3": content.startswith(b"ID3")
-            or (
-                len(content) >= 2
-                and content[0] == 0xFF
-                and content[1] & 0xE0 == 0xE0
-            ),
+            or (len(content) >= 2 and content[0] == 0xFF and content[1] & 0xE0 == 0xE0),
             "aac": len(content) >= 2
             and content[0] == 0xFF
             and content[1] & 0xF0 == 0xF0,

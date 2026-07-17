@@ -98,9 +98,7 @@ class MediaStateTests(unittest.IsolatedAsyncioTestCase):
                         }
                     ],
                 )
-            self.assertEqual(
-                request.url.path, "/api/states/media_player.media_room"
-            )
+            self.assertEqual(request.url.path, "/api/states/media_player.media_room")
             return httpx.Response(
                 200,
                 json={
@@ -130,21 +128,15 @@ class MediaStateTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(state["status"], "ok")
         self.assertTrue(state["effective"]["available"])
         self.assertEqual(state["effective"]["volume_percent"], 35)
-        self.assertEqual(
-            state["effective"]["media"]["title"], "Dance into the Light"
-        )
-        self.assertEqual(
-            state["music_assistant"]["device"]["model"], "AVC-X8500H"
-        )
-        self.assertNotIn(
-            "identifiers", state["music_assistant"]["device"]
-        )
+        self.assertEqual(state["effective"]["media"]["title"], "Dance into the Light")
+        self.assertEqual(state["music_assistant"]["device"]["model"], "AVC-X8500H")
+        self.assertNotIn("identifiers", state["music_assistant"]["device"])
         self.assertFalse(state["player"]["control_enabled"])
-        self.assertEqual(
-            sum(request.url.host == "ha.local" for request in requests), 1
-        )
+        self.assertEqual(sum(request.url.host == "ha.local" for request in requests), 1)
 
-    async def test_missing_provider_credentials_fail_closed_without_network(self) -> None:
+    async def test_missing_provider_credentials_fail_closed_without_network(
+        self,
+    ) -> None:
         os.environ.pop("HOME_ASSISTANT_TOKEN")
         os.environ.pop("MUSIC_ASSISTANT_TOKEN")
         called = False
@@ -164,12 +156,8 @@ class MediaStateTests(unittest.IsolatedAsyncioTestCase):
             snapshot["providers"]["music_assistant"]["status"],
             "not_configured",
         )
-        self.assertEqual(
-            snapshot["providers"]["home_assistant"]["status"], "partial"
-        )
-        self.assertEqual(
-            snapshot["players"]["media-heos"]["status"], "unresolved"
-        )
+        self.assertEqual(snapshot["providers"]["home_assistant"]["status"], "partial")
+        self.assertEqual(snapshot["players"]["media-heos"]["status"], "unresolved")
         self.assertFalse(called)
 
 

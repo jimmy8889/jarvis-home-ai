@@ -20,7 +20,7 @@ from fastapi import (
     WebSocket,
     WebSocketDisconnect,
 )
-from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.responses import FileResponse, PlainTextResponse, RedirectResponse
 from pydantic import BaseModel, Field, model_validator
 
 from . import __version__
@@ -28,6 +28,8 @@ from .audio_assets import AudioAssetError, AudioAssets
 from .config import Settings
 from .integrations import IntegrationRequestFailed, IntegrationUnavailable, Integrations
 from .media_state import MediaStateReader
+from .meetings import MeetingRecordingError, MeetingRecordings
+from .observability import evaluate_observability, prometheus_metrics
 from .orchestration import ResolutionError, RoomOrchestrator
 from .registry import Registry
 from .secret_values import read_secret
@@ -112,9 +114,7 @@ class DeviceCommandInput(BaseModel):
         return self
 
     def control_payload(self) -> dict[str, Any]:
-        return self.model_dump(
-            exclude={"expires_in_seconds"}, exclude_none=True
-        )
+        return self.model_dump(exclude={"expires_in_seconds"}, exclude_none=True)
 
 
 class RoomControlInput(DeviceCommandInput):
@@ -129,9 +129,7 @@ class RoomControlInput(DeviceCommandInput):
 
 
 class RoomMediaCommand(BaseModel):
-    action: Literal[
-        "play", "pause", "stop", "set_volume", "play_media", "transfer"
-    ]
+    action: Literal["play", "pause", "stop", "set_volume", "play_media", "transfer"]
     player_id: str | None = None
     media_uri: str | None = None
     target_room_id: str | None = None
@@ -173,6 +171,54 @@ class RoomSpeakRequest(BaseModel):
         if self.critical and self.kind != "announcement":
             raise ValueError("only announcements may be critical")
         return self
+
+
+class MeetingCreate(BaseModel):
+    title: str = Field(min_length=1, max_length=300)
+    language: str = Field(default="en", min_length=2, max_length=35)
+    started_at: datetime | None = None
+    source_device_id: str | None = Field(default=None, max_length=128)
+
+
+class TranscriptSegmentInput(BaseModel):
+    speaker_label: str | None = Field(default=None, max_length=100)
+    start_ms: int = Field(ge=0)
+    end_ms: int = Field(gt=0)
+    text: str = Field(min_length=1, max_length=20_000)
+    confidence: float | None = Field(default=None, ge=0, le=1)
+
+    @model_validator(mode="after")
+    def validate_timing(self) -> "TranscriptSegmentInput":
+        if self.end_ms <= self.start_ms:
+            raise ValueError("end_ms must be greater than start_ms")
+        return self
+
+
+class MeetingTranscriptInput(BaseModel):
+    segments: list[TranscriptSegmentInput] = Field(min_length=1, max_length=20_000)
+
+
+class MeetingDecisionInput(BaseModel):
+    summary: str = Field(min_length=1, max_length=4_000)
+    segment_ids: list[str] = Field(default_factory=list, max_length=500)
+
+
+class MeetingActionInput(BaseModel):
+    task: str = Field(min_length=1, max_length=4_000)
+    owner: str | None = Field(default=None, max_length=300)
+    due_at: datetime | None = None
+    confidence: float | None = Field(default=None, ge=0, le=1)
+    segment_ids: list[str] = Field(default_factory=list, max_length=500)
+
+
+class MeetingAnalysisInput(BaseModel):
+    summary: str = Field(min_length=1, max_length=20_000)
+    decisions: list[MeetingDecisionInput] = Field(
+        default_factory=list, max_length=1_000
+    )
+    action_items: list[MeetingActionInput] = Field(
+        default_factory=list, max_length=2_000
+    )
 
 
 class EventHub:
@@ -270,8 +316,11 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
         settings.server.audio_asset_max_bytes,
         settings.server.audio_asset_retention_seconds,
     )
-    local_tts = LocalTTS(
-        settings.integrations, settings.server.audio_asset_max_bytes
+    local_tts = LocalTTS(settings.integrations, settings.server.audio_asset_max_bytes)
+    meeting_recordings = MeetingRecordings(
+        database,
+        settings.server.meeting_asset_path,
+        settings.server.meeting_asset_max_bytes,
     )
     hub = EventHub()
     device_hub = DeviceHub()
@@ -309,21 +358,15 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
         device_id: str, payload: dict[str, Any], expires_in_seconds: int
     ) -> dict[str, Any]:
         try:
-            command = database.create_command(
-                device_id, payload, expires_in_seconds
-            )
+            command = database.create_command(device_id, payload, expires_in_seconds)
         except KeyError:
             raise HTTPException(status_code=404, detail="device not found") from None
-        if await device_hub.send(
-            device_id, {"type": "command", "command": command}
-        ):
+        if await device_hub.send(device_id, {"type": "command", "command": command}):
             database.mark_command_delivered(command["id"], device_id)
             command = database.get_command(command["id"]) or command
         return command
 
-    async def audio_targets(
-        room_id: str, device_id: str | None
-    ) -> tuple[Any, Any]:
+    async def audio_targets(room_id: str, device_id: str | None) -> tuple[Any, Any]:
         try:
             target = orchestrator.device(
                 room_id,
@@ -355,9 +398,7 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
             "volume": volume,
             "critical": critical,
         }
-        command = await queue_device_command(
-            target.id, payload, expires_in_seconds
-        )
+        command = await queue_device_command(target.id, payload, expires_in_seconds)
         return {
             "room_id": room_id,
             "target": target.as_dict(),
@@ -481,7 +522,9 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
 
     def require_admin(authorization: str | None = Header(default=None)) -> None:
         configured = read_secret(settings.server.admin_token_env)
-        if not configured or not secrets.compare_digest(_bearer(authorization), configured):
+        if not configured or not secrets.compare_digest(
+            _bearer(authorization), configured
+        ):
             raise HTTPException(status_code=401, detail="invalid admin token")
 
     def require_bootstrap(authorization: str | None = Header(default=None)) -> None:
@@ -490,7 +533,9 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
                 status_code=403, detail="legacy bootstrap registration is disabled"
             )
         configured = read_secret(settings.server.bootstrap_token_env)
-        if not configured or not secrets.compare_digest(_bearer(authorization), configured):
+        if not configured or not secrets.compare_digest(
+            _bearer(authorization), configured
+        ):
             raise HTTPException(status_code=401, detail="invalid bootstrap token")
 
     @app.get("/healthz")
@@ -532,6 +577,128 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
     async def rooms() -> dict[str, Any]:
         return {"rooms": registry.list_rooms()}
 
+    @app.post(
+        "/v1/meetings",
+        dependencies=[Depends(require_admin)],
+        status_code=201,
+    )
+    async def create_meeting(request: MeetingCreate) -> dict[str, Any]:
+        started_at = request.started_at or datetime.now(UTC)
+        if started_at.tzinfo is None:
+            started_at = started_at.replace(tzinfo=UTC)
+        return database.create_meeting(
+            request.title.strip(),
+            request.language,
+            started_at.astimezone(UTC).isoformat(),
+            request.source_device_id,
+        )
+
+    @app.get("/v1/meetings", dependencies=[Depends(require_admin)])
+    async def list_meetings(
+        limit: int = Query(default=50, ge=1, le=200),
+        status: Literal["created", "recorded", "transcribed", "ready", "failed"]
+        | None = None,
+    ) -> dict[str, Any]:
+        return {"meetings": database.list_meetings(limit, status)}
+
+    @app.get(
+        "/v1/meetings/{meeting_id}",
+        dependencies=[Depends(require_admin)],
+    )
+    async def meeting_detail(meeting_id: str) -> dict[str, Any]:
+        meeting = database.get_meeting(meeting_id)
+        if meeting is None:
+            raise HTTPException(status_code=404, detail="meeting not found")
+        return meeting
+
+    @app.put(
+        "/v1/meetings/{meeting_id}/recording",
+        dependencies=[Depends(require_admin)],
+        status_code=201,
+    )
+    async def upload_meeting_recording(
+        meeting_id: str,
+        request: Request,
+        x_pilot_filename: str = Header(default="recording"),
+    ) -> dict[str, Any]:
+        try:
+            recording = await meeting_recordings.save(
+                meeting_id,
+                x_pilot_filename,
+                request.headers.get("content-type", ""),
+                request.stream(),
+            )
+        except KeyError:
+            raise HTTPException(status_code=404, detail="meeting not found") from None
+        except MeetingRecordingError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from None
+        return {key: value for key, value in recording.items() if key != "path"}
+
+    @app.get(
+        "/v1/meetings/{meeting_id}/recording",
+        dependencies=[Depends(require_admin)],
+    )
+    async def download_meeting_recording(meeting_id: str) -> FileResponse:
+        if database.get_meeting(meeting_id) is None:
+            raise HTTPException(status_code=404, detail="meeting not found")
+        recording = database.get_meeting_recording(meeting_id)
+        if recording is None:
+            raise HTTPException(status_code=404, detail="recording not found")
+        return FileResponse(
+            recording["path"],
+            media_type=recording["content_type"],
+            filename=recording["filename"],
+            headers={"Cache-Control": "no-store"},
+        )
+
+    @app.put(
+        "/v1/meetings/{meeting_id}/transcript",
+        dependencies=[Depends(require_admin)],
+    )
+    async def replace_meeting_transcript(
+        meeting_id: str, request: MeetingTranscriptInput
+    ) -> dict[str, Any]:
+        try:
+            return database.replace_transcript(
+                meeting_id,
+                [segment.model_dump() for segment in request.segments],
+            )
+        except KeyError:
+            raise HTTPException(status_code=404, detail="meeting not found") from None
+
+    @app.put(
+        "/v1/meetings/{meeting_id}/analysis",
+        dependencies=[Depends(require_admin)],
+    )
+    async def replace_meeting_analysis(
+        meeting_id: str, request: MeetingAnalysisInput
+    ) -> dict[str, Any]:
+        try:
+            return database.replace_meeting_analysis(
+                meeting_id,
+                request.summary,
+                [decision.model_dump() for decision in request.decisions],
+                [
+                    {
+                        **action.model_dump(),
+                        "due_at": (
+                            (
+                                action.due_at
+                                if action.due_at.tzinfo is not None
+                                else action.due_at.replace(tzinfo=UTC)
+                            )
+                            .astimezone(UTC)
+                            .isoformat()
+                            if action.due_at
+                            else None
+                        ),
+                    }
+                    for action in request.action_items
+                ],
+            )
+        except KeyError:
+            raise HTTPException(status_code=404, detail="meeting not found") from None
+
     @app.get("/v1/state", dependencies=[Depends(require_admin)])
     async def whole_home_state() -> dict[str, Any]:
         connected = await device_hub.connected_ids()
@@ -543,9 +710,7 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
             },
         }
 
-    @app.get("/v1/operations", dependencies=[Depends(require_admin)])
-    async def operations(response: Response) -> dict[str, Any]:
-        response.headers["Cache-Control"] = "no-store"
+    async def build_operations_snapshot() -> dict[str, Any]:
         connected = await device_hub.connected_ids()
         rooms_state = {
             room_id: orchestrator.room_state(room_id, connected)
@@ -590,7 +755,7 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
             status = str(command_payload["status"])
             command_counts[status] = command_counts.get(status, 0) + 1
 
-        return {
+        payload = {
             "generated_at": datetime.now(UTC).isoformat(),
             "deployment": {
                 "version": __version__,
@@ -608,14 +773,12 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
                 ),
                 "configured_integration_count": len(configured_integrations),
                 "healthy_integration_count": sum(
-                    status.get("status") == "ok"
-                    for status in configured_integrations
+                    status.get("status") == "ok" for status in configured_integrations
                 ),
                 "armed_room_count": len(armed_rooms),
                 "unarmed_room_count": len(unarmed_rooms),
                 "pending_command_count": sum(
-                    command_counts.get(status, 0)
-                    for status in ("queued", "delivered")
+                    command_counts.get(status, 0) for status in ("queued", "delivered")
                 ),
             },
             "safety": {
@@ -630,6 +793,31 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
             "command_counts": command_counts,
             "events": events,
         }
+        payload["observability"] = evaluate_observability(payload)
+        return payload
+
+    @app.get("/v1/operations", dependencies=[Depends(require_admin)])
+    async def operations(response: Response) -> dict[str, Any]:
+        response.headers["Cache-Control"] = "no-store"
+        return await build_operations_snapshot()
+
+    @app.get("/v1/observability", dependencies=[Depends(require_admin)])
+    async def observability(response: Response) -> dict[str, Any]:
+        response.headers["Cache-Control"] = "no-store"
+        return (await build_operations_snapshot())["observability"]
+
+    @app.get(
+        "/v1/metrics",
+        dependencies=[Depends(require_admin)],
+        response_class=PlainTextResponse,
+    )
+    async def metrics() -> PlainTextResponse:
+        snapshot = await build_operations_snapshot()
+        return PlainTextResponse(
+            prometheus_metrics(snapshot, snapshot["observability"]),
+            media_type="text/plain; version=0.0.4",
+            headers={"Cache-Control": "no-store"},
+        )
 
     @app.get("/v1/rooms/{room_id}", dependencies=[Depends(require_admin)])
     async def room(room_id: str) -> dict[str, Any]:
@@ -639,14 +827,10 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
         payload["focus"] = database.room_focus(room_id)
         return payload
 
-    @app.get(
-        "/v1/rooms/{room_id}/state", dependencies=[Depends(require_admin)]
-    )
+    @app.get("/v1/rooms/{room_id}/state", dependencies=[Depends(require_admin)])
     async def room_state(room_id: str) -> dict[str, Any]:
         try:
-            return orchestrator.room_state(
-                room_id, await device_hub.connected_ids()
-            )
+            return orchestrator.room_state(room_id, await device_hub.connected_ids())
         except ResolutionError as error:
             raise HTTPException(status_code=404, detail=str(error)) from None
 
@@ -654,9 +838,7 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
         "/v1/rooms/{room_id}/media-state",
         dependencies=[Depends(require_admin)],
     )
-    async def room_media_state(
-        room_id: str, response: Response
-    ) -> dict[str, Any]:
+    async def room_media_state(room_id: str, response: Response) -> dict[str, Any]:
         if room_id not in registry.rooms:
             raise HTTPException(status_code=404, detail="room not found")
         response.headers["Cache-Control"] = "no-store"
@@ -667,9 +849,7 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
         dependencies=[Depends(require_admin)],
         status_code=201,
     )
-    async def room_control(
-        room_id: str, request: RoomControlInput
-    ) -> dict[str, Any]:
+    async def room_control(room_id: str, request: RoomControlInput) -> dict[str, Any]:
         capability = request.capability or (
             "voice"
             if request.action
@@ -698,9 +878,7 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
         "/v1/rooms/{room_id}/media",
         dependencies=[Depends(require_admin)],
     )
-    async def room_media(
-        room_id: str, request: RoomMediaCommand
-    ) -> dict[str, Any]:
+    async def room_media(room_id: str, request: RoomMediaCommand) -> dict[str, Any]:
         try:
             player = orchestrator.music_player(room_id, request.player_id)
             target_player = (
@@ -747,9 +925,13 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
         if content_length:
             try:
                 if int(content_length) > settings.server.audio_asset_max_bytes:
-                    raise HTTPException(status_code=413, detail="audio asset is too large")
+                    raise HTTPException(
+                        status_code=413, detail="audio asset is too large"
+                    )
             except ValueError:
-                raise HTTPException(status_code=400, detail="invalid content-length") from None
+                raise HTTPException(
+                    status_code=400, detail="invalid content-length"
+                ) from None
         content = bytearray()
         async for chunk in request.stream():
             content.extend(chunk)
@@ -789,9 +971,7 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
         dependencies=[Depends(require_admin)],
         status_code=201,
     )
-    async def room_audio(
-        room_id: str, request: RoomAudioCommand
-    ) -> dict[str, Any]:
+    async def room_audio(room_id: str, request: RoomAudioCommand) -> dict[str, Any]:
         asset = audio_assets.get(request.asset_id)
         if asset is None:
             raise HTTPException(status_code=404, detail="audio asset not found")
@@ -824,9 +1004,7 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
         dependencies=[Depends(require_admin)],
         status_code=201,
     )
-    async def room_speak(
-        room_id: str, request: RoomSpeakRequest
-    ) -> dict[str, Any]:
+    async def room_speak(room_id: str, request: RoomSpeakRequest) -> dict[str, Any]:
         try:
             orchestrator.require_room(room_id)
         except ResolutionError as error:
@@ -902,9 +1080,7 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
         "/v1/players/{player_id}/state",
         dependencies=[Depends(require_admin)],
     )
-    async def player_state(
-        player_id: str, response: Response
-    ) -> dict[str, Any]:
+    async def player_state(player_id: str, response: Response) -> dict[str, Any]:
         player_config = registry.players.get(player_id)
         if player_config is None:
             raise HTTPException(status_code=404, detail="player not found")
@@ -989,15 +1165,9 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
     async def device_commands(device_id: str, limit: int = 100) -> dict[str, Any]:
         if not any(device["id"] == device_id for device in database.list_devices()):
             raise HTTPException(status_code=404, detail="device not found")
-        return {
-            "commands": database.list_commands(
-                device_id, min(max(limit, 1), 500)
-            )
-        }
+        return {"commands": database.list_commands(device_id, min(max(limit, 1), 500))}
 
-    @app.get(
-        "/v1/commands/{command_id}", dependencies=[Depends(require_admin)]
-    )
+    @app.get("/v1/commands/{command_id}", dependencies=[Depends(require_admin)])
     async def command(command_id: int) -> dict[str, Any]:
         result = database.get_command(command_id)
         if not result:
@@ -1020,9 +1190,7 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
             await socket.close(code=1008, reason="invalid device credentials")
             return
         await device_hub.connect(device_id, socket)
-        await device_hub.send(
-            device_id, {"type": "hello", "device_id": device_id}
-        )
+        await device_hub.send(device_id, {"type": "hello", "device_id": device_id})
         for pending in database.pending_commands(device_id):
             if await device_hub.send(
                 device_id, {"type": "command", "command": pending}

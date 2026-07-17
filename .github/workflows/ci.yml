@@ -40,6 +40,7 @@ jobs:
           deploy/scripts/pilot-media
           deploy/scripts/pilot-audio
           deploy/scripts/pilot-speak
+          deploy/scripts/pilot-media-room-acceptance
           deploy/scripts/pilot-bootstrap-device
           deploy/scripts/pilot-core-backup
           deploy/scripts/pilot-core-diagnose
@@ -85,6 +86,7 @@ jobs:
           deploy/scripts/pilot-media
           deploy/scripts/pilot-audio
           deploy/scripts/pilot-speak
+          deploy/scripts/pilot-media-room-acceptance
           deploy/scripts/pilot-bootstrap-device
           deploy/scripts/pilot-core-backup
           deploy/scripts/pilot-core-diagnose
@@ -133,3 +135,24 @@ jobs:
           -i deploy/ansible/inventory/hosts.example.yml
           deploy/ansible/site.yml
           --syntax-check
+
+  android-tv:
+    name: Shield TV
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: apps/shield-tv
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+          cache-dependency-path: |
+            apps/shield-tv/*.gradle.kts
+            apps/shield-tv/gradle/wrapper/gradle-wrapper.properties
+            apps/shield-tv/app/build.gradle.kts
+      - name: Test, lint, and assemble Pilot TV
+        run: ./gradlew testDebugUnitTest lintDebug assembleDebug

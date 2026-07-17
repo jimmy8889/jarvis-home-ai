@@ -82,6 +82,16 @@ Read-only Denon HEOS and NVIDIA Shield discovery, Media Room registration, and
 the fail-closed player control gate are documented in
 [docs/MEDIA_ROOM.md](docs/MEDIA_ROOM.md).
 
+The buildable read-only NVIDIA Shield client is documented in
+[docs/SHIELD_TV.md](docs/SHIELD_TV.md).
+
+Central alerts and authenticated Prometheus metrics are documented in
+[docs/OBSERVABILITY.md](docs/OBSERVABILITY.md).
+
+The local meeting recording, transcript, decision, and action-item foundation
+is documented in
+[docs/MEETING_INTELLIGENCE.md](docs/MEETING_INTELLIGENCE.md).
+
 Staged Music Assistant playback is documented in
 [docs/MUSIC_ASSISTANT.md](docs/MUSIC_ASSISTANT.md).
 
@@ -132,6 +142,7 @@ It defines:
 ```text
 apps/room-agent/       Local health/status API
 apps/pilot-core/       Central room and player registry API
+apps/shield-tv/        Kotlin/Compose for TV operations client
 config/                Versioned example room configuration
 deploy/ansible/        Reproducible Debian 13 deployment
 deploy/scripts/        Inventory, validation, and rollback commands

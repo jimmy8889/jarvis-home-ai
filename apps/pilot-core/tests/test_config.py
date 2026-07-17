@@ -61,19 +61,24 @@ class ConfigTests(unittest.TestCase):
 
     def test_can_disable_legacy_bootstrap(self) -> None:
         configured = VALID_CONFIG.replace(
-            'listen_port = 8770',
-            'listen_port = 8770\nlegacy_bootstrap_enabled = false',
+            "listen_port = 8770",
+            "listen_port = 8770\nlegacy_bootstrap_enabled = false",
         )
-        self.assertFalse(
-            self._load(configured).server.legacy_bootstrap_enabled
-        )
+        self.assertFalse(self._load(configured).server.legacy_bootstrap_enabled)
 
     def test_rejects_unknown_default_player(self) -> None:
         with self.assertRaisesRegex(ValueError, "unknown player"):
-            self._load(VALID_CONFIG.replace('default_music_player_id = "office-music"', 'default_music_player_id = "missing"'))
+            self._load(
+                VALID_CONFIG.replace(
+                    'default_music_player_id = "office-music"',
+                    'default_music_player_id = "missing"',
+                )
+            )
 
     def test_rejects_duplicate_player_id(self) -> None:
-        duplicate = VALID_CONFIG + """
+        duplicate = (
+            VALID_CONFIG
+            + """
 [[players]]
 id = "office-music"
 room_id = "office"
@@ -81,6 +86,7 @@ name = "Duplicate"
 protocol = "sendspin"
 kind = "music"
 """
+        )
         with self.assertRaisesRegex(ValueError, "duplicate player id"):
             self._load(duplicate)
 

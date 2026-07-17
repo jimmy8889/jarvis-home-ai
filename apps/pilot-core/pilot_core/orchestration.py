@@ -37,9 +37,7 @@ class RoomOrchestrator:
         if room_id not in self.registry.rooms:
             raise ResolutionError(f"unknown room: {room_id}")
 
-    def music_player(
-        self, room_id: str, player_id: str | None = None
-    ) -> Player:
+    def music_player(self, room_id: str, player_id: str | None = None) -> Player:
         self.require_room(room_id)
         selected_id = player_id or self.registry.rooms[room_id].default_music_player_id
         player = self.registry.players.get(selected_id)
@@ -80,9 +78,7 @@ class RoomOrchestrator:
                 raise ResolutionError(
                     f"device {device_id} is not registered in room {room_id}"
                 )
-        capable = [
-            item for item in candidates if capability in item["capabilities"]
-        ]
+        capable = [item for item in candidates if capability in item["capabilities"]]
         if not capable:
             raise ResolutionError(
                 f"room {room_id} has no device with capability {capability}"

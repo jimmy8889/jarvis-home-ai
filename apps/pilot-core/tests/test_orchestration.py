@@ -2,7 +2,13 @@ from __future__ import annotations
 
 import unittest
 
-from pilot_core.config import IntegrationSettings, Player, Room, ServerSettings, Settings
+from pilot_core.config import (
+    IntegrationSettings,
+    Player,
+    Room,
+    ServerSettings,
+    Settings,
+)
 from pilot_core.orchestration import ResolutionError, RoomOrchestrator
 from pilot_core.registry import Registry
 from pilot_core.storage import Store
@@ -51,9 +57,7 @@ class OrchestrationTests(unittest.TestCase):
         self.store.register_device(
             "office-primary", "office", "Office Primary", ["audio", "voice"]
         )
-        self.orchestrator = RoomOrchestrator(
-            Registry.from_settings(config), self.store
-        )
+        self.orchestrator = RoomOrchestrator(Registry.from_settings(config), self.store)
 
     def tearDown(self) -> None:
         self.store.close()
@@ -88,9 +92,7 @@ class OrchestrationTests(unittest.TestCase):
             self.orchestrator.music_player("office", "office-assistant")
 
     def test_room_state_combines_sources_health_and_targets(self) -> None:
-        self.store.record_event(
-            "office-primary", "office", "health", {"ready": True}
-        )
+        self.store.record_event("office-primary", "office", "health", {"ready": True})
         self.store.record_event(
             "office-primary",
             "office",

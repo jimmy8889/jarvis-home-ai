@@ -36,9 +36,7 @@ class MediaStateReader:
         )
 
         music_task = (
-            asyncio.create_task(
-                self.integrations.music_assistant("players/all", {})
-            )
+            asyncio.create_task(self.integrations.music_assistant("players/all", {}))
             if music_assistant_required
             else None
         )
@@ -67,9 +65,7 @@ class MediaStateReader:
                     raise IntegrationRequestFailed(
                         "Music Assistant player inventory is not a list"
                     )
-                music_rows = [
-                    row for row in raw_music if isinstance(row, dict)
-                ]
+                music_rows = [row for row in raw_music if isinstance(row, dict)]
                 provider_status["music_assistant"] = {
                     "status": "ok",
                     "player_count": len(music_rows),
@@ -149,7 +145,9 @@ class MediaStateReader:
         playback_state = (
             music.get("state")
             if music is not None
-            else home.get("state") if home is not None else "unknown"
+            else home.get("state")
+            if home is not None
+            else "unknown"
         )
         volume_percent: int | None = None
         muted: bool | None = None
@@ -203,9 +201,7 @@ class MediaStateReader:
             "powered": bool(row.get("powered")),
             "state": row.get("state") or "unknown",
             "volume_percent": (
-                int(round(volume))
-                if isinstance(volume, (int, float))
-                else None
+                int(round(volume)) if isinstance(volume, (int, float)) else None
             ),
             "active_source": row.get("active_source"),
             "group_members": list(row.get("group_childs") or []),

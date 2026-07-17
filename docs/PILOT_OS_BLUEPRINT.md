@@ -1,6 +1,6 @@
 # Pilot OS Blueprint
 
-Version 1.1
+Version 1.2
 
 Last updated: 2026-07-17
 
@@ -88,12 +88,24 @@ Music Assistant: Home Assistant add-on on 10.0.2.72
 Music Assistant UI/API: TCP 8095
 Music streams: TCP 8097
 Sendspin server: TCP 8927
+Pilot Core: 10.0.1.64:8770
+Pilot Core host: debian-docker / Debian 12
+Pilot Core image: jarvis-home-ai/pilot-core:02a777c
 ```
 
 The Home Assistant add-on is the preferred initial Music Assistant deployment.
 It provides simple lifecycle management and close HA integration. A standalone
 container remains an option if independent uptime or resource isolation later
 becomes important.
+
+Pilot Core 0.7 is deployed as a hardened, non-root Docker service with a
+read-only root filesystem, all Linux capabilities dropped, file-backed secrets,
+and persistent state in the `infra_pilot-core-data` volume. The service passed
+LAN health/readiness, authenticated API, invalid-token, disabled legacy
+bootstrap, container-restart persistence, backup-integrity, and log checks.
+Home Assistant, Music Assistant, and TTS integration credentials remain
+deliberately unconfigured; their URLs and tokens must be enabled together after
+dedicated service credentials are provisioned.
 
 ### Office room endpoint
 
@@ -434,15 +446,16 @@ deployed integration, hardware boundary, or milestone status changes.
 - [x] One-time device enrollment grants
 - [x] Silent integration diagnostics and central backup/restore tooling
 - [x] Supervised room playback activation gate
-- [ ] Deploy Pilot Core on the selected central container host
+- [x] Deploy Pilot Core on the central Docker host at `10.0.1.64:8770`
 - [ ] Enable the registered office room-agent reporter
 
 ## 14. Immediate next steps
 
 1. Select `Pilot Office Music` in Music Assistant and prove audible playback.
 2. Validate TIDAL playback and a local lossless track.
-3. Deploy Pilot Core 0.7 centrally, issue a one-time Office enrollment grant,
-   and enable the command channel.
+3. Provision dedicated Home Assistant and Music Assistant credentials in Pilot
+   Core, issue a one-time Office enrollment grant, and enable the command
+   channel.
 4. Deploy room-agent 0.5, complete the supervised K3 acceptance receipt, and
    explicitly arm room playback.
 5. Validate the native Intel Bluetooth controller; add a dedicated adapter only
@@ -492,3 +505,6 @@ deployed integration, hardware boundary, or milestone status changes.
 - **1.1** — Added hardened file-backed central deployment, one-time enrollment,
   silent integration diagnostics, integrity-manifested backup/restore, and a
   fail-closed supervised room playback activation gate.
+- **1.2** — Deployed Pilot Core 0.7 on the central Docker host at
+  `10.0.1.64:8770`, verified authenticated and restart-safe operation, and kept
+  HA/MA/TTS integrations disabled pending dedicated credentials.

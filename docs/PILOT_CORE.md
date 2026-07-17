@@ -1,6 +1,6 @@
 # Pilot Core
 
-Pilot Core 0.8 is the authenticated control-plane foundation for Pilot OS. It
+Pilot Core 0.9 is the authenticated control-plane foundation for Pilot OS. It
 persists the canonical room/player registry, registered room devices, source
 state, event history, and durable device command queue in SQLite.
 
@@ -34,15 +34,18 @@ Administrator endpoints:
 - `GET /v1/state` for a joined all-room snapshot
 - `GET /v1/rooms` and `GET /v1/rooms/{room_id}`
 - `GET /v1/rooms/{room_id}/state`
+- `GET /v1/rooms/{room_id}/media-state`
 - `POST /v1/rooms/{room_id}/media`
 - `POST /v1/rooms/{room_id}/control`
 - `GET /v1/players` and `GET /v1/players/{player_id}`
+- `GET /v1/players/{player_id}/state`
 - `GET /v1/devices`
 - `POST /v1/bootstrap-grants`
 - `GET /v1/integrations/diagnostics`
 - `GET /v1/events`
 - `WS /v1/events/ws`
 - `GET /v1/media`
+- `GET /v1/media/state`
 - `POST /v1/media` for play, pause, stop, volume, URI playback, and transfer
 - `POST /v1/media/search`
 - `POST /v1/assistant`
@@ -95,6 +98,19 @@ playback, volume, speech, and home-control actions remain intentionally absent.
 Static dashboard responses are served with a same-origin content-security
 policy, no-store caching, referrer suppression, MIME sniffing protection, and
 framing disabled.
+
+Pilot Core 0.9 adds provider-neutral media state. Configured Music Assistant
+players are matched by their stable external ID, with a name fallback recorded
+explicitly when required. A configured `media_player.*` endpoint is joined with
+read-only Home Assistant state. The normalized result exposes availability,
+power, playback, volume, mute, source, media metadata, and a bounded device
+description without returning raw provider payloads.
+
+Player discovery and player control are independent. A player with
+`control_enabled = false` remains visible in the registry, state APIs, and
+dashboard, while every media mutation is rejected before an integration call.
+The verified Media Room model is documented in
+[MEDIA_ROOM.md](MEDIA_ROOM.md).
 
 The event stream carries health and source-state changes. Source events produce
 a deterministic focus decision using this priority:

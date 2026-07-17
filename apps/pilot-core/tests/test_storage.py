@@ -173,6 +173,50 @@ class StorageTests(unittest.TestCase):
             connection.close()
         self.assertIn("default_device_id", columns)
 
+    def test_legacy_player_table_is_migrated_for_control_policy(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "pilot.db"
+            connection = sqlite3.connect(path)
+            connection.executescript(
+                """CREATE TABLE rooms (
+                       id TEXT PRIMARY KEY,
+                       name TEXT NOT NULL,
+                       response_player_id TEXT NOT NULL,
+                       default_music_player_id TEXT NOT NULL,
+                       default_device_id TEXT NOT NULL DEFAULT '',
+                       agent_url TEXT NOT NULL DEFAULT ''
+                   );
+                   CREATE TABLE players (
+                       id TEXT PRIMARY KEY,
+                       room_id TEXT NOT NULL REFERENCES rooms(id),
+                       name TEXT NOT NULL,
+                       protocol TEXT NOT NULL,
+                       kind TEXT NOT NULL,
+                       endpoint TEXT NOT NULL DEFAULT '',
+                       external_id TEXT NOT NULL DEFAULT '',
+                       enabled INTEGER NOT NULL DEFAULT 1
+                   );"""
+            )
+            connection.commit()
+            connection.close()
+
+            migrated = Store(str(path), settings())
+            migrated.close()
+            connection = sqlite3.connect(path)
+            columns = {
+                row[1]
+                for row in connection.execute("PRAGMA table_info(players)")
+            }
+            policies = {
+                row[0]: row[1]
+                for row in connection.execute(
+                    "SELECT id, control_enabled FROM players"
+                )
+            }
+            connection.close()
+        self.assertIn("control_enabled", columns)
+        self.assertEqual(policies["office-music"], 1)
+
 
 if __name__ == "__main__":
     unittest.main()

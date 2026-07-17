@@ -27,6 +27,7 @@ from . import __version__
 from .audio_assets import AudioAssetError, AudioAssets
 from .config import Settings
 from .integrations import IntegrationRequestFailed, IntegrationUnavailable, Integrations
+from .media_state import MediaStateReader
 from .orchestration import ResolutionError, RoomOrchestrator
 from .registry import Registry
 from .secret_values import read_secret
@@ -262,6 +263,7 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
     database = store or Store(settings.server.database_path, settings)
     orchestrator = RoomOrchestrator(registry, database)
     integrations = Integrations(settings.integrations)
+    media_states = MediaStateReader(registry, integrations)
     audio_assets = AudioAssets(
         database,
         settings.server.audio_asset_path,
@@ -423,12 +425,22 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
         player = registry.players.get(player_id)
         if not player:
             raise HTTPException(status_code=404, detail="player not found")
+        if not player.control_enabled:
+            raise HTTPException(
+                status_code=409,
+                detail=f"player {player.id} controls are disabled",
+            )
         external_id = player.external_id or player.id
         target_external_id: str | None = None
         if target_player_id is not None:
             target = registry.players.get(target_player_id)
             if target is None:
                 raise HTTPException(status_code=404, detail="target player not found")
+            if not target.control_enabled:
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"player {target.id} controls are disabled",
+                )
             target_external_id = target.external_id or target.id
         command_map = {
             "play": ("players/cmd/play", {"player_id": external_id}),
@@ -539,7 +551,10 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
             room_id: orchestrator.room_state(room_id, connected)
             for room_id in sorted(registry.rooms)
         }
-        diagnostics = await integrations.diagnostics()
+        diagnostics, media_snapshot = await asyncio.gather(
+            integrations.diagnostics(),
+            media_states.snapshot(),
+        )
         tts_status = local_tts.status()
         tts_status["status"] = (
             "configured" if tts_status["configured"] else "not_configured"
@@ -609,6 +624,7 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
                 "unarmed_rooms": unarmed_rooms,
             },
             "integrations": diagnostics,
+            "media": media_snapshot,
             "rooms": rooms_state,
             "commands": commands,
             "command_counts": command_counts,
@@ -633,6 +649,18 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
             )
         except ResolutionError as error:
             raise HTTPException(status_code=404, detail=str(error)) from None
+
+    @app.get(
+        "/v1/rooms/{room_id}/media-state",
+        dependencies=[Depends(require_admin)],
+    )
+    async def room_media_state(
+        room_id: str, response: Response
+    ) -> dict[str, Any]:
+        if room_id not in registry.rooms:
+            raise HTTPException(status_code=404, detail="room not found")
+        response.headers["Cache-Control"] = "no-store"
+        return await media_states.snapshot(room_id)
 
     @app.post(
         "/v1/rooms/{room_id}/control",
@@ -870,6 +898,20 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
             raise HTTPException(status_code=404, detail="player not found")
         return registry.players[player_id].as_dict()
 
+    @app.get(
+        "/v1/players/{player_id}/state",
+        dependencies=[Depends(require_admin)],
+    )
+    async def player_state(
+        player_id: str, response: Response
+    ) -> dict[str, Any]:
+        player_config = registry.players.get(player_id)
+        if player_config is None:
+            raise HTTPException(status_code=404, detail="player not found")
+        response.headers["Cache-Control"] = "no-store"
+        snapshot = await media_states.snapshot(player_config.room_id)
+        return snapshot["players"][player_id]
+
     @app.get("/v1/devices", dependencies=[Depends(require_admin)])
     async def devices() -> dict[str, Any]:
         connected = await device_hub.connected_ids()
@@ -1086,6 +1128,11 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
             raise HTTPException(status_code=503, detail=str(error)) from None
         except IntegrationRequestFailed as error:
             raise HTTPException(status_code=502, detail=str(error)) from None
+
+    @app.get("/v1/media/state", dependencies=[Depends(require_admin)])
+    async def media_state(response: Response) -> dict[str, Any]:
+        response.headers["Cache-Control"] = "no-store"
+        return await media_states.snapshot()
 
     @app.get(
         "/v1/integrations/diagnostics",

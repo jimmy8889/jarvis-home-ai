@@ -42,6 +42,7 @@ class RegistryTests(unittest.TestCase):
         view = registry.room_view("office")
         self.assertEqual(view["default_music_player_id"], "office-music")
         self.assertEqual(len(view["players"]), 2)
+        self.assertTrue(view["players"][1]["control_enabled"])
 
     def test_revision_is_deterministic(self) -> None:
         first = Registry.from_settings(self.settings)

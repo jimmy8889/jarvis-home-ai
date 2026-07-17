@@ -129,7 +129,7 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.headers["cache-control"], "no-store")
         payload = response.json()
-        self.assertEqual(payload["deployment"]["version"], "0.8.0")
+        self.assertEqual(payload["deployment"]["version"], "0.9.0")
         self.assertEqual(payload["summary"]["room_count"], 2)
         self.assertEqual(payload["summary"]["device_count"], 0)
         self.assertEqual(payload["summary"]["armed_room_count"], 0)
@@ -142,6 +142,7 @@ class ApiTests(unittest.TestCase):
         self.assertIn("home_assistant", payload["integrations"])
         self.assertIn("music_assistant", payload["integrations"])
         self.assertIn("tts", payload["integrations"])
+        self.assertIn("players", payload["media"])
         self.assertEqual(
             payload["integrations"]["tts"]["status"], "not_configured"
         )
@@ -703,6 +704,103 @@ class ApiTests(unittest.TestCase):
         music_assistant.assert_awaited_once_with(
             "players/cmd/play", {"player_id": "pilot-office"}
         )
+
+    @patch("pilot_core.api.Integrations.music_assistant", new_callable=AsyncMock)
+    def test_control_disabled_player_is_read_only(
+        self, music_assistant
+    ) -> None:
+        config = settings(self.audio_directory.name)
+        config = replace(
+            config,
+            players=tuple(
+                replace(player, control_enabled=False)
+                if player.id == "media-music"
+                else player
+                for player in config.players
+            ),
+        )
+        store = Store(":memory:", config)
+        with TestClient(create_app(config, store)) as client:
+            response = client.post(
+                "/v1/rooms/media-room/media",
+                headers={"Authorization": "Bearer admin-test"},
+                json={"action": "play"},
+            )
+        store.close()
+        self.assertEqual(response.status_code, 409)
+        self.assertIn("controls are disabled", response.json()["detail"])
+        music_assistant.assert_not_awaited()
+
+    @patch("pilot_core.api.Integrations.music_assistant", new_callable=AsyncMock)
+    def test_transfer_to_control_disabled_player_is_rejected(
+        self, music_assistant
+    ) -> None:
+        config = settings(self.audio_directory.name)
+        config = replace(
+            config,
+            players=tuple(
+                replace(player, control_enabled=False)
+                if player.id == "media-music"
+                else player
+                for player in config.players
+            ),
+        )
+        store = Store(":memory:", config)
+        with TestClient(create_app(config, store)) as client:
+            response = client.post(
+                "/v1/rooms/office/media",
+                headers={"Authorization": "Bearer admin-test"},
+                json={
+                    "action": "transfer",
+                    "target_room_id": "media-room",
+                },
+            )
+        store.close()
+        self.assertEqual(response.status_code, 409)
+        self.assertIn("controls are disabled", response.json()["detail"])
+        music_assistant.assert_not_awaited()
+
+    @patch(
+        "pilot_core.api.MediaStateReader.snapshot",
+        new_callable=AsyncMock,
+    )
+    def test_read_only_media_state_routes(self, snapshot) -> None:
+        player_state = {
+            "player": {"id": "media-music", "room_id": "media-room"},
+            "status": "ok",
+            "effective": {
+                "available": True,
+                "powered": True,
+                "playback_state": "idle",
+                "volume_percent": 35,
+            },
+        }
+        snapshot.return_value = {
+            "observed_at": "2026-07-17T00:00:00+00:00",
+            "room_id": "media-room",
+            "providers": {},
+            "players": {"media-music": player_state},
+        }
+        room_response = self.client.get(
+            "/v1/rooms/media-room/media-state",
+            headers={"Authorization": "Bearer admin-test"},
+        )
+        self.assertEqual(room_response.status_code, 200)
+        self.assertEqual(room_response.headers["cache-control"], "no-store")
+        self.assertEqual(
+            room_response.json()["players"]["media-music"]["status"], "ok"
+        )
+
+        player_response = self.client.get(
+            "/v1/players/media-music/state",
+            headers={"Authorization": "Bearer admin-test"},
+        )
+        self.assertEqual(player_response.status_code, 200)
+        self.assertEqual(player_response.headers["cache-control"], "no-store")
+        self.assertEqual(
+            player_response.json()["effective"]["volume_percent"], 35
+        )
+        self.assertEqual(self.client.get("/v1/media/state").status_code, 401)
 
 
 if __name__ == "__main__":

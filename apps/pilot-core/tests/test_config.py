@@ -48,6 +48,16 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(settings.rooms[0].id, "office")
         self.assertEqual(settings.rooms[0].default_device_id, "pilot-office")
         self.assertEqual(settings.players[1].protocol, "sendspin")
+        self.assertTrue(settings.players[1].control_enabled)
+
+    def test_can_disable_player_control_without_hiding_state(self) -> None:
+        configured = VALID_CONFIG.replace(
+            'kind = "music"',
+            'kind = "music"\ncontrol_enabled = false',
+        )
+        settings = self._load(configured)
+        self.assertTrue(settings.players[1].enabled)
+        self.assertFalse(settings.players[1].control_enabled)
 
     def test_can_disable_legacy_bootstrap(self) -> None:
         configured = VALID_CONFIG.replace(

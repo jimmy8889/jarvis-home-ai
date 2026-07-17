@@ -610,6 +610,12 @@ h2 {
   text-transform: uppercase;
 }
 
+.column-label-secondary {
+  border-top: 1px solid var(--line);
+  margin-top: 20px;
+  padding-top: 18px;
+}
+
 .device-line,
 .player-line,
 .integration-line {

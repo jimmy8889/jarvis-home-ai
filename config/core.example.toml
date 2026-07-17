@@ -54,7 +54,7 @@ name = "Pilot Office Music"
 protocol = "sendspin"
 kind = "music"
 endpoint = "ws://10.0.2.72:8927/sendspin"
-external_id = "pilot-office"
+external_id = "uppilotoffice"
 
 [[players]]
 id = "office-airplay"
@@ -63,3 +63,41 @@ name = "Pilot Office"
 protocol = "airplay"
 kind = "music-input"
 endpoint = "homeai.local:5000"
+
+[[rooms]]
+id = "media-room"
+name = "Media Room"
+response_player_id = "media-room-assistant"
+default_music_player_id = "media-room-heos"
+default_device_id = ""
+agent_url = ""
+
+[[players]]
+id = "media-room-assistant"
+room_id = "media-room"
+name = "Media Room Assistant"
+protocol = "heos"
+kind = "response"
+endpoint = "media_player.media_room"
+external_id = "1174905188"
+# Discovery and state are enabled; mutations stay locked until accepted.
+control_enabled = false
+
+[[players]]
+id = "media-room-heos"
+room_id = "media-room"
+name = "Media Room"
+protocol = "heos"
+kind = "music"
+endpoint = "media_player.media_room"
+external_id = "1174905188"
+control_enabled = false
+
+[[players]]
+id = "media-room-shield"
+room_id = "media-room"
+name = "SHIELD"
+protocol = "universal_player"
+kind = "video"
+external_id = "upb0713734fca0742d2bf2125b59cbf3b1"
+control_enabled = false

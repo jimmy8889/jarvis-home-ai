@@ -78,6 +78,10 @@ Room-bound, authenticated assistant and announcement playback is documented in
 Local Home Assistant/Piper and OpenAI-compatible speech synthesis is documented
 in [docs/LOCAL_TTS.md](docs/LOCAL_TTS.md).
 
+Read-only Denon HEOS and NVIDIA Shield discovery, Media Room registration, and
+the fail-closed player control gate are documented in
+[docs/MEDIA_ROOM.md](docs/MEDIA_ROOM.md).
+
 Staged Music Assistant playback is documented in
 [docs/MUSIC_ASSISTANT.md](docs/MUSIC_ASSISTANT.md).
 

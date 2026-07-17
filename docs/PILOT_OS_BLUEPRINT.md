@@ -1,6 +1,6 @@
 # Pilot OS Blueprint
 
-Version 1.4
+Version 1.5
 
 Last updated: 2026-07-17
 
@@ -90,7 +90,7 @@ Music streams: TCP 8097
 Sendspin server: TCP 8927
 Pilot Core: 10.0.1.64:8770
 Pilot Core host: debian-docker / Debian 12
-Pilot Core image: jarvis-home-ai/pilot-core:dashboard-20260717.3
+Pilot Core image: jarvis-home-ai/pilot-core:media-state-20260717
 ```
 
 The Home Assistant add-on is the preferred initial Music Assistant deployment.
@@ -98,7 +98,7 @@ It provides simple lifecycle management and close HA integration. A standalone
 container remains an option if independent uptime or resource isolation later
 becomes important.
 
-Pilot Core 0.8 is deployed as a hardened, non-root Docker service with a
+Pilot Core 0.9 is deployed as a hardened, non-root Docker service with a
 read-only root filesystem, all Linux capabilities dropped, file-backed secrets,
 and persistent state in the `infra_pilot-core-data` volume. The service passed
 LAN health/readiness, authenticated API, invalid-token, disabled legacy
@@ -109,6 +109,14 @@ healthy. TTS remains deliberately unconfigured until the local speech provider
 is selected. A same-origin operations dashboard is available at `/dashboard`;
 its room, device, integration, safety, command, event, and deployment data
 remain protected by the existing administrator bearer token.
+
+The Media Room is registered in read-only mode. Music Assistant identifies the
+Denon AVC-X8500H as HEOS player `1174905188` at `10.0.1.150`; Home Assistant
+exposes the same receiver as `media_player.media_room`. The NVIDIA Shield is
+registered through Music Assistant player
+`upb0713734fca0742d2bf2125b59cbf3b1` at `10.0.1.101`. Pilot Core normalizes
+their live provider state while `control_enabled = false` rejects every media
+mutation before it reaches Music Assistant, HEOS, or Home Assistant.
 
 ### Office room endpoint
 
@@ -197,6 +205,8 @@ Implemented foundation:
 - Read-only Home Assistant and Music Assistant integration diagnostics
 - Integrity-manifested central backup and guarded restore tooling
 - Authenticated operations snapshot and responsive central dashboard
+- Provider-neutral Music Assistant/Home Assistant player state
+- Per-player read-only discovery and fail-closed control policy
 
 Planned responsibilities:
 
@@ -316,11 +326,12 @@ Target Pilot Core APIs not yet implemented:
 - `/memory`
 - WebSockets for streaming meeting transcripts
 
-Pilot Core 0.8 implements authenticated `/v1/rooms`, `/v1/players`,
+Pilot Core 0.9 implements authenticated `/v1/rooms`, `/v1/players`,
 `/v1/devices`, `/v1/media`, `/v1/assistant`, `/v1/operations`, event
-ingestion/history, a realtime event WebSocket, and the operations dashboard. It
-also persists device commands and delivers them over authenticated outbound
-room-agent WebSockets. Meeting and memory APIs remain future phases.
+ingestion/history, provider-neutral media state, a realtime event WebSocket,
+and the operations dashboard. It also persists device commands and delivers
+them over authenticated outbound room-agent WebSockets. Meeting and memory APIs
+remain future phases.
 
 Pilot Core 0.5 added `/v1/rooms/{room_id}/audio-assets`,
 `/v1/rooms/{room_id}/audio`, and the device-authenticated audio download path.
@@ -413,8 +424,11 @@ deployed integration, hardware boundary, or milestone status changes.
 
 ### Phase 3 — Media room
 
-- [ ] Denon HEOS discovery and control
-- [ ] Media-room player selection
+- [x] Read-only Denon HEOS discovery
+- [x] Media-room player registration and deterministic selection
+- [x] Provider-neutral Denon and Shield state
+- [x] Fail-closed Media Room control gate
+- [ ] In-person Denon control acceptance
 - [ ] Shield application foundation
 - [ ] N150 HDMI design and passthrough decision
 - [ ] Multi-room sync and announcements
@@ -453,6 +467,8 @@ deployed integration, hardware boundary, or milestone status changes.
 - [x] Enable and verify the registered office room-agent reporter
 - [x] Verify authenticated command delivery and restart reconnection
 - [x] Deploy the authenticated Pilot Core operations dashboard
+- [x] Register Media Room, Denon HEOS, and Shield in read-only mode
+- [x] Add normalized live player state to Pilot Core and its dashboard
 
 ## 14. Immediate next steps
 
@@ -464,6 +480,8 @@ deployed integration, hardware boundary, or milestone status changes.
 5. Validate the native Intel Bluetooth controller; add a dedicated adapter only
    if its receiver behavior is inadequate.
 6. Train and deploy the **Hey Pilot** wake model.
+7. Complete the in-person Denon power, source, playback, and safe-volume
+   acceptance before enabling Media Room control.
 
 ## 15. Decision log
 
@@ -479,6 +497,8 @@ deployed integration, hardware boundary, or milestone status changes.
 - Prefer native Sendspin over Squeezelite now that an official headless client
   is released; retain Squeezelite as a fallback.
 - Keep the Shield as the licensed Dolby Vision playback engine.
+- Separate player discovery from mutation; new room players start with
+  `control_enabled = false`.
 
 ## 16. Version history
 
@@ -519,3 +539,6 @@ deployed integration, hardware boundary, or milestone status changes.
 - **1.4** — Added Pilot Core 0.8's authenticated operations snapshot and
   responsive dashboard for rooms, devices, integrations, source focus, safety,
   commands, events, and release state without enabling audible controls.
+- **1.5** — Added Pilot Core 0.9's read-only Media Room model, verified Denon
+  HEOS and Shield identities, normalized Music Assistant/Home Assistant player
+  state, and enforced a fail-closed per-player control gate.

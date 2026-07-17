@@ -57,7 +57,8 @@ class Store:
                     kind TEXT NOT NULL,
                     endpoint TEXT NOT NULL DEFAULT '',
                     external_id TEXT NOT NULL DEFAULT '',
-                    enabled INTEGER NOT NULL DEFAULT 1
+                    enabled INTEGER NOT NULL DEFAULT 1,
+                    control_enabled INTEGER NOT NULL DEFAULT 1
                 );
                 CREATE TABLE IF NOT EXISTS devices (
                     id TEXT PRIMARY KEY,
@@ -137,6 +138,15 @@ class Store:
                     """ALTER TABLE rooms ADD COLUMN default_device_id
                        TEXT NOT NULL DEFAULT ''"""
                 )
+            player_columns = {
+                row["name"]
+                for row in self._connection.execute("PRAGMA table_info(players)")
+            }
+            if "control_enabled" not in player_columns:
+                self._connection.execute(
+                    """ALTER TABLE players ADD COLUMN control_enabled
+                       INTEGER NOT NULL DEFAULT 1"""
+                )
 
     def sync_registry(self, settings: Settings) -> None:
         with self._lock, self._connection:
@@ -164,8 +174,9 @@ class Store:
             for player in settings.players:
                 self._connection.execute(
                     """INSERT INTO players
-                       (id, room_id, name, protocol, kind, endpoint, external_id, enabled)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                       (id, room_id, name, protocol, kind, endpoint, external_id,
+                        enabled, control_enabled)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                        ON CONFLICT(id) DO UPDATE SET
                          room_id=excluded.room_id,
                          name=excluded.name,
@@ -173,7 +184,8 @@ class Store:
                          kind=excluded.kind,
                          endpoint=excluded.endpoint,
                          external_id=excluded.external_id,
-                         enabled=excluded.enabled""",
+                         enabled=excluded.enabled,
+                         control_enabled=excluded.control_enabled""",
                     (
                         player.id,
                         player.room_id,
@@ -183,6 +195,7 @@ class Store:
                         player.endpoint,
                         player.external_id,
                         int(player.enabled),
+                        int(player.control_enabled),
                     ),
                 )
 

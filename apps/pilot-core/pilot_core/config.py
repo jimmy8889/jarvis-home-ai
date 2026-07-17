@@ -65,6 +65,7 @@ class Player:
     endpoint: str = ""
     external_id: str = ""
     enabled: bool = True
+    control_enabled: bool = True
 
     def as_dict(self) -> dict[str, str | bool]:
         return {
@@ -76,6 +77,7 @@ class Player:
             "endpoint": self.endpoint,
             "external_id": self.external_id,
             "enabled": self.enabled,
+            "control_enabled": self.control_enabled,
         }
 
 
@@ -124,6 +126,7 @@ def _parse_player(value: dict[str, object]) -> Player:
         endpoint=str(value.get("endpoint", "")).strip(),
         external_id=str(value.get("external_id", "")).strip(),
         enabled=bool(value.get("enabled", True)),
+        control_enabled=bool(value.get("control_enabled", True)),
     )
 
 

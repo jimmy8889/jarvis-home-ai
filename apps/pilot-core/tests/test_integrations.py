@@ -7,7 +7,7 @@ import unittest
 import httpx
 
 from pilot_core.config import IntegrationSettings
-from pilot_core.integrations import Integrations
+from pilot_core.integrations import IntegrationRequestFailed, Integrations
 
 
 class IntegrationDiagnosticTests(unittest.IsolatedAsyncioTestCase):
@@ -66,6 +66,15 @@ class IntegrationDiagnosticTests(unittest.IsolatedAsyncioTestCase):
             result["music_assistant"]["status"], "credential_missing"
         )
         self.assertFalse(called)
+
+    async def test_home_assistant_state_rejects_invalid_entity_path(self) -> None:
+        integrations = Integrations(
+            IntegrationSettings(home_assistant_url="http://ha.local:8123")
+        )
+        with self.assertRaisesRegex(IntegrationRequestFailed, "invalid"):
+            await integrations.home_assistant_state(
+                "media_player.media_room/../../config"
+            )
 
 
 if __name__ == "__main__":

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 import time
 from typing import Any
 from uuid import uuid4
@@ -17,6 +18,9 @@ class IntegrationUnavailable(RuntimeError):
 
 class IntegrationRequestFailed(RuntimeError):
     pass
+
+
+_ENTITY_ID = re.compile(r"^[a-z0-9_]+\.[a-z0-9_]+$")
 
 
 class Integrations:
@@ -78,6 +82,32 @@ class Integrations:
                 return response.json()
         except (httpx.HTTPError, ValueError) as error:
             raise IntegrationRequestFailed(f"Home Assistant request failed: {error}") from error
+
+    async def home_assistant_state(self, entity_id: str) -> dict[str, Any]:
+        if not _ENTITY_ID.fullmatch(entity_id):
+            raise IntegrationRequestFailed("Home Assistant entity ID is invalid")
+        if not self.settings.home_assistant_url:
+            raise IntegrationUnavailable("Home Assistant URL is not configured")
+        token = read_secret(self.settings.home_assistant_token_env)
+        if not token:
+            raise IntegrationUnavailable("Home Assistant token is not configured")
+        try:
+            async with httpx.AsyncClient(
+                timeout=10, transport=self.transport, follow_redirects=False
+            ) as client:
+                response = await client.get(
+                    f"{self.settings.home_assistant_url}/api/states/{entity_id}",
+                    headers={"Authorization": f"Bearer {token}"},
+                )
+                response.raise_for_status()
+                payload = response.json()
+                if not isinstance(payload, dict):
+                    raise ValueError("state response is not an object")
+                return payload
+        except (httpx.HTTPError, ValueError) as error:
+            raise IntegrationRequestFailed(
+                f"Home Assistant state request failed: {error}"
+            ) from error
 
     async def diagnostics(self) -> dict[str, Any]:
         """Run read-only provider checks without returning URLs or credentials."""

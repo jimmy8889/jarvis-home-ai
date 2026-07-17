@@ -197,7 +197,10 @@ const renderSummary = (payload) => {
   const allIntegrationsHealthy =
     summary.configured_integration_count > 0 &&
     summary.healthy_integration_count === summary.configured_integration_count;
-  const posture = allDevicesConnected && allIntegrationsHealthy ? "Nominal" : "Attention";
+  let posture = "Attention";
+  if (allDevicesConnected && allIntegrationsHealthy) {
+    posture = payload.safety.audible_actions_gated ? "Guarded" : "Nominal";
+  }
   text("#system-posture", posture);
   document
     .querySelector("#hero-orbit")
@@ -269,6 +272,46 @@ const renderRooms = (payload) => {
       );
       endpointColumn.append(line);
     });
+    const visiblePlayers = players.filter((player) =>
+      ["music", "video"].includes(player.kind),
+    );
+    if (visiblePlayers.length) {
+      endpointColumn.append(
+        node("span", "column-label column-label-secondary", "Media players"),
+      );
+    }
+    visiblePlayers.forEach((player) => {
+      const playerState = payload.media?.players?.[player.id];
+      const effective = playerState?.effective || {};
+      const line = node("div", "player-line");
+      const meta = node("div", "player-meta");
+      meta.append(node("strong", "", player.name));
+      const volume =
+        effective.volume_percent == null
+          ? ""
+          : ` · ${effective.volume_percent}%`;
+      const access = player.control_enabled ? "control ready" : "read only";
+      meta.append(
+        node(
+          "small",
+          "",
+          `${titleCase(player.protocol)}${volume} · ${access}`,
+        ),
+      );
+      line.append(meta);
+      const stateLabel =
+        playerState?.status === "ok"
+          ? titleCase(effective.playback_state || "available")
+          : "Unresolved";
+      const stateKind =
+        playerState?.status === "ok" && effective.available
+          ? effective.powered
+            ? "good"
+            : "neutral"
+          : "bad";
+      line.append(badge(stateLabel, stateKind));
+      endpointColumn.append(line);
+    });
     body.append(endpointColumn);
 
     const sourcesColumn = node("div", "room-column");
@@ -298,15 +341,18 @@ const renderRooms = (payload) => {
     const actions = node("div", "room-actions");
     const cancelButton = node("button", "button button-quiet button-small", "Clear transient state");
     cancelButton.type = "button";
+    cancelButton.disabled = devices.length === 0;
     cancelButton.addEventListener("click", () => sendCancel(room.id, cancelButton));
     actions.append(cancelButton);
     actions.append(
       node(
         "p",
         "action-note",
-        armed
-          ? "Audible controls remain intentionally absent from this operations view."
-          : "Playback and volume stay locked until supervised activation.",
+        devices.length === 0
+          ? "No room endpoint is enrolled. Provider state remains read only."
+          : armed
+            ? "Audible controls remain intentionally absent from this operations view."
+            : "Playback and volume stay locked until supervised activation.",
       ),
     );
     actionsColumn.append(actions);

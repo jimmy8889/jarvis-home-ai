@@ -1,6 +1,6 @@
 # Room-aware orchestration
 
-Pilot Core 0.4 treats a room ID as the stable public routing boundary. Clients
+Pilot Core treats a room ID as the stable public routing boundary. Clients
 do not need to know Music Assistant queue IDs, Sendspin IDs, or the device
 currently acting as the room endpoint.
 
@@ -15,6 +15,8 @@ For media:
 4. For transfer, independently resolve the target room's default music player.
 5. Translate registry player IDs to provider `external_id` values at the Music
    Assistant boundary.
+6. Reject the operation before contacting the provider when the selected source
+   or target player has `control_enabled = false`.
 
 For endpoint controls:
 
@@ -47,6 +49,11 @@ infrastructure identifiers.
 This endpoint is the basis for answering “what is playing where?” and for
 future room dashboards. It intentionally reports locally observed source state;
 provider-specific track metadata remains owned by Music Assistant.
+
+`GET /v1/rooms/{room_id}/media-state` adds a read-only provider-neutral view of
+configured room players. Discovery remains available when player control is
+locked, which allows a new room to be observed before any receiver or speaker
+mutation is authorized.
 
 `GET /v1/state` returns the same joined snapshot for every configured room,
 keyed by room ID, with the registry revision used to construct it.

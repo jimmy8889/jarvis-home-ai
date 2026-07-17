@@ -1,6 +1,6 @@
 # Pilot OS Blueprint
 
-Version 1.2
+Version 1.3
 
 Last updated: 2026-07-17
 
@@ -90,7 +90,7 @@ Music streams: TCP 8097
 Sendspin server: TCP 8927
 Pilot Core: 10.0.1.64:8770
 Pilot Core host: debian-docker / Debian 12
-Pilot Core image: jarvis-home-ai/pilot-core:02a777c
+Pilot Core image: jarvis-home-ai/pilot-core:wsruntime-20260717
 ```
 
 The Home Assistant add-on is the preferred initial Music Assistant deployment.
@@ -103,9 +103,10 @@ read-only root filesystem, all Linux capabilities dropped, file-backed secrets,
 and persistent state in the `infra_pilot-core-data` volume. The service passed
 LAN health/readiness, authenticated API, invalid-token, disabled legacy
 bootstrap, container-restart persistence, backup-integrity, and log checks.
-Home Assistant, Music Assistant, and TTS integration credentials remain
-deliberately unconfigured; their URLs and tokens must be enabled together after
-dedicated service credentials are provisioned.
+Dedicated Home Assistant and Music Assistant credentials are installed through
+the root-owned file-backed secret store, and both read-only diagnostics are
+healthy. TTS remains deliberately unconfigured until the local speech provider
+is selected.
 
 ### Office room endpoint
 
@@ -126,6 +127,8 @@ Active room services:
 - Shairport Sync AirPlay receiver on TCP 5000
 - Sendspin 7.5.0 client connected to Music Assistant on TCP 8927
 - Boot-time restoration of stable Stadium/K3 PipeWire defaults
+- Authenticated health and source-state reporting to Pilot Core
+- Authenticated outbound command WebSocket with reconnect-safe results
 
 Bluetooth support is installed but disabled until Bluetooth source arbitration
 is implemented and accepted. The native host exposes its Intel Bluetooth
@@ -133,9 +136,10 @@ controller, so a dedicated adapter is no longer a prerequisite for discovery.
 
 The permanent native deployment replaced the original Proxmox VM after music
 playback on the VM exhibited skipping. Native Debian removes USB scheduling and
-audio virtualization from the room playback path. The migration passed all 15
-silent health checks after reboot, plus microphone capture, K3 playback, and
-simultaneous input/output through PipeWire.
+audio virtualization from the room playback path. The current release passes
+all 19 silent endpoint checks, including Pilot Core command connectivity, while
+the K3 audio activation gate remains explicitly unarmed until an in-person
+acceptance test.
 
 ## 5. Hardware plan
 
@@ -447,17 +451,16 @@ deployed integration, hardware boundary, or milestone status changes.
 - [x] Silent integration diagnostics and central backup/restore tooling
 - [x] Supervised room playback activation gate
 - [x] Deploy Pilot Core on the central Docker host at `10.0.1.64:8770`
-- [ ] Enable the registered office room-agent reporter
+- [x] Enable and verify the registered office room-agent reporter
+- [x] Verify authenticated command delivery and restart reconnection
 
 ## 14. Immediate next steps
 
 1. Select `Pilot Office Music` in Music Assistant and prove audible playback.
 2. Validate TIDAL playback and a local lossless track.
-3. Provision dedicated Home Assistant and Music Assistant credentials in Pilot
-   Core, issue a one-time Office enrollment grant, and enable the command
-   channel.
-4. Deploy room-agent 0.5, complete the supervised K3 acceptance receipt, and
-   explicitly arm room playback.
+3. Complete the supervised K3 acceptance receipt and explicitly arm room
+   playback.
+4. Validate assistant ducking and gain restoration at a safe listening volume.
 5. Validate the native Intel Bluetooth controller; add a dedicated adapter only
    if its receiver behavior is inadequate.
 6. Train and deploy the **Hey Pilot** wake model.
@@ -508,3 +511,8 @@ deployed integration, hardware boundary, or milestone status changes.
 - **1.2** — Deployed Pilot Core 0.7 on the central Docker host at
   `10.0.1.64:8770`, verified authenticated and restart-safe operation, and kept
   HA/MA/TTS integrations disabled pending dedicated credentials.
+- **1.3** — Provisioned dedicated Home Assistant and Music Assistant
+  credentials, enrolled the Office N150, deployed Room Agent 0.5 reporting and
+  commands, fixed the production WebSocket runtime, verified non-audible command
+  delivery and restart reconnection, and retained the fail-closed K3 activation
+  gate.

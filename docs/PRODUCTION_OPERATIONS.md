@@ -105,6 +105,13 @@ deploy/scripts/pilot-register-device \
 
 The grant cannot be replayed. Store the device token in Ansible Vault, remove
 the grant file, and deploy it to the endpoint as `/etc/pilot/device-token`.
+During initial enrollment, the room endpoint role also accepts a mode-`0600`
+controller file through `room_endpoint_core_device_token_source_file`. This
+keeps the token out of inventory and command-line extra variables; move it into
+Ansible Vault before treating the controller as a durable deployment host.
+Once installed, routine Ansible upgrades preserve the endpoint credential if no
+replacement token is supplied. New installations still require an explicit
+credential source.
 
 ## 5. Back up and restore
 

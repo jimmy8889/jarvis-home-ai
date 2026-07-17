@@ -202,15 +202,26 @@
     mode: "0640"
   notify: Restart Pilot room-agent
 
+- name: Inspect installed Pilot Core device credential
+  ansible.builtin.stat:
+    path: "{{ room_endpoint_core_device_token_file }}"
+  register: room_endpoint_core_device_token_remote
+  when: >-
+    room_endpoint_core_reporting_enabled | bool or
+    room_endpoint_core_commands_enabled | bool
+
 - name: Validate Pilot Core reporting credentials
   ansible.builtin.assert:
     that:
       - room_endpoint_core_url | length > 0
       - room_endpoint_core_device_id | length > 0
-      - room_endpoint_core_device_token | length > 0
+      - >-
+        room_endpoint_core_device_token | length > 0 or
+        room_endpoint_core_device_token_source_file | length > 0 or
+        room_endpoint_core_device_token_remote.stat.isreg | default(false)
     fail_msg: >-
-      Pilot Core URL, device ID, and device token are required when reporting
-      or commands are enabled.
+      Pilot Core URL, device ID, and either a new or already-installed device
+      token are required when reporting or commands are enabled.
   when: >-
     room_endpoint_core_reporting_enabled | bool or
     room_endpoint_core_commands_enabled | bool
@@ -224,8 +235,24 @@
     group: "{{ room_endpoint_user }}"
     mode: "0600"
   when: >-
-    room_endpoint_core_reporting_enabled | bool or
-    room_endpoint_core_commands_enabled | bool
+    (room_endpoint_core_reporting_enabled | bool or
+    room_endpoint_core_commands_enabled | bool) and
+    room_endpoint_core_device_token | length > 0
+  notify: Restart Pilot room-agent
+  no_log: true
+
+- name: Install Pilot Core device credential from controller file
+  ansible.builtin.copy:
+    src: "{{ room_endpoint_core_device_token_source_file }}"
+    dest: "{{ room_endpoint_core_device_token_file }}"
+    owner: "{{ room_endpoint_user }}"
+    group: "{{ room_endpoint_user }}"
+    mode: "0600"
+  when: >-
+    (room_endpoint_core_reporting_enabled | bool or
+    room_endpoint_core_commands_enabled | bool) and
+    room_endpoint_core_device_token | length == 0 and
+    room_endpoint_core_device_token_source_file | length > 0
   notify: Restart Pilot room-agent
   no_log: true
 

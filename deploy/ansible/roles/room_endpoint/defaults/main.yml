@@ -44,6 +44,7 @@ room_endpoint_core_reporting_enabled: false
 room_endpoint_core_url: ""
 room_endpoint_core_device_id: "pilot-{{ room_endpoint_room_id }}"
 room_endpoint_core_device_token: ""
+room_endpoint_core_device_token_source_file: ""
 room_endpoint_core_device_token_file: /etc/pilot/device-token
 room_endpoint_core_report_interval_seconds: 15
 room_endpoint_core_commands_enabled: false

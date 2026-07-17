@@ -109,6 +109,8 @@ jobs:
           docker compose -f infra/docker-compose.yml config --quiet
           docker compose -f infra/docker-compose.yml build pilot-core
           docker compose -f infra/docker-compose.yml up -d --no-build pilot-core
+          docker compose -f infra/docker-compose.yml exec -T pilot-core \
+            python -c 'import websockets'
           for attempt in {1..30}; do
             if curl --fail --silent http://127.0.0.1:8770/readyz >/dev/null; then
               break

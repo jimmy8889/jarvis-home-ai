@@ -109,3 +109,10 @@ deploy/scripts/pilot-register-device \
 Store the returned device token in Ansible Vault and enable the
 `room_endpoint_core_reporting_*` and `room_endpoint_core_commands_*` variables.
 The role writes it to a `0600` file owned by the `pilot` service account.
+For a one-time local deployment, set
+`room_endpoint_core_device_token_source_file` to the mode-`0600` token file on
+the Ansible controller; the token remains out of inventory, process arguments,
+and command output. Ansible Vault remains the durable production option.
+After enrollment, subsequent role runs preserve an existing endpoint token when
+neither token input is supplied. A fresh or rebuilt endpoint still fails closed
+until a new credential is provided.

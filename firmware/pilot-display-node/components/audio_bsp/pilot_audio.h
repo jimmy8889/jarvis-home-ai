@@ -29,9 +29,6 @@ public:
     bool Playing() const { return playing_; }
 
 private:
-    static constexpr std::size_t kCaptureChannels = 4;
-    static constexpr std::size_t kMaximumCaptureFrames = 320;
-
     void Destroy();
 
     i2c_master_bus_handle_t i2c_bus_ = nullptr;
@@ -45,10 +42,6 @@ private:
     const audio_codec_gpio_if_t *gpio_ = nullptr;
     esp_codec_dev_handle_t output_ = nullptr;
     esp_codec_dev_handle_t input_ = nullptr;
-    std::array<
-        int16_t,
-        kMaximumCaptureFrames * kCaptureChannels
-    > capture_scratch_ = {};
     bool available_ = false;
     bool capturing_ = false;
     bool playing_ = false;

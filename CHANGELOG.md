@@ -2,6 +2,11 @@
 
 ## 2026-07-19
 
+- Fixed Pilot Display Node 0.2.7 microphone capture after live speech exposed
+  a TDM channel-filtering regression. ESP-IDF already packs the selected
+  ES7210 slot as mono; removing a second, erroneous four-to-one decimation
+  restores true 16 kHz speech for Home Assistant STT. The node installed the
+  immutable release over OTA and reconnected on 0.2.7.
 - Added Pilot Core 0.12 display telemetry: read-only Home Assistant history for
   configured indoor and outdoor temperature sensors, rolling 24-hour
   min/max values, and a fixed 24-point downsampled series that bounds the

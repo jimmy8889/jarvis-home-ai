@@ -165,8 +165,8 @@ acceptance test.
 
 ```text
 Hardware: Waveshare ESP32-C6-Touch-AMOLED-2.16
-Deployed firmware: Pilot Display Node 0.2.6
-Published firmware: Pilot Display Node 0.2.6
+Deployed firmware: Pilot Display Node 0.2.7
+Published firmware: Pilot Display Node 0.2.7
 Display: 480 x 480 AMOLED
 Time: Australia/Brisbane via NTP with PCF85063 RTC fallback
 Network: Hazell IoT VLAN over 2.4 GHz Wi-Fi
@@ -195,10 +195,8 @@ Hands-on Talk to Pilot testing then exposed and repaired two embedded voice
 faults. Version 0.2.5 moves the HTTP response buffer off the voice-task stack,
 increases the task allocation from 7 KiB to 12 KiB, and logs measured stack
 headroom and bounded server failures. Two consecutive requests completed with
-more than 8 KiB of stack remaining and no reset. The ES7210's four interleaved
-TDM microphone channels are now converted to a real 16 kHz mono stream; the
-corrected stream was accepted by Home Assistant STT and reached local intent
-processing. The embedded TTS locale now matches the installed
+more than 8 KiB of stack remaining and no reset. The embedded TTS locale now
+matches the installed
 `en_US-amy-low` Piper voice.
 
 Version 0.2.6 adds rain amount, wind, and tomorrow's outlook to the forecast.
@@ -209,6 +207,16 @@ The USB rollout verified image integrity, boot, Wi-Fi, NTP, authenticated data
 refresh, dimming, and panel-off behavior without a reset. The identical
 immutable image is now published through Pilot Core; visual page navigation and
 onboard response playback remain hands-on acceptance items.
+
+Natural-speech testing then revealed that 0.2.6 consistently reached Assist but
+produced its generic misunderstanding response. A known-good 16 kHz sample sent
+through the same authenticated Pilot Core endpoint transcribed correctly,
+isolating the fault to embedded capture. ESP-IDF already packs the selected
+ES7210 TDM slot into contiguous mono PCM; firmware had incorrectly selected
+every fourth sample a second time, producing an effective 4 kHz stream labelled
+as 16 kHz. Version 0.2.7 removes that second decimation. Its immutable image is
+published and the node installed it over OTA, rebooted, refreshed its
+authenticated snapshot, and reported `current_version=0.2.7`.
 
 ## 5. Hardware plan
 
@@ -585,17 +593,18 @@ deployed integration, hardware boundary, or milestone status changes.
 
 ## 14. Immediate next steps
 
-1. Visually confirm Pilot Display Node 0.2.6's Forecast, Outside, and Bedroom
-   pages and hear its onboard Piper response.
-2. Validate wake word through spoken response on the Office K3.
-3. Validate a local lossless Music Assistant track.
-4. Complete the supervised K3 acceptance receipt and explicitly arm room
+1. Confirm Pilot Display Node 0.2.7 natural-speech transcription and its
+   onboard Piper response.
+2. Visually confirm its Forecast, Outside, and Bedroom pages.
+3. Validate wake word through spoken response on the Office K3.
+4. Validate a local lossless Music Assistant track.
+5. Complete the supervised K3 acceptance receipt and explicitly arm room
    playback.
-5. Validate assistant ducking and gain restoration at a safe listening volume.
-6. Validate the native Intel Bluetooth controller; add a dedicated adapter only
+6. Validate assistant ducking and gain restoration at a safe listening volume.
+7. Validate the native Intel Bluetooth controller; add a dedicated adapter only
    if its receiver behavior is inadequate.
-7. Train and deploy the **Hey Pilot** wake model.
-8. Complete the in-person Denon power, source, playback, and safe-volume
+8. Train and deploy the **Hey Pilot** wake model.
+9. Complete the in-person Denon power, source, playback, and safe-volume
    acceptance before enabling Media Room control.
 
 ## 15. Decision log
@@ -687,3 +696,7 @@ deployed integration, hardware boundary, or milestone status changes.
   richer today/tomorrow forecast data, current/min/max temperature pages, and
   24-point line graphs. The release passed server tests, physical USB boot,
   authenticated refresh, dim/off, and immutable OTA publication checks.
+- **2.2** — Reproduced Bedroom voice routing with known-good audio, isolated
+  natural-speech failure to erroneous four-to-one decimation after ESP-IDF's
+  TDM slot filter, and deployed Pilot Display Node 0.2.7 over OTA with
+  contiguous 16 kHz mono capture restored.

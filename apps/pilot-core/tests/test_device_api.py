@@ -235,6 +235,17 @@ class DisplayNodeApiTests(unittest.TestCase):
         self.assertTrue(manifest.json()["update_available"])
         self.assertEqual(manifest.json()["release"]["sha256"], digest)
 
+        newer_device = self.client.get(
+            "/v1/devices/pilot-bedroom-display/firmware",
+            headers=self.headers,
+            params={
+                "target": "esp32-c6-touch-amoled-2.16",
+                "current_version": "0.3.0",
+            },
+        )
+        self.assertEqual(newer_device.status_code, 200)
+        self.assertFalse(newer_device.json()["update_available"])
+
         download = self.client.get(
             "/v1/devices/pilot-bedroom-display/firmware/image",
             headers=self.headers,

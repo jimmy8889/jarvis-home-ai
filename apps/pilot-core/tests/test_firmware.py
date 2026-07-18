@@ -6,10 +6,29 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from pilot_core.firmware import FirmwareReleaseError, FirmwareReleases
+from pilot_core.firmware import (
+    FirmwareReleaseError,
+    FirmwareReleases,
+    is_newer_version,
+)
 
 
 class FirmwareReleaseTests(unittest.TestCase):
+    def test_semantic_version_ordering_never_authorizes_a_downgrade(self) -> None:
+        self.assertTrue(is_newer_version("0.2.3", "0.2.2"))
+        self.assertFalse(is_newer_version("0.2.1", "0.2.2"))
+        self.assertFalse(is_newer_version("0.2.2", "0.2.2"))
+        self.assertTrue(is_newer_version("0.2.2", ""))
+        self.assertFalse(is_newer_version("0.2.2", "not-a-version"))
+
+    def test_semantic_version_ordering_handles_prerelease_and_build_metadata(
+        self,
+    ) -> None:
+        self.assertTrue(is_newer_version("1.0.0", "1.0.0-rc.1"))
+        self.assertFalse(is_newer_version("1.0.0-rc.1", "1.0.0"))
+        self.assertTrue(is_newer_version("1.0.0-rc.10", "1.0.0-rc.2"))
+        self.assertFalse(is_newer_version("1.0.0+new", "1.0.0+old"))
+
     def test_validates_and_returns_latest_release(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             target = Path(directory) / "esp32-c6-touch-amoled-2.16"

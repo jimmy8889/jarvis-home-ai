@@ -75,6 +75,9 @@ constexpr uint8_t kAwakeBrightness = 55;
 constexpr uint8_t kDimBrightness = 2;
 constexpr TickType_t kDimAfter = pdMS_TO_TICKS(20000);
 constexpr TickType_t kOffAfter = pdMS_TO_TICKS(30000);
+constexpr float kMotionAccelerationDelta = 0.70f;
+constexpr float kMotionGyroDelta = 0.30f;
+constexpr int kMotionConfirmationSamples = 2;
 constexpr TickType_t kWeatherInterval = pdMS_TO_TICKS(30 * 60 * 1000);
 constexpr TickType_t kOtaInterval = pdMS_TO_TICKS(6 * 60 * 60 * 1000);
 constexpr gpio_num_t kActionButton = GPIO_NUM_9;
@@ -877,29 +880,49 @@ void set_screen_power(ScreenPower target) {
 void motion_power_task(void *) {
     MotionSample baseline = {};
     bool have_baseline = false;
+    int motion_samples = 0;
     while (true) {
         if (motion != nullptr && motion->Available()) {
             MotionSample sample = {};
             if (motion->Read(&sample) == ESP_OK) {
-                if (have_baseline) {
+                if (!have_baseline) {
+                    baseline = sample;
+                    have_baseline = true;
+                } else {
                     const float acceleration_delta = std::sqrt(
                         std::pow(sample.accel_x - baseline.accel_x, 2) +
                         std::pow(sample.accel_y - baseline.accel_y, 2) +
                         std::pow(sample.accel_z - baseline.accel_z, 2)
                     );
-                    const float gyro = std::sqrt(
-                        sample.gyro_x * sample.gyro_x +
-                        sample.gyro_y * sample.gyro_y +
-                        sample.gyro_z * sample.gyro_z
+                    const float gyro_delta = std::sqrt(
+                        std::pow(sample.gyro_x - baseline.gyro_x, 2) +
+                        std::pow(sample.gyro_y - baseline.gyro_y, 2) +
+                        std::pow(sample.gyro_z - baseline.gyro_z, 2)
                     );
-                    if (acceleration_delta > 0.32f || gyro > 0.16f) {
+                    if (
+                        acceleration_delta >= kMotionAccelerationDelta ||
+                        gyro_delta >= kMotionGyroDelta
+                    ) {
+                        motion_samples += 1;
+                    } else {
+                        motion_samples = 0;
+                    }
+                    if (motion_samples >= kMotionConfirmationSamples) {
                         note_activity();
                     }
+                    baseline.accel_x =
+                        baseline.accel_x * 0.88f + sample.accel_x * 0.12f;
+                    baseline.accel_y =
+                        baseline.accel_y * 0.88f + sample.accel_y * 0.12f;
+                    baseline.accel_z =
+                        baseline.accel_z * 0.88f + sample.accel_z * 0.12f;
+                    baseline.gyro_x =
+                        baseline.gyro_x * 0.88f + sample.gyro_x * 0.12f;
+                    baseline.gyro_y =
+                        baseline.gyro_y * 0.88f + sample.gyro_y * 0.12f;
+                    baseline.gyro_z =
+                        baseline.gyro_z * 0.88f + sample.gyro_z * 0.12f;
                 }
-                baseline.accel_x = baseline.accel_x * 0.88f + sample.accel_x * 0.12f;
-                baseline.accel_y = baseline.accel_y * 0.88f + sample.accel_y * 0.12f;
-                baseline.accel_z = baseline.accel_z * 0.88f + sample.accel_z * 0.12f;
-                have_baseline = true;
             }
         }
         if (voice_state.load() != VoiceState::idle) {
@@ -1135,5 +1158,5 @@ extern "C" void app_main() {
     );
     xTaskCreate(voice_task, "pilot_voice", 7168, nullptr, 5, nullptr);
     xTaskCreate(action_button_task, "pilot_button", 2048, nullptr, 4, nullptr);
-    xTaskCreate(network_task, "pilot_network", 7168, nullptr, 5, nullptr);
+    xTaskCreate(network_task, "pilot_network", 12288, nullptr, 5, nullptr);
 }

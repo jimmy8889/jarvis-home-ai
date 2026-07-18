@@ -164,28 +164,31 @@ acceptance test.
 
 ```text
 Hardware: Waveshare ESP32-C6-Touch-AMOLED-2.16
-Deployed firmware: Pilot Display Node 0.1
-Published firmware: Pilot Display Node 0.2.1
+Deployed firmware: Pilot Display Node 0.2.4
+Published firmware: Pilot Display Node 0.2.4
 Display: 480 x 480 AMOLED
 Time: Australia/Brisbane via NTP with PCF85063 RTC fallback
 Network: Hazell IoT VLAN over 2.4 GHz Wi-Fi
 ```
 
-The first display-node firmware remains deployed on physical hardware. It presents
-a burn-in-conscious clock, reconnects to Wi-Fi, synchronizes time using
-Cloudflare NTP, refreshes the hardware RTC, and continues as an offline clock
-if networking is unavailable. Native USB diagnostics, two OTA application
-slots, pinned dependencies, reproducible scripts, and a preserved full factory
-flash provide the initial operations and rollback model.
-
-Version 0.2.1 is compiled and published through Pilot Core's private firmware
-service for its first USB acceptance flash. It adds QMI8658 motion wake,
-20-second dimming, a dark display after 30 seconds, touch-scrollable
-current/daily weather, touch and GPIO push-to-talk, animated
+The deployed display node presents a burn-in-conscious clock, reconnects to
+Wi-Fi, synchronizes time using Cloudflare NTP, refreshes the hardware RTC, and
+continues as an offline clock if networking is unavailable. It adds QMI8658
+motion wake, 20-second dimming, a dark display after 30 seconds,
+touch-scrollable current/daily weather, touch and GPIO push-to-talk, animated
 listening/processing/responding states, ES7210 microphone streaming to Pilot
-Core, ES8311 Piper response playback, authenticated device snapshots, and
-checksum-verified dual-slot OTA with automatic rollback. The first USB flash is
-required because version 0.1 does not yet contain the OTA client.
+Core, ES8311 Piper response playback, and authenticated device snapshots.
+Native USB diagnostics, pinned dependencies, reproducible scripts, and a
+preserved full factory flash provide the operations and rollback model.
+
+Physical acceptance used USB to install 0.2.3 and then Pilot Core's private
+firmware service to upgrade it to immutable release 0.2.4. The test verified
+Wi-Fi, NTP/RTC, weather, the stationary IMU dim/off sequence, authenticated
+download and SHA-256 validation, alternate-slot boot, and the healthy-image
+mark that cancels automatic rollback. Pilot Core and the embedded client now
+both enforce semantic-version upgrades, so an older published release cannot
+cause a downgrade loop. Interactive touch, motion wake, live microphone
+capture, and audible speaker response still require hands-on acceptance.
 
 ## 5. Hardware plan
 
@@ -507,7 +510,8 @@ deployed integration, hardware boundary, or milestone status changes.
 - [x] Touch weather navigation and push-to-talk control
 - [x] Motion-aware bedroom dim/off and immediate wake behavior
 - [x] Authenticated, checksum-verified OTA update workflow
-- [ ] Physical version 0.2.1 touch, IMU, microphone, speaker, and rollback acceptance
+- [x] Physical USB boot, stationary IMU dim/off, alternate-slot OTA, and healthy-image mark
+- [ ] Physical touch, motion wake, microphone, speaker, and forced-rollback acceptance
 
 ### Phase 3 — Media room
 
@@ -559,8 +563,8 @@ deployed integration, hardware boundary, or milestone status changes.
 
 ## 14. Immediate next steps
 
-1. Flash and physically validate Pilot Display Node 0.2.1, including touch, IMU,
-   microphone capture, speaker response, weather, and rollback.
+1. Physically validate Pilot Display Node 0.2.4 touch, motion wake, microphone
+   capture, speaker response, and a deliberately failed-image rollback.
 2. Validate wake word through spoken response on the Office K3.
 3. Validate a local lossless Music Assistant track.
 4. Complete the supervised K3 acceptance receipt and explicitly arm room
@@ -647,3 +651,8 @@ deployed integration, hardware boundary, or milestone status changes.
   Assist/Piper audio, animated voice states, authenticated OTA, and automatic
   rollback. The firmware is compiled and awaits its first physical acceptance
   flash.
+- **1.9** — Physically flashed the Bedroom node, corrected stationary IMU
+  filtering, deployed semantic-version downgrade protection in Pilot Core and
+  the embedded client, moved OTA transfer storage off the network task stack,
+  and verified the complete 0.2.3-to-0.2.4 alternate-slot update and
+  healthy-image confirmation path.

@@ -2,6 +2,16 @@
 
 ## 2026-07-18
 
+- Added Pilot Display Node 0.2.3/0.2.4 and Pilot Core downgrade protection
+  after the first physical OTA exercise exposed equality-only release
+  comparison. Both sides now require a semantic-version upgrade, the OTA
+  transfer buffer lives on the heap, and the network task has additional stack
+  headroom. Version 0.2.4 is the immutable acceptance image used to prove the
+  repaired dual-slot update, reboot, and rollback-cancellation path.
+- Added Pilot Display Node 0.2.2 after physical 0.2.1 acceptance exposed
+  stationary IMU noise keeping the bedroom display awake. Motion detection now
+  initializes a complete sensor baseline, compares both acceleration and gyro
+  deltas, filters noise, and requires two consecutive movement samples.
 - Added Pilot Core 0.11's authenticated embedded-node snapshot, local Assist
   PCM streaming, bounded weather projection, and immutable firmware delivery
   APIs.

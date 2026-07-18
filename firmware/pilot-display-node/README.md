@@ -93,7 +93,7 @@ idf.py -p /dev/cu.usbmodem2101 monitor
 Expected diagnostics include:
 
 ```text
-Pilot display node 0.2.1 starting
+Pilot display node 0.2.4 starting
 Wi-Fi connected
 NTP synchronised using time.cloudflare.com
 ES7210 microphone and ES8311 speaker codec initialized

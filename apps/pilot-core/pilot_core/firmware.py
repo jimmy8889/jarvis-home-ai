@@ -8,13 +8,72 @@ import re
 from typing import Any
 
 
-_VERSION = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+(?:[-+][a-zA-Z0-9.-]+)?$")
+_VERSION = re.compile(
+    r"^(?P<major>0|[1-9][0-9]*)\."
+    r"(?P<minor>0|[1-9][0-9]*)\."
+    r"(?P<patch>0|[1-9][0-9]*)"
+    r"(?:-(?P<prerelease>[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?"
+    r"(?:\+(?P<build>[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$"
+)
 _TARGET = re.compile(r"^[a-z0-9][a-z0-9.-]{0,127}$")
 _SHA256 = re.compile(r"^[a-f0-9]{64}$")
 
 
 class FirmwareReleaseError(RuntimeError):
     pass
+
+
+def _version_key(version: str) -> tuple[int, int, int, tuple[tuple[int, int | str], ...] | None]:
+    match = _VERSION.fullmatch(version)
+    if match is None:
+        raise ValueError("invalid semantic version")
+    prerelease = match.group("prerelease")
+    prerelease_key = None
+    if prerelease is not None:
+        prerelease_key = tuple(
+            (0, int(identifier))
+            if identifier.isdigit()
+            else (1, identifier)
+            for identifier in prerelease.split(".")
+        )
+    return (
+        int(match.group("major")),
+        int(match.group("minor")),
+        int(match.group("patch")),
+        prerelease_key,
+    )
+
+
+def is_newer_version(candidate: str, current: str) -> bool:
+    """Return whether candidate is a valid SemVer upgrade from current.
+
+    An empty current version represents an unversioned factory image. Invalid
+    non-empty versions fail closed so a malformed request cannot authorize a
+    downgrade.
+    """
+
+    try:
+        candidate_key = _version_key(candidate)
+    except ValueError:
+        return False
+    if not current:
+        return True
+    try:
+        current_key = _version_key(current)
+    except ValueError:
+        return False
+
+    candidate_core = candidate_key[:3]
+    current_core = current_key[:3]
+    if candidate_core != current_core:
+        return candidate_core > current_core
+    candidate_prerelease = candidate_key[3]
+    current_prerelease = current_key[3]
+    if candidate_prerelease is None:
+        return current_prerelease is not None
+    if current_prerelease is None:
+        return False
+    return candidate_prerelease > current_prerelease
 
 
 @dataclass(frozen=True)

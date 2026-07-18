@@ -26,7 +26,7 @@ from pydantic import BaseModel, Field, model_validator
 from . import __version__
 from .audio_assets import AudioAssetError, AudioAssets
 from .config import Settings
-from .firmware import FirmwareReleaseError, FirmwareReleases
+from .firmware import FirmwareReleaseError, FirmwareReleases, is_newer_version
 from .integrations import IntegrationRequestFailed, IntegrationUnavailable, Integrations
 from .media_state import MediaStateReader
 from .meetings import MeetingRecordingError, MeetingRecordings
@@ -1372,7 +1372,9 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
         return {
             "target": target,
             "current_version": current_version,
-            "update_available": release.version != current_version,
+            "update_available": is_newer_version(
+                release.version, current_version
+            ),
             "release": {
                 **release.manifest(),
                 "download_url": (

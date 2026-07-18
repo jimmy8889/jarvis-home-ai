@@ -3,13 +3,16 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 
 #include "cJSON.h"
 #include "esp_app_desc.h"
 #include "esp_crt_bundle.h"
 #include "esp_http_client.h"
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_ota_ops.h"
 #include "esp_system.h"
@@ -25,6 +28,7 @@ constexpr int64_t kVoiceMaximumUs = 10'000'000;
 constexpr int64_t kNoSpeechTimeoutUs = 5'000'000;
 constexpr int64_t kEndSilenceUs = 1'100'000;
 constexpr float kVoiceThreshold = 350.0f;
+constexpr std::size_t kOtaBufferSize = 4096;
 
 struct FileWriter {
     FILE *file;
@@ -47,6 +51,219 @@ bool json_number(cJSON *object, const char *name, float *destination) {
     }
     *destination = static_cast<float>(value->valuedouble);
     return true;
+}
+
+struct SemanticVersion {
+    uint32_t parts[3];
+    const char *prerelease;
+    std::size_t prerelease_length;
+};
+
+bool parse_version_number(
+    const char **cursor,
+    uint32_t *destination
+) {
+    if (cursor == nullptr || *cursor == nullptr || destination == nullptr) {
+        return false;
+    }
+    const char *start = *cursor;
+    if (*start < '0' || *start > '9') {
+        return false;
+    }
+    if (*start == '0' && start[1] >= '0' && start[1] <= '9') {
+        return false;
+    }
+    char *end = nullptr;
+    const unsigned long value = std::strtoul(start, &end, 10);
+    if (end == start || value > UINT32_MAX) {
+        return false;
+    }
+    *destination = static_cast<uint32_t>(value);
+    *cursor = end;
+    return true;
+}
+
+bool valid_version_identifier(const char *start, std::size_t length) {
+    if (start == nullptr || length == 0) {
+        return false;
+    }
+    for (std::size_t index = 0; index < length; ++index) {
+        const char value = start[index];
+        if (
+            !((value >= '0' && value <= '9') ||
+              (value >= 'A' && value <= 'Z') ||
+              (value >= 'a' && value <= 'z') ||
+              value == '-')
+        ) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool parse_semantic_version(const char *value, SemanticVersion *version) {
+    if (value == nullptr || version == nullptr) {
+        return false;
+    }
+    const char *cursor = value;
+    for (std::size_t index = 0; index < 3; ++index) {
+        if (!parse_version_number(&cursor, &version->parts[index])) {
+            return false;
+        }
+        if (index < 2 && *cursor++ != '.') {
+            return false;
+        }
+    }
+    version->prerelease = nullptr;
+    version->prerelease_length = 0;
+    if (*cursor == '-') {
+        const char *start = ++cursor;
+        const char *identifier = cursor;
+        while (*cursor != '\0' && *cursor != '+') {
+            if (*cursor == '.') {
+                if (!valid_version_identifier(
+                        identifier,
+                        static_cast<std::size_t>(cursor - identifier)
+                    )) {
+                    return false;
+                }
+                identifier = cursor + 1;
+            }
+            ++cursor;
+        }
+        if (!valid_version_identifier(
+                identifier,
+                static_cast<std::size_t>(cursor - identifier)
+            )) {
+            return false;
+        }
+        version->prerelease = start;
+        version->prerelease_length =
+            static_cast<std::size_t>(cursor - start);
+    }
+    if (*cursor == '+') {
+        const char *identifier = ++cursor;
+        while (*cursor != '\0') {
+            if (*cursor == '.') {
+                if (!valid_version_identifier(
+                        identifier,
+                        static_cast<std::size_t>(cursor - identifier)
+                    )) {
+                    return false;
+                }
+                identifier = cursor + 1;
+            }
+            ++cursor;
+        }
+        if (!valid_version_identifier(
+                identifier,
+                static_cast<std::size_t>(cursor - identifier)
+            )) {
+            return false;
+        }
+    }
+    return *cursor == '\0';
+}
+
+int compare_prerelease_identifier(
+    const char *left,
+    std::size_t left_length,
+    const char *right,
+    std::size_t right_length
+) {
+    bool left_numeric = true;
+    bool right_numeric = true;
+    for (std::size_t index = 0; index < left_length; ++index) {
+        left_numeric = left_numeric && left[index] >= '0' && left[index] <= '9';
+    }
+    for (std::size_t index = 0; index < right_length; ++index) {
+        right_numeric =
+            right_numeric && right[index] >= '0' && right[index] <= '9';
+    }
+    if (left_numeric != right_numeric) {
+        return left_numeric ? -1 : 1;
+    }
+    if (left_numeric) {
+        while (left_length > 1 && *left == '0') {
+            ++left;
+            --left_length;
+        }
+        while (right_length > 1 && *right == '0') {
+            ++right;
+            --right_length;
+        }
+        if (left_length != right_length) {
+            return left_length < right_length ? -1 : 1;
+        }
+    }
+    const std::size_t shared = std::min(left_length, right_length);
+    const int compared = std::memcmp(left, right, shared);
+    if (compared != 0) {
+        return compared < 0 ? -1 : 1;
+    }
+    if (left_length == right_length) {
+        return 0;
+    }
+    return left_length < right_length ? -1 : 1;
+}
+
+int compare_prerelease(const SemanticVersion &left, const SemanticVersion &right) {
+    if (left.prerelease == nullptr || right.prerelease == nullptr) {
+        if (left.prerelease == right.prerelease) {
+            return 0;
+        }
+        return left.prerelease == nullptr ? 1 : -1;
+    }
+    const char *left_cursor = left.prerelease;
+    const char *right_cursor = right.prerelease;
+    const char *left_end = left.prerelease + left.prerelease_length;
+    const char *right_end = right.prerelease + right.prerelease_length;
+    while (left_cursor < left_end && right_cursor < right_end) {
+        const char *left_dot = static_cast<const char *>(
+            std::memchr(left_cursor, '.', left_end - left_cursor)
+        );
+        const char *right_dot = static_cast<const char *>(
+            std::memchr(right_cursor, '.', right_end - right_cursor)
+        );
+        const char *left_identifier_end =
+            left_dot == nullptr ? left_end : left_dot;
+        const char *right_identifier_end =
+            right_dot == nullptr ? right_end : right_dot;
+        const int result = compare_prerelease_identifier(
+            left_cursor,
+            static_cast<std::size_t>(left_identifier_end - left_cursor),
+            right_cursor,
+            static_cast<std::size_t>(right_identifier_end - right_cursor)
+        );
+        if (result != 0) {
+            return result;
+        }
+        left_cursor =
+            left_dot == nullptr ? left_end : left_identifier_end + 1;
+        right_cursor =
+            right_dot == nullptr ? right_end : right_identifier_end + 1;
+    }
+    if (left_cursor == left_end && right_cursor == right_end) {
+        return 0;
+    }
+    return left_cursor == left_end ? -1 : 1;
+}
+
+bool version_is_newer(const char *candidate, const char *current) {
+    SemanticVersion candidate_version = {};
+    SemanticVersion current_version = {};
+    if (
+        !parse_semantic_version(candidate, &candidate_version) ||
+        !parse_semantic_version(current, &current_version)
+    ) {
+        return false;
+    }
+    for (std::size_t index = 0; index < 3; ++index) {
+        if (candidate_version.parts[index] != current_version.parts[index]) {
+            return candidate_version.parts[index] > current_version.parts[index];
+        }
+    }
+    return compare_prerelease(candidate_version, current_version) > 0;
 }
 
 bool write_all(
@@ -629,6 +846,16 @@ esp_err_t PilotClient::CheckForUpdate(bool install) {
     const std::size_t size = cJSON_IsNumber(size_value)
         ? static_cast<std::size_t>(size_value->valuedouble)
         : 0;
+    if (!version_is_newer(version, firmware_version_)) {
+        ESP_LOGW(
+            kTag,
+            "Ignoring non-upgrade firmware %s while running %s",
+            version,
+            firmware_version_
+        );
+        cJSON_Delete(root);
+        return ESP_OK;
+    }
     ESP_LOGI(kTag, "Firmware %s is available", version);
     cJSON_Delete(root);
     if (!install) {
@@ -697,11 +924,20 @@ esp_err_t PilotClient::InstallFirmware(
     mbedtls_sha256_context sha = {};
     mbedtls_sha256_init(&sha);
     mbedtls_sha256_starts(&sha, 0);
-    std::array<uint8_t, 4096> buffer = {};
+    auto *buffer = static_cast<uint8_t *>(
+        heap_caps_malloc(kOtaBufferSize, MALLOC_CAP_8BIT)
+    );
+    if (buffer == nullptr) {
+        mbedtls_sha256_free(&sha);
+        esp_ota_abort(ota);
+        esp_http_client_close(client);
+        esp_http_client_cleanup(client);
+        return ESP_ERR_NO_MEM;
+    }
     std::size_t total = 0;
     while (result == ESP_OK) {
         const int read = esp_http_client_read(
-            client, reinterpret_cast<char *>(buffer.data()), buffer.size()
+            client, reinterpret_cast<char *>(buffer), kOtaBufferSize
         );
         if (read < 0) {
             result = ESP_FAIL;
@@ -715,9 +951,10 @@ esp_err_t PilotClient::InstallFirmware(
             result = ESP_ERR_INVALID_SIZE;
             break;
         }
-        mbedtls_sha256_update(&sha, buffer.data(), static_cast<std::size_t>(read));
-        result = esp_ota_write(ota, buffer.data(), static_cast<std::size_t>(read));
+        mbedtls_sha256_update(&sha, buffer, static_cast<std::size_t>(read));
+        result = esp_ota_write(ota, buffer, static_cast<std::size_t>(read));
     }
+    heap_caps_free(buffer);
     std::array<uint8_t, 32> digest = {};
     mbedtls_sha256_finish(&sha, digest.data());
     mbedtls_sha256_free(&sha);

@@ -8,6 +8,7 @@ __pycache__/
 **/build/
 .idea/
 local.properties
+.artifacts/
 deploy/ansible/inventory/hosts.yml
 validation-*.log
 *.wav

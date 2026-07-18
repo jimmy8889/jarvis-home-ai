@@ -78,6 +78,8 @@ jobs:
           bash -n deploy/scripts/pilot-core-deploy
           bash -n deploy/scripts/pilot-rollback
           bash -n deploy/scripts/pilot-validate
+          bash -n firmware/pilot-display-node/scripts/build.sh
+          bash -n firmware/pilot-display-node/scripts/flash.sh
       - name: Check Python deployment scripts
         run: >-
           python -m py_compile

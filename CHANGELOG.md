@@ -1,5 +1,21 @@
 # Changelog
 
+## 2026-07-18
+
+- Added Pilot Display Node 0.1 firmware for the Waveshare
+  ESP32-C6-Touch-AMOLED-2.16, with a burn-in-conscious 480 x 480 office clock,
+  Brisbane timezone, Wi-Fi/NTP synchronization, RTC fallback, and native USB
+  diagnostics.
+- Added an OTA-ready 16 MB partition layout, pinned ESP-IDF component
+  dependencies, reproducible build/flash scripts, third-party notices, and a
+  complete factory-flash rollback procedure.
+- Tuned the no-PSRAM display and Wi-Fi memory profiles so LVGL, Wi-Fi 6, NTP,
+  and the clock can coexist; Wi-Fi failure now preserves an operational offline
+  RTC clock instead of causing a reboot loop.
+- Backed up the complete original factory flash before deployment, flashed the
+  Pilot image with hash verification, then validated Wi-Fi, DHCP, NTP, RTC
+  update, minute heartbeat, and reset recovery on the physical board.
+
 ## 2026-07-17
 
 - Added Pilot Core 0.10 authenticated observability with derived endpoint

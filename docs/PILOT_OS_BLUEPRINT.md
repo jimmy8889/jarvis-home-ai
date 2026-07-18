@@ -1,8 +1,8 @@
 # Pilot OS Blueprint
 
-Version 1.6
+Version 1.7
 
-Last updated: 2026-07-17
+Last updated: 2026-07-18
 
 Status: Canonical architecture reference
 
@@ -157,6 +157,24 @@ all 19 silent endpoint checks, including Pilot Core command connectivity, while
 the K3 audio activation gate remains explicitly unarmed until an in-person
 acceptance test.
 
+### Office display node
+
+```text
+Hardware: Waveshare ESP32-C6-Touch-AMOLED-2.16
+Firmware: Pilot Display Node 0.1
+Display: 480 x 480 AMOLED
+Time: Australia/Brisbane via NTP with PCF85063 RTC fallback
+Network: Hazell IoT VLAN over 2.4 GHz Wi-Fi
+```
+
+The first display-node firmware is deployed on physical hardware. It presents
+a burn-in-conscious clock, reconnects to Wi-Fi, synchronizes time using
+Cloudflare NTP, refreshes the hardware RTC, and continues as an offline clock
+if networking is unavailable. Native USB diagnostics, two OTA application
+slots, pinned dependencies, reproducible scripts, and a preserved full factory
+flash provide the initial operations and rollback model. Touch and Pilot Core
+event rendering remain deliberately deferred.
+
 ## 5. Hardware plan
 
 ### Core cluster
@@ -268,6 +286,15 @@ reads the authenticated operations snapshot, renders rooms, integrations,
 safety, endpoints, players, and now-playing state, and stores its administrator
 credential only in process memory. Media and Home Assistant mutations remain
 absent until in-person acceptance.
+
+### Embedded display nodes
+
+Pilot Display Node 0.1 is the first ESP32 client. Its current responsibilities
+are local time display, network/time-source status, NTP synchronization, RTC
+fallback, and boot diagnostics. Planned responsibilities are authenticated
+Pilot Core enrollment, event/status rendering, touch controls, OTA updates,
+presence-aware brightness, and room-context interactions. It is a display and
+control surface, not a replacement for the N150 audio endpoint.
 
 ## 7. Voice and AI pipeline
 
@@ -401,6 +428,7 @@ pilot/
   deploy/ansible/
   deploy/scripts/
   docs/
+  firmware/pilot-display-node/
   systemd/
 
 Future:
@@ -434,11 +462,21 @@ deployed integration, hardware boundary, or milestone status changes.
 - [x] AirPlay receiver
 - [x] Native Music Assistant Sendspin connection
 - [x] Sendspin reboot persistence and automatic reconnection
-- [ ] Audible Music Assistant playback acceptance test
-- [ ] TIDAL provider and local-library acceptance tests
+- [x] Audible Music Assistant playback acceptance test
+- [x] TIDAL provider and playback acceptance test
+- [ ] Local lossless-library acceptance test
 - [x] Source-priority policy and local control/event foundation
 - [ ] Audible assistant ducking and gain-restoration acceptance test
 - [ ] Bluetooth A2DP sink
+
+### Embedded nodes
+
+- [x] ESP32-C6 display hardware identified and factory image preserved
+- [x] Pilot clock UI, Wi-Fi, NTP, RTC fallback, and reboot persistence
+- [x] Reproducible firmware build, flash, and rollback documentation
+- [ ] Authenticated Pilot Core enrollment and event transport
+- [ ] Touch interaction and room controls
+- [ ] Signed or authenticated OTA update workflow
 
 ### Phase 3 — Media room
 
@@ -490,15 +528,18 @@ deployed integration, hardware boundary, or milestone status changes.
 
 ## 14. Immediate next steps
 
-1. Select `Pilot Office Music` in Music Assistant and prove audible playback.
-2. Validate TIDAL playback and a local lossless track.
+1. Select and deploy the local TTS provider, then validate wake word through
+   spoken response on the Office K3.
+2. Validate a local lossless Music Assistant track.
 3. Complete the supervised K3 acceptance receipt and explicitly arm room
    playback.
 4. Validate assistant ducking and gain restoration at a safe listening volume.
 5. Validate the native Intel Bluetooth controller; add a dedicated adapter only
    if its receiver behavior is inadequate.
 6. Train and deploy the **Hey Pilot** wake model.
-7. Complete the in-person Denon power, source, playback, and safe-volume
+7. Enroll the ESP32 display with Pilot Core and add authenticated room-status
+   events before enabling touch or OTA.
+8. Complete the in-person Denon power, source, playback, and safe-volume
    acceptance before enabling Media Room control.
 
 ## 15. Decision log
@@ -517,6 +558,10 @@ deployed integration, hardware boundary, or milestone status changes.
 - Keep the Shield as the licensed Dolby Vision playback engine.
 - Separate player discovery from mutation; new room players start with
   `control_enabled = false`.
+- Treat ESP32 displays as thin room surfaces; keep audio, orchestration, and
+  durable state on the N150 endpoints and Pilot Core.
+- Inject display-node Wi-Fi credentials only during local builds and keep the
+  complete pre-Pilot factory flash outside source control.
 
 ## 16. Version history
 
@@ -560,3 +605,10 @@ deployed integration, hardware boundary, or milestone status changes.
 - **1.5** — Added Pilot Core 0.9's read-only Media Room model, verified Denon
   HEOS and Shield identities, normalized Music Assistant/Home Assistant player
   state, and enforced a fail-closed per-player control gate.
+- **1.6** — Added Pilot Core 0.10 observability, actionable alerts, Prometheus
+  metrics, the read-only Media Room acceptance harness, Pilot TV 0.1, and the
+  bounded meeting-ingestion and evidence-review foundation.
+- **1.7** — Added and physically deployed Pilot Display Node 0.1 on the
+  ESP32-C6 AMOLED hardware, including Wi-Fi/NTP, RTC fallback, a low-memory
+  display profile, OTA-ready partitions, reproducible firmware tooling, and a
+  full factory-flash rollback path.

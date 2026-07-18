@@ -1,0 +1,15 @@
+idf_component_register(
+    SRCS
+    "i2c_bsp.cpp"
+    "display_bsp.cpp"
+    INCLUDE_DIRS
+    "./"
+    REQUIRES
+    driver
+    esp_lcd
+    waveshare__esp_lcd_touch_cst9217
+    PRIV_REQUIRES
+    pmicpower
+    espressif__esp_lcd_sh8601
+    esp_timer
+)

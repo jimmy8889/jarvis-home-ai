@@ -43,11 +43,17 @@ tts_engine_id = "tts.piper"
 tts_voice = "default"
 tts_format = "wav"
 tts_language = "en"
+tts_sample_rate = 16000
+tts_sample_channels = 1
+tts_sample_bytes = 2
 tts_timeout_seconds = 60
 ```
 
-The actual Piper entity ID must be confirmed in Home Assistant before this is
-enabled. The long-lived Home Assistant token remains an environment secret.
+The production deployment uses `tts.piper` with the local Amy voice. Pilot Core
+requests all four preferred audio properties because a format-only request may
+fall back to MP3. The 16 kHz, mono, 16-bit WAV response is compatible with the
+bedroom ESP32 node and remains suitable for the room-agent playback path. The
+long-lived Home Assistant token remains a file-backed container secret.
 
 ### OpenAI-compatible local speech
 
@@ -134,15 +140,14 @@ deploy/scripts/pilot-speak \
 Omit the text to read it from standard input. Use
 `--kind announcement --critical` only for a genuine critical announcement.
 
-## Activation gate
+## Current activation state
 
-The provider configuration remains disabled in the repository examples. The
-safe activation sequence is:
+The provider remains disabled in the generic example configuration. It is
+enabled in the production container configuration and has passed a silent
+format check against Home Assistant Piper. Audible acceptance remains
+room-specific:
 
-1. Deploy Pilot Core and register the Office endpoint.
-2. Confirm the Home Assistant Piper entity ID.
-3. Enable the Home Assistant provider and verify `/v1/tts`.
-4. Synthesize a response without enabling live audio focus.
-5. With someone in the room, play a quiet test through the K3.
-6. Verify cancellation, source-state reporting, and volume restoration.
-7. Enable live ducking only after the physical acceptance test passes.
+1. Verify `/v1/tts` and synthesize without enabling live audio focus.
+2. With someone in the room, play a quiet test through the intended endpoint.
+3. Verify cancellation, source-state reporting, and volume restoration.
+4. Enable live ducking only after that room's physical acceptance passes.

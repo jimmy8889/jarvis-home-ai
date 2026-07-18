@@ -15,6 +15,9 @@ class ServerSettings:
     audio_asset_retention_seconds: int = 3600
     meeting_asset_path: str = "/var/lib/pilot-core/meetings"
     meeting_asset_max_bytes: int = 2_000_000_000
+    firmware_asset_path: str = "/var/lib/pilot-core/firmware"
+    firmware_asset_max_bytes: int = 8_000_000
+    voice_audio_max_bytes: int = 1_000_000
     admin_token_env: str = "PILOT_CORE_ADMIN_TOKEN"
     bootstrap_token_env: str = "PILOT_CORE_BOOTSTRAP_TOKEN"
     legacy_bootstrap_enabled: bool = True
@@ -26,6 +29,10 @@ class IntegrationSettings:
     music_assistant_token_env: str = "MUSIC_ASSISTANT_TOKEN"
     home_assistant_url: str = ""
     home_assistant_token_env: str = "HOME_ASSISTANT_TOKEN"
+    home_assistant_assist_pipeline_id: str = ""
+    home_assistant_assist_language: str = "en"
+    home_assistant_assist_timeout_seconds: int = 60
+    weather_entity_id: str = ""
     tts_provider: str = ""
     tts_url: str = ""
     tts_token_env: str = "PILOT_TTS_TOKEN"
@@ -34,6 +41,9 @@ class IntegrationSettings:
     tts_voice: str = "default"
     tts_format: str = "wav"
     tts_language: str = "en"
+    tts_sample_rate: int = 16000
+    tts_sample_channels: int = 1
+    tts_sample_bytes: int = 2
     tts_timeout_seconds: int = 60
 
 
@@ -165,6 +175,10 @@ def _validate_references(rooms: tuple[Room, ...], players: tuple[Player, ...]) -
                     f"room {room.id} {field} references player {player_id} "
                     f"owned by room {player.room_id}"
                 )
+            if not player.enabled:
+                raise ValueError(
+                    f"room {room.id} {field} references disabled player {player_id}"
+                )
 
 
 def load_settings(path: str | Path) -> Settings:
@@ -196,6 +210,15 @@ def load_settings(path: str | Path) -> Settings:
         meeting_asset_max_bytes=int(
             server_values.get("meeting_asset_max_bytes", 2_000_000_000)
         ),
+        firmware_asset_path=str(
+            server_values.get("firmware_asset_path", "/var/lib/pilot-core/firmware")
+        ),
+        firmware_asset_max_bytes=int(
+            server_values.get("firmware_asset_max_bytes", 8_000_000)
+        ),
+        voice_audio_max_bytes=int(
+            server_values.get("voice_audio_max_bytes", 1_000_000)
+        ),
         admin_token_env=str(
             server_values.get("admin_token_env", "PILOT_CORE_ADMIN_TOKEN")
         ),
@@ -210,6 +233,14 @@ def load_settings(path: str | Path) -> Settings:
         raise ValueError("server.audio_asset_max_bytes must be positive")
     if server.meeting_asset_max_bytes < 1:
         raise ValueError("server.meeting_asset_max_bytes must be positive")
+    if not 1 <= server.firmware_asset_max_bytes <= 16_000_000:
+        raise ValueError(
+            "server.firmware_asset_max_bytes must be between 1 and 16000000"
+        )
+    if not 32_000 <= server.voice_audio_max_bytes <= 10_000_000:
+        raise ValueError(
+            "server.voice_audio_max_bytes must be between 32000 and 10000000"
+        )
     if not 60 <= server.audio_asset_retention_seconds <= 86_400:
         raise ValueError(
             "server.audio_asset_retention_seconds must be between 60 and 86400"
@@ -231,6 +262,18 @@ def load_settings(path: str | Path) -> Settings:
         home_assistant_token_env=str(
             integration_values.get("home_assistant_token_env", "HOME_ASSISTANT_TOKEN")
         ),
+        home_assistant_assist_pipeline_id=str(
+            integration_values.get("home_assistant_assist_pipeline_id", "")
+        ).strip(),
+        home_assistant_assist_language=str(
+            integration_values.get("home_assistant_assist_language", "en")
+        ).strip(),
+        home_assistant_assist_timeout_seconds=int(
+            integration_values.get("home_assistant_assist_timeout_seconds", 60)
+        ),
+        weather_entity_id=str(
+            integration_values.get("weather_entity_id", "")
+        ).strip(),
         tts_provider=str(integration_values.get("tts_provider", "")).strip(),
         tts_url=str(integration_values.get("tts_url", "")).rstrip("/"),
         tts_token_env=str(integration_values.get("tts_token_env", "PILOT_TTS_TOKEN")),
@@ -239,14 +282,34 @@ def load_settings(path: str | Path) -> Settings:
         tts_voice=str(integration_values.get("tts_voice", "default")).strip(),
         tts_format=str(integration_values.get("tts_format", "wav")).strip(),
         tts_language=str(integration_values.get("tts_language", "en")).strip(),
+        tts_sample_rate=int(integration_values.get("tts_sample_rate", 16000)),
+        tts_sample_channels=int(
+            integration_values.get("tts_sample_channels", 1)
+        ),
+        tts_sample_bytes=int(integration_values.get("tts_sample_bytes", 2)),
         tts_timeout_seconds=int(integration_values.get("tts_timeout_seconds", 60)),
     )
     if integrations.tts_provider not in {"", "home_assistant", "openai"}:
         raise ValueError("integrations.tts_provider must be home_assistant or openai")
     if integrations.tts_format not in {"wav", "flac", "mp3", "ogg", "aac"}:
         raise ValueError("integrations.tts_format is unsupported")
+    if integrations.tts_sample_rate not in {8000, 16000, 22050, 24000, 44100, 48000}:
+        raise ValueError("integrations.tts_sample_rate is unsupported")
+    if integrations.tts_sample_channels not in {1, 2}:
+        raise ValueError("integrations.tts_sample_channels must be 1 or 2")
+    if integrations.tts_sample_bytes != 2:
+        raise ValueError("integrations.tts_sample_bytes must be 2")
     if not 1 <= integrations.tts_timeout_seconds <= 300:
         raise ValueError("integrations.tts_timeout_seconds must be between 1 and 300")
+    if not 5 <= integrations.home_assistant_assist_timeout_seconds <= 300:
+        raise ValueError(
+            "integrations.home_assistant_assist_timeout_seconds must be "
+            "between 5 and 300"
+        )
+    if integrations.weather_entity_id and not integrations.weather_entity_id.startswith(
+        "weather."
+    ):
+        raise ValueError("integrations.weather_entity_id must be a weather entity")
     if integrations.tts_provider == "home_assistant":
         if not integrations.home_assistant_url:
             raise ValueError(

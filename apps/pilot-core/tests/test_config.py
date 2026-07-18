@@ -75,6 +75,14 @@ class ConfigTests(unittest.TestCase):
                 )
             )
 
+    def test_rejects_disabled_default_player(self) -> None:
+        configured = VALID_CONFIG.replace(
+            'kind = "music"',
+            'kind = "music"\nenabled = false',
+        )
+        with self.assertRaisesRegex(ValueError, "disabled player"):
+            self._load(configured)
+
     def test_rejects_duplicate_player_id(self) -> None:
         duplicate = (
             VALID_CONFIG

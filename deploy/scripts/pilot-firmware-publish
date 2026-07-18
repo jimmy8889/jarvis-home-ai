@@ -1,0 +1,129 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+repo_root="$(cd "${script_dir}/../.." && pwd)"
+compose_file="${repo_root}/infra/docker-compose.yml"
+release_dir=""
+
+usage() {
+  printf '%s\n' \
+    "Usage: pilot-firmware-publish --release-dir PATH [--compose-file PATH]" \
+    "" \
+    "Validates and atomically publishes one ESP firmware release to Pilot Core."
+}
+
+while (($#)); do
+  case "$1" in
+    --release-dir) release_dir="$2"; shift ;;
+    --compose-file) compose_file="$2"; shift ;;
+    -h|--help) usage; exit 0 ;;
+    *) printf 'Unknown option: %s\n' "$1" >&2; usage >&2; exit 2 ;;
+  esac
+  shift
+done
+
+if [[ -z "$release_dir" ]]; then
+  usage >&2
+  exit 2
+fi
+release_dir="$(cd "$release_dir" && pwd)"
+manifest="${release_dir}/latest.json"
+if [[ ! -f "$manifest" ]]; then
+  printf 'Firmware manifest is missing: %s\n' "$manifest" >&2
+  exit 1
+fi
+
+IFS=$'\t' read -r target version filename expected_sha256 expected_size < <(
+  python3 -c '
+import json
+import re
+import sys
+from pathlib import Path
+
+manifest = Path(sys.argv[1])
+value = json.loads(manifest.read_text(encoding="utf-8"))
+target = str(value.get("target", ""))
+version = str(value.get("version", ""))
+filename = str(value.get("filename", ""))
+sha256 = str(value.get("sha256", "")).lower()
+size = value.get("size_bytes")
+mandatory = value.get("mandatory")
+if not re.fullmatch(r"[a-z0-9][a-z0-9.-]{0,127}", target):
+    raise SystemExit("invalid firmware target")
+if not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+(?:[-+][a-zA-Z0-9.-]+)?", version):
+    raise SystemExit("invalid firmware version")
+if filename != Path(filename).name or not filename.endswith(".bin"):
+    raise SystemExit("invalid firmware filename")
+if not re.fullmatch(r"[a-f0-9]{64}", sha256):
+    raise SystemExit("invalid firmware SHA-256")
+if not isinstance(size, int) or size < 1:
+    raise SystemExit("invalid firmware size")
+if not isinstance(mandatory, bool):
+    raise SystemExit("invalid mandatory flag")
+print("\t".join((target, version, filename, sha256, str(size))))
+' "$manifest"
+)
+
+image="${release_dir}/${filename}"
+if [[ ! -f "$image" ]]; then
+  printf 'Firmware image is missing: %s\n' "$image" >&2
+  exit 1
+fi
+if command -v sha256sum >/dev/null 2>&1; then
+  actual_sha256="$(sha256sum "$image" | awk '{print $1}')"
+else
+  actual_sha256="$(shasum -a 256 "$image" | awk '{print $1}')"
+fi
+actual_size="$(wc -c < "$image" | tr -d '[:space:]')"
+if [[ "$actual_sha256" != "$expected_sha256" || "$actual_size" != "$expected_size" ]]; then
+  echo "Firmware image does not match its release manifest." >&2
+  exit 1
+fi
+
+upload_id="$$"
+remote_dir="/data/firmware/${target}"
+incoming_image="${remote_dir}/.incoming-${upload_id}-${filename}"
+incoming_manifest="${remote_dir}/.incoming-${upload_id}-latest.json"
+
+docker compose -f "$compose_file" exec -T pilot-core \
+  python -c 'from pathlib import Path; import sys; Path(sys.argv[1]).mkdir(parents=True, exist_ok=True)' \
+  "$remote_dir"
+docker compose -f "$compose_file" cp "$image" "pilot-core:${incoming_image}"
+docker compose -f "$compose_file" cp "$manifest" "pilot-core:${incoming_manifest}"
+docker compose -f "$compose_file" exec -T pilot-core \
+  python -c '
+import hashlib
+import json
+import os
+from pathlib import Path
+import sys
+
+remote_dir = Path(sys.argv[1])
+incoming_image = Path(sys.argv[2])
+incoming_manifest = Path(sys.argv[3])
+expected_sha256 = sys.argv[4]
+expected_size = int(sys.argv[5])
+filename = sys.argv[6]
+version = sys.argv[7]
+image = incoming_image.read_bytes()
+if len(image) != expected_size:
+    raise SystemExit("uploaded firmware size mismatch")
+if hashlib.sha256(image).hexdigest() != expected_sha256:
+    raise SystemExit("uploaded firmware checksum mismatch")
+manifest = json.loads(incoming_manifest.read_text(encoding="utf-8"))
+if manifest.get("filename") != filename or manifest.get("version") != version:
+    raise SystemExit("uploaded firmware manifest mismatch")
+destination = remote_dir / filename
+if destination.exists():
+    existing = destination.read_bytes()
+    if hashlib.sha256(existing).hexdigest() != expected_sha256:
+        raise SystemExit("refusing to replace an immutable firmware release")
+    incoming_image.unlink()
+else:
+    os.replace(incoming_image, destination)
+os.replace(incoming_manifest, remote_dir / "latest.json")
+' "$remote_dir" "$incoming_image" "$incoming_manifest" \
+  "$expected_sha256" "$expected_size" "$filename" "$version"
+
+printf 'Published firmware %s %s to Pilot Core.\n' "$target" "$version"

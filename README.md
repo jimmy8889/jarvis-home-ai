@@ -78,9 +78,10 @@ Room-bound, authenticated assistant and announcement playback is documented in
 Local Home Assistant/Piper and OpenAI-compatible speech synthesis is documented
 in [docs/LOCAL_TTS.md](docs/LOCAL_TTS.md).
 
-The first ESP32-C6 AMOLED room display firmware, including its reproducible
-build, flash, diagnostics, and factory-image rollback procedure, is documented
-in [firmware/pilot-display-node/README.md](firmware/pilot-display-node/README.md).
+The ESP32-C6 AMOLED bedroom node firmware, including motion-aware dim/off,
+weather, touch push-to-talk, local voice responses, authenticated OTA,
+reproducible builds, and factory-image rollback, is documented in
+[firmware/pilot-display-node/README.md](firmware/pilot-display-node/README.md).
 
 Read-only Denon HEOS and NVIDIA Shield discovery, Media Room registration, and
 the fail-closed player control gate are documented in

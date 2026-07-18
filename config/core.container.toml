@@ -7,6 +7,9 @@ audio_asset_max_bytes = 20000000
 audio_asset_retention_seconds = 3600
 meeting_asset_path = "/data/meetings"
 meeting_asset_max_bytes = 2000000000
+firmware_asset_path = "/data/firmware"
+firmware_asset_max_bytes = 8000000
+voice_audio_max_bytes = 1000000
 admin_token_env = "PILOT_CORE_ADMIN_TOKEN"
 bootstrap_token_env = "PILOT_CORE_BOOTSTRAP_TOKEN"
 legacy_bootstrap_enabled = false
@@ -16,15 +19,48 @@ music_assistant_url = "http://10.0.2.72:8095"
 music_assistant_token_env = "MUSIC_ASSISTANT_TOKEN"
 home_assistant_url = "http://10.0.2.72:8123"
 home_assistant_token_env = "HOME_ASSISTANT_TOKEN"
-tts_provider = ""
+home_assistant_assist_pipeline_id = "01kxkqhhw28z558e2b99nwzk0z"
+home_assistant_assist_language = "en"
+home_assistant_assist_timeout_seconds = 60
+weather_entity_id = "weather.geebung"
+tts_provider = "home_assistant"
 tts_url = ""
 tts_token_env = "PILOT_TTS_TOKEN"
-tts_engine_id = ""
+tts_engine_id = "tts.piper"
 tts_model = "tts-1"
-tts_voice = "default"
+tts_voice = "en_US-amy-low"
 tts_format = "wav"
-tts_language = "en"
+tts_language = "en_US"
+tts_sample_rate = 16000
+tts_sample_channels = 1
+tts_sample_bytes = 2
 tts_timeout_seconds = 60
+
+[[rooms]]
+id = "bedroom"
+name = "Bedroom"
+response_player_id = "bedroom-display-speaker"
+default_music_player_id = "bedroom-music"
+default_device_id = "pilot-bedroom-display"
+agent_url = ""
+
+[[players]]
+id = "bedroom-display-speaker"
+room_id = "bedroom"
+name = "Bedroom Display Speaker"
+protocol = "pilot-device"
+kind = "response"
+endpoint = "pilot-bedroom-display"
+control_enabled = false
+
+[[players]]
+id = "bedroom-music"
+room_id = "bedroom"
+name = "Bedroom Music"
+protocol = "future"
+kind = "music"
+endpoint = ""
+control_enabled = false
 
 [[rooms]]
 id = "office"

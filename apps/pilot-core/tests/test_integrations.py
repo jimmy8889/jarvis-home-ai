@@ -72,6 +72,54 @@ class IntegrationDiagnosticTests(unittest.IsolatedAsyncioTestCase):
                 "media_player.media_room/../../config"
             )
 
+    async def test_weather_reads_current_state_and_daily_forecast(self) -> None:
+        requests: list[httpx.Request] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            requests.append(request)
+            if request.method == "GET":
+                return httpx.Response(
+                    200,
+                    json={
+                        "entity_id": "weather.home",
+                        "state": "sunny",
+                        "attributes": {"temperature": 24.0},
+                    },
+                )
+            self.assertEqual(request.url.path, "/api/services/weather/get_forecasts")
+            self.assertEqual(request.url.params["return_response"], "")
+            self.assertEqual(
+                json.loads(request.content),
+                {"entity_id": "weather.home", "type": "daily"},
+            )
+            return httpx.Response(
+                200,
+                json={
+                    "service_response": {
+                        "weather.home": {
+                            "forecast": [{"temperature": 27, "templow": 17}]
+                        }
+                    }
+                },
+            )
+
+        integrations = Integrations(
+            IntegrationSettings(
+                home_assistant_url="http://ha.local:8123",
+                weather_entity_id="weather.home",
+            ),
+            httpx.MockTransport(handler),
+        )
+        result = await integrations.home_assistant_weather()
+        self.assertEqual(result["current"]["state"], "sunny")
+        self.assertEqual(
+            result["forecast_response"]["service_response"]["weather.home"][
+                "forecast"
+            ][0]["temperature"],
+            27,
+        )
+        self.assertEqual(len(requests), 2)
+
 
 if __name__ == "__main__":
     unittest.main()

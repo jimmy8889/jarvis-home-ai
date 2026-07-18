@@ -1,6 +1,6 @@
 # Pilot Core
 
-Pilot Core 0.9 is the authenticated control-plane foundation for Pilot OS. It
+Pilot Core 0.11 is the authenticated control-plane foundation for Pilot OS. It
 persists the canonical room/player registry, registered room devices, source
 state, event history, and durable device command queue in SQLite.
 
@@ -64,6 +64,15 @@ Provisioning and device endpoints:
 - `POST /v1/devices/register` is legacy-only and disabled in production
 - `POST /v1/events` using device ID and device bearer token
 - `WS /v1/devices/ws?device_id=...` using device ID and device bearer token
+- `GET /v1/devices/{device_id}/snapshot` for bounded weather and service state
+- `POST /v1/devices/{device_id}/voice` for bounded 16-bit mono PCM
+- `GET /v1/devices/{device_id}/firmware` for the validated OTA manifest
+- `GET /v1/devices/{device_id}/firmware/image` for the private OTA image
+
+The embedded-node routes require both the matching `X-Pilot-Device-ID` header
+and that device's bearer token. Voice and OTA additionally require the matching
+device capability. Home Assistant credentials, raw provider weather payloads,
+and filesystem paths are never returned to the node.
 
 The command transport and its queued, delivered, terminal, expiry, reconnect,
 and idempotency behavior are documented in

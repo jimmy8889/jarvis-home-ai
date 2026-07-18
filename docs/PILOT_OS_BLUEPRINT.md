@@ -1,6 +1,6 @@
 # Pilot OS Blueprint
 
-Version 1.7
+Version 1.8
 
 Last updated: 2026-07-18
 
@@ -90,7 +90,7 @@ Music streams: TCP 8097
 Sendspin server: TCP 8927
 Pilot Core: 10.0.1.64:8770
 Pilot Core host: debian-docker / Debian 12
-Pilot Core image: jarvis-home-ai/pilot-core:core-0.10.0-20260717.1
+Pilot Core image: jarvis-home-ai/pilot-core:core-0.11.0-20260718.2
 ```
 
 The Home Assistant add-on is the preferred initial Music Assistant deployment.
@@ -98,15 +98,18 @@ It provides simple lifecycle management and close HA integration. A standalone
 container remains an option if independent uptime or resource isolation later
 becomes important.
 
-Pilot Core 0.10 is deployed as a hardened, non-root Docker service with a
+Pilot Core is deployed as a hardened, non-root Docker service with a
 read-only root filesystem, all Linux capabilities dropped, file-backed secrets,
 and persistent state in the `infra_pilot-core-data` volume. The service passed
 LAN health/readiness, authenticated API, invalid-token, disabled legacy
 bootstrap, container-restart persistence, backup-integrity, and log checks.
 Dedicated Home Assistant and Music Assistant credentials are installed through
 the root-owned file-backed secret store, and both read-only diagnostics are
-healthy. TTS remains deliberately unconfigured until the local speech provider
-is selected. A same-origin operations dashboard is available at `/dashboard`;
+healthy. Pilot Core 0.11 enables the local Home Assistant Assist pipeline,
+Piper TTS, the Geebung weather entity, and authenticated embedded-node voice,
+weather, and firmware APIs. Piper has been validated to return 16 kHz, mono,
+16-bit WAV when all preferred audio properties are requested. A same-origin
+operations dashboard is available at `/dashboard`;
 its room, device, integration, safety, command, event, and deployment data
 remain protected by the existing administrator bearer token.
 
@@ -157,23 +160,32 @@ all 19 silent endpoint checks, including Pilot Core command connectivity, while
 the K3 audio activation gate remains explicitly unarmed until an in-person
 acceptance test.
 
-### Office display node
+### Bedroom display node
 
 ```text
 Hardware: Waveshare ESP32-C6-Touch-AMOLED-2.16
-Firmware: Pilot Display Node 0.1
+Deployed firmware: Pilot Display Node 0.1
+Published firmware: Pilot Display Node 0.2.1
 Display: 480 x 480 AMOLED
 Time: Australia/Brisbane via NTP with PCF85063 RTC fallback
 Network: Hazell IoT VLAN over 2.4 GHz Wi-Fi
 ```
 
-The first display-node firmware is deployed on physical hardware. It presents
+The first display-node firmware remains deployed on physical hardware. It presents
 a burn-in-conscious clock, reconnects to Wi-Fi, synchronizes time using
 Cloudflare NTP, refreshes the hardware RTC, and continues as an offline clock
 if networking is unavailable. Native USB diagnostics, two OTA application
 slots, pinned dependencies, reproducible scripts, and a preserved full factory
-flash provide the initial operations and rollback model. Touch and Pilot Core
-event rendering remain deliberately deferred.
+flash provide the initial operations and rollback model.
+
+Version 0.2.1 is compiled and published through Pilot Core's private firmware
+service for its first USB acceptance flash. It adds QMI8658 motion wake,
+20-second dimming, a dark display after 30 seconds, touch-scrollable
+current/daily weather, touch and GPIO push-to-talk, animated
+listening/processing/responding states, ES7210 microphone streaming to Pilot
+Core, ES8311 Piper response playback, authenticated device snapshots, and
+checksum-verified dual-slot OTA with automatic rollback. The first USB flash is
+required because version 0.1 does not yet contain the OTA client.
 
 ## 5. Hardware plan
 
@@ -224,6 +236,10 @@ Implemented foundation:
 - Bounded Home Assistant/Piper and OpenAI-compatible local TTS adapters
 - Optional spoken Home Assistant conversation responses routed to their
   originating room
+- Authenticated embedded-node snapshot, weather, voice-stream, response-audio,
+  firmware-manifest, and firmware-image endpoints
+- Bounded PCM forwarding to Home Assistant's local Assist WebSocket pipeline
+- Immutable checksum-verified firmware release storage and private delivery
 - File-backed container secrets and hardened read-only central deployment
 - Short-lived, device-bound, single-use bootstrap grants
 - Read-only Home Assistant and Music Assistant integration diagnostics
@@ -289,12 +305,16 @@ absent until in-person acceptance.
 
 ### Embedded display nodes
 
-Pilot Display Node 0.1 is the first ESP32 client. Its current responsibilities
-are local time display, network/time-source status, NTP synchronization, RTC
-fallback, and boot diagnostics. Planned responsibilities are authenticated
-Pilot Core enrollment, event/status rendering, touch controls, OTA updates,
-presence-aware brightness, and room-context interactions. It is a display and
-control surface, not a replacement for the N150 audio endpoint.
+Pilot Display Node 0.2 is the first complete ESP32 room client. It owns local
+time/offline behavior, motion and touch UX, short push-to-talk capture, response
+playback, weather rendering, and rollback-safe updates. Pilot Core owns Home
+Assistant credentials, Assist/STT orchestration, TTS synthesis, weather
+normalization, and release authorization. The node stores only Wi-Fi
+credentials and its revocable per-device token.
+
+The bedroom node deliberately keeps the ESP32 awake with the panel fully dark
+so the QMI8658 can wake the screen immediately. Deep sleep is deferred until an
+interrupt-driven IMU path is accepted on the physical board.
 
 ## 7. Voice and AI pipeline
 
@@ -386,6 +406,15 @@ or cancellation. Pilot Core 0.6 adds `/v1/tts` and
 local synthesis providers. `/v1/assistant` can optionally speak a Home
 Assistant conversation response through the request's originating room.
 
+Pilot Core 0.11 adds device-authenticated
+`/v1/devices/{device_id}/snapshot`,
+`/v1/devices/{device_id}/voice`,
+`/v1/devices/{device_id}/firmware`, and the corresponding private firmware
+image route. Raw little-endian 16-bit mono PCM is size-bounded before it is
+forwarded to the selected local Assist pipeline. Weather responses expose only
+the small display-safe schema, and every release image is checked against its
+immutable manifest before serving.
+
 Room-level state, media, and endpoint-control APIs resolve configured targets
 deterministically. Connected capable devices are preferred with stable
 tie-breaking, while offline commands remain queued for the selected room rather
@@ -474,9 +503,11 @@ deployed integration, hardware boundary, or milestone status changes.
 - [x] ESP32-C6 display hardware identified and factory image preserved
 - [x] Pilot clock UI, Wi-Fi, NTP, RTC fallback, and reboot persistence
 - [x] Reproducible firmware build, flash, and rollback documentation
-- [ ] Authenticated Pilot Core enrollment and event transport
-- [ ] Touch interaction and room controls
-- [ ] Signed or authenticated OTA update workflow
+- [x] Authenticated Pilot Core weather, voice, reply-audio, and OTA transport
+- [x] Touch weather navigation and push-to-talk control
+- [x] Motion-aware bedroom dim/off and immediate wake behavior
+- [x] Authenticated, checksum-verified OTA update workflow
+- [ ] Physical version 0.2.1 touch, IMU, microphone, speaker, and rollback acceptance
 
 ### Phase 3 — Media room
 
@@ -528,17 +559,16 @@ deployed integration, hardware boundary, or milestone status changes.
 
 ## 14. Immediate next steps
 
-1. Select and deploy the local TTS provider, then validate wake word through
-   spoken response on the Office K3.
-2. Validate a local lossless Music Assistant track.
-3. Complete the supervised K3 acceptance receipt and explicitly arm room
+1. Flash and physically validate Pilot Display Node 0.2.1, including touch, IMU,
+   microphone capture, speaker response, weather, and rollback.
+2. Validate wake word through spoken response on the Office K3.
+3. Validate a local lossless Music Assistant track.
+4. Complete the supervised K3 acceptance receipt and explicitly arm room
    playback.
-4. Validate assistant ducking and gain restoration at a safe listening volume.
-5. Validate the native Intel Bluetooth controller; add a dedicated adapter only
+5. Validate assistant ducking and gain restoration at a safe listening volume.
+6. Validate the native Intel Bluetooth controller; add a dedicated adapter only
    if its receiver behavior is inadequate.
-6. Train and deploy the **Hey Pilot** wake model.
-7. Enroll the ESP32 display with Pilot Core and add authenticated room-status
-   events before enabling touch or OTA.
+7. Train and deploy the **Hey Pilot** wake model.
 8. Complete the in-person Denon power, source, playback, and safe-volume
    acceptance before enabling Media Room control.
 
@@ -612,3 +642,8 @@ deployed integration, hardware boundary, or milestone status changes.
   ESP32-C6 AMOLED hardware, including Wi-Fi/NTP, RTC fallback, a low-memory
   display profile, OTA-ready partitions, reproducible firmware tooling, and a
   full factory-flash rollback path.
+- **1.8** — Added Pilot Core 0.11 embedded-node APIs and Pilot Display Node 0.2.1
+  with motion-aware bedroom power behavior, weather, touch push-to-talk, local
+  Assist/Piper audio, animated voice states, authenticated OTA, and automatic
+  rollback. The firmware is compiled and awaits its first physical acceptance
+  flash.

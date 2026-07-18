@@ -111,6 +111,40 @@ class Integrations:
                 f"Home Assistant state request failed: {error}"
             ) from error
 
+    async def home_assistant_weather(self) -> dict[str, Any]:
+        entity_id = self.settings.weather_entity_id
+        if not entity_id:
+            raise IntegrationUnavailable(
+                "Home Assistant weather entity is not configured"
+            )
+        current = await self.home_assistant_state(entity_id)
+        token = read_secret(self.settings.home_assistant_token_env)
+        if not token:
+            raise IntegrationUnavailable("Home Assistant token is not configured")
+        try:
+            async with httpx.AsyncClient(
+                timeout=15, transport=self.transport, follow_redirects=False
+            ) as client:
+                response = await client.post(
+                    (
+                        f"{self.settings.home_assistant_url}"
+                        "/api/services/weather/get_forecasts?return_response"
+                    ),
+                    headers={"Authorization": f"Bearer {token}"},
+                    json={"entity_id": entity_id, "type": "daily"},
+                )
+                response.raise_for_status()
+                forecast_response = response.json()
+        except (httpx.HTTPError, ValueError) as error:
+            raise IntegrationRequestFailed(
+                f"Home Assistant weather forecast request failed: {error}"
+            ) from error
+        return {
+            "entity_id": entity_id,
+            "current": current,
+            "forecast_response": forecast_response,
+        }
+
     async def diagnostics(self) -> dict[str, Any]:
         """Run read-only provider checks without returning URLs or credentials."""
 

@@ -32,6 +32,9 @@ class HomeAssistantTTSTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(payload["language"], "en-AU")
                 self.assertFalse(payload["cache"])
                 self.assertEqual(payload["options"]["preferred_format"], "wav")
+                self.assertEqual(payload["options"]["preferred_sample_rate"], 16000)
+                self.assertEqual(payload["options"]["preferred_sample_channels"], 1)
+                self.assertEqual(payload["options"]["preferred_sample_bytes"], 2)
                 return httpx.Response(
                     200,
                     json={"path": "/api/tts_proxy/generated.wav"},

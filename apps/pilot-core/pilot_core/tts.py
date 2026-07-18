@@ -131,6 +131,9 @@ class LocalTTS:
             )
         options: dict[str, Any] = {
             "preferred_format": self.settings.tts_format,
+            "preferred_sample_rate": self.settings.tts_sample_rate,
+            "preferred_sample_channels": self.settings.tts_sample_channels,
+            "preferred_sample_bytes": self.settings.tts_sample_bytes,
         }
         if voice and voice != "default":
             options["voice"] = voice

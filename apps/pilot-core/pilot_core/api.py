@@ -26,6 +26,7 @@ from pydantic import BaseModel, Field, model_validator
 from . import __version__
 from .audio_assets import AudioAssetError, AudioAssets
 from .config import Settings
+from .firmware import FirmwareReleaseError, FirmwareReleases
 from .integrations import IntegrationRequestFailed, IntegrationUnavailable, Integrations
 from .media_state import MediaStateReader
 from .meetings import MeetingRecordingError, MeetingRecordings
@@ -35,6 +36,11 @@ from .registry import Registry
 from .secret_values import read_secret
 from .storage import Store
 from .tts import LocalTTS, TTSRequestFailed, TTSUnavailable
+from .voice import (
+    HomeAssistantVoicePipeline,
+    VoicePipelineFailed,
+    VoicePipelineUnavailable,
+)
 
 
 class DeviceRegistration(BaseModel):
@@ -317,6 +323,11 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
         settings.server.audio_asset_retention_seconds,
     )
     local_tts = LocalTTS(settings.integrations, settings.server.audio_asset_max_bytes)
+    voice_pipeline = HomeAssistantVoicePipeline(settings.integrations)
+    firmware_releases = FirmwareReleases(
+        settings.server.firmware_asset_path,
+        settings.server.firmware_asset_max_bytes,
+    )
     meeting_recordings = MeetingRecordings(
         database,
         settings.server.meeting_asset_path,
@@ -353,6 +364,69 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
                 "X-Frame-Options": "DENY",
             },
         )
+
+    def authenticated_device(
+        device_id: str,
+        header_device_id: str,
+        authorization: str | None,
+    ) -> dict[str, Any]:
+        if device_id != header_device_id:
+            raise HTTPException(status_code=403, detail="device identity mismatch")
+        if not database.authenticate_device(device_id, _bearer(authorization)):
+            raise HTTPException(status_code=401, detail="invalid device credentials")
+        device = next(
+            (
+                item
+                for item in database.list_devices()
+                if item["id"] == device_id
+            ),
+            None,
+        )
+        if device is None:
+            raise HTTPException(status_code=404, detail="device not found")
+        return device
+
+    def safe_weather(raw: dict[str, Any]) -> dict[str, Any]:
+        current = raw.get("current") or {}
+        attributes = current.get("attributes") or {}
+        entity_id = str(raw.get("entity_id") or "")
+        forecast_response = raw.get("forecast_response") or {}
+        service_response = (
+            forecast_response.get("service_response", forecast_response)
+            if isinstance(forecast_response, dict)
+            else {}
+        )
+        entity_forecast = (
+            service_response.get(entity_id, {})
+            if isinstance(service_response, dict)
+            else {}
+        )
+        forecast = (
+            entity_forecast.get("forecast", [])
+            if isinstance(entity_forecast, dict)
+            else []
+        )
+        today = forecast[0] if forecast and isinstance(forecast[0], dict) else {}
+
+        def value(source: dict[str, Any], key: str) -> Any:
+            candidate = source.get(key)
+            return candidate if isinstance(candidate, (str, int, float)) else None
+
+        return {
+            "status": "ok",
+            "condition": value(current, "state"),
+            "temperature": value(attributes, "temperature"),
+            "apparent_temperature": value(attributes, "apparent_temperature"),
+            "temperature_unit": value(attributes, "temperature_unit"),
+            "humidity": value(attributes, "humidity"),
+            "high_temperature": value(today, "temperature"),
+            "low_temperature": value(today, "templow"),
+            "precipitation_probability": value(
+                today, "precipitation_probability"
+            ),
+            "forecast_condition": value(today, "condition"),
+            "updated_at": value(current, "last_updated"),
+        }
 
     async def queue_device_command(
         device_id: str, payload: dict[str, Any], expires_in_seconds: int
@@ -1145,6 +1219,198 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
         except KeyError:
             raise HTTPException(status_code=404, detail="room not found") from None
         return {"device_id": request.device_id, "device_token": token}
+
+    @app.get("/v1/devices/{device_id}/snapshot")
+    async def display_node_snapshot(
+        device_id: str,
+        response: Response,
+        x_pilot_device_id: str = Header(),
+        authorization: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        device = authenticated_device(
+            device_id, x_pilot_device_id, authorization
+        )
+        response.headers["Cache-Control"] = "no-store"
+        try:
+            weather = safe_weather(await integrations.home_assistant_weather())
+        except IntegrationUnavailable as error:
+            weather = {"status": "not_configured", "detail": str(error)}
+        except IntegrationRequestFailed as error:
+            weather = {"status": "unavailable", "detail": str(error)}
+        return {
+            "device_id": device_id,
+            "room_id": device["room_id"],
+            "server_time": datetime.now(UTC).isoformat(),
+            "weather": weather,
+            "voice": voice_pipeline.status(),
+            "tts": local_tts.status(),
+        }
+
+    @app.post("/v1/devices/{device_id}/voice")
+    async def display_node_voice(
+        device_id: str,
+        request: Request,
+        response: Response,
+        x_pilot_device_id: str = Header(),
+        authorization: str | None = Header(default=None),
+        x_pilot_sample_rate: int = Header(default=16000, ge=8000, le=48000),
+        x_pilot_language: str | None = Header(default=None),
+        x_pilot_conversation_id: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        device = authenticated_device(
+            device_id, x_pilot_device_id, authorization
+        )
+        if "voice" not in device["capabilities"]:
+            raise HTTPException(
+                status_code=403, detail="device does not have voice capability"
+            )
+        normalized_type = request.headers.get("content-type", "").partition(";")[0]
+        if normalized_type.lower() not in {"audio/l16", "application/octet-stream"}:
+            raise HTTPException(
+                status_code=415,
+                detail="voice audio must be signed 16-bit little-endian mono PCM",
+            )
+        declared_length = request.headers.get("content-length")
+        if declared_length:
+            try:
+                if int(declared_length) > settings.server.voice_audio_max_bytes:
+                    raise HTTPException(status_code=413, detail="voice audio is too large")
+            except ValueError:
+                raise HTTPException(
+                    status_code=400, detail="invalid content length"
+                ) from None
+
+        total_bytes = 0
+
+        async def bounded_audio():
+            nonlocal total_bytes
+            async for chunk in request.stream():
+                total_bytes += len(chunk)
+                if total_bytes > settings.server.voice_audio_max_bytes:
+                    raise VoicePipelineFailed("voice audio exceeds the size limit")
+                if chunk:
+                    yield chunk
+
+        try:
+            result = await voice_pipeline.run(
+                bounded_audio(),
+                sample_rate=x_pilot_sample_rate,
+                language=x_pilot_language,
+                conversation_id=x_pilot_conversation_id,
+            )
+        except VoicePipelineUnavailable as error:
+            raise HTTPException(status_code=503, detail=str(error)) from None
+        except VoicePipelineFailed as error:
+            status_code = (
+                413 if "size limit" in str(error).lower() else 502
+            )
+            raise HTTPException(status_code=status_code, detail=str(error)) from None
+        if total_bytes < x_pilot_sample_rate // 2:
+            raise HTTPException(status_code=422, detail="voice audio is too short")
+
+        try:
+            synthesized = await local_tts.synthesize(
+                result.response_text,
+                x_pilot_language,
+            )
+        except TTSUnavailable as error:
+            raise HTTPException(status_code=503, detail=str(error)) from None
+        except TTSRequestFailed as error:
+            raise HTTPException(status_code=502, detail=str(error)) from None
+        try:
+            asset = audio_assets.create(
+                device["room_id"],
+                "assistant",
+                synthesized.filename,
+                synthesized.content_type,
+                synthesized.content,
+                300,
+            )
+        except AudioAssetError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from None
+
+        response.headers["Cache-Control"] = "no-store"
+        return {
+            "device_id": device_id,
+            "room_id": device["room_id"],
+            "transcript": result.transcript,
+            "response_text": result.response_text,
+            "conversation_id": result.conversation_id,
+            "audio": {
+                **audio_assets.public_view(asset),
+                "download_url": f"/v1/audio-assets/{asset['id']}",
+            },
+            "synthesis": synthesized.metadata(),
+        }
+
+    @app.get("/v1/devices/{device_id}/firmware")
+    async def display_node_firmware_manifest(
+        device_id: str,
+        target: str,
+        current_version: str = "",
+        x_pilot_device_id: str = Header(),
+        authorization: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        device = authenticated_device(
+            device_id, x_pilot_device_id, authorization
+        )
+        if "ota" not in device["capabilities"]:
+            raise HTTPException(
+                status_code=403, detail="device does not have OTA capability"
+            )
+        try:
+            release = firmware_releases.latest(target)
+        except FirmwareReleaseError as error:
+            raise HTTPException(status_code=503, detail=str(error)) from None
+        if release is None:
+            return {
+                "target": target,
+                "current_version": current_version,
+                "update_available": False,
+                "release": None,
+            }
+        return {
+            "target": target,
+            "current_version": current_version,
+            "update_available": release.version != current_version,
+            "release": {
+                **release.manifest(),
+                "download_url": (
+                    f"/v1/devices/{device_id}/firmware/image?target={target}"
+                ),
+            },
+        }
+
+    @app.get("/v1/devices/{device_id}/firmware/image")
+    async def display_node_firmware_image(
+        device_id: str,
+        target: str,
+        x_pilot_device_id: str = Header(),
+        authorization: str | None = Header(default=None),
+    ) -> FileResponse:
+        device = authenticated_device(
+            device_id, x_pilot_device_id, authorization
+        )
+        if "ota" not in device["capabilities"]:
+            raise HTTPException(
+                status_code=403, detail="device does not have OTA capability"
+            )
+        try:
+            release = firmware_releases.latest(target)
+        except FirmwareReleaseError as error:
+            raise HTTPException(status_code=503, detail=str(error)) from None
+        if release is None:
+            raise HTTPException(status_code=404, detail="firmware release not found")
+        return FileResponse(
+            release.path,
+            media_type="application/octet-stream",
+            filename=release.filename,
+            headers={
+                "Cache-Control": "no-store",
+                "X-Pilot-Firmware-Version": release.version,
+                "X-Pilot-Firmware-SHA256": release.sha256,
+            },
+        )
 
     @app.post(
         "/v1/devices/{device_id}/commands",

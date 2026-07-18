@@ -2,6 +2,19 @@
 
 ## 2026-07-18
 
+- Added Pilot Core 0.11's authenticated embedded-node snapshot, local Assist
+  PCM streaming, bounded weather projection, and immutable firmware delivery
+  APIs.
+- Added Pilot Display Node 0.2.1 with QMI8658 motion wake, staged bedroom
+  brightness, a touch weather page, push-to-talk, animated voice states,
+  ES7210 microphone capture, ES8311 response playback, and rollback-safe OTA.
+- Published the immutable 0.2.1 image through Pilot Core's authenticated
+  firmware service for the Bedroom node's first USB acceptance flash.
+- Made the embedded WAV decoder accept Home Assistant's bounded streaming WAV
+  output, whose RIFF and data lengths are deliberately left unspecified.
+- Enabled the deployed local Assist pipeline and Home Assistant Piper provider;
+  synthesis explicitly requests 16 kHz, mono, 16-bit WAV for deterministic
+  embedded playback.
 - Added Pilot Display Node 0.1 firmware for the Waveshare
   ESP32-C6-Touch-AMOLED-2.16, with a burn-in-conscious 480 x 480 office clock,
   Brisbane timezone, Wi-Fi/NTP synchronization, RTC fallback, and native USB

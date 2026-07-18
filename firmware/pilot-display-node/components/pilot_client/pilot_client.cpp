@@ -7,6 +7,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <memory>
 
 #include "cJSON.h"
 #include "esp_app_desc.h"
@@ -22,6 +23,7 @@
 namespace {
 constexpr char kTag[] = "pilot_client";
 constexpr char kVoicePathPrefix[] = "/v1/devices/";
+constexpr char kVoiceLanguage[] = "en_US";
 constexpr int kVoiceSampleRate = 16000;
 constexpr int kVoiceChunkSamples = 320;
 constexpr int64_t kVoiceMaximumUs = 10'000'000;
@@ -29,6 +31,7 @@ constexpr int64_t kNoSpeechTimeoutUs = 5'000'000;
 constexpr int64_t kEndSilenceUs = 1'100'000;
 constexpr float kVoiceThreshold = 350.0f;
 constexpr std::size_t kOtaBufferSize = 4096;
+constexpr std::size_t kVoiceResponseBufferSize = 4096;
 
 struct FileWriter {
     FILE *file;
@@ -529,10 +532,23 @@ esp_err_t PilotClient::RunVoiceSession(
         return ESP_ERR_INVALID_ARG;
     }
 
-    std::array<char, 4096> response_data = {};
+    std::unique_ptr<char, decltype(&heap_caps_free)> response_data(
+        static_cast<char *>(
+            heap_caps_calloc(
+                kVoiceResponseBufferSize,
+                sizeof(char),
+                MALLOC_CAP_8BIT
+            )
+        ),
+        &heap_caps_free
+    );
+    if (response_data == nullptr) {
+        ESP_LOGE(kTag, "Unable to allocate voice response buffer");
+        return ESP_ERR_NO_MEM;
+    }
     ResponseBuffer response = {
-        .data = response_data.data(),
-        .capacity = response_data.size(),
+        .data = response_data.get(),
+        .capacity = kVoiceResponseBufferSize,
         .length = 0,
         .truncated = false,
     };
@@ -557,7 +573,7 @@ esp_err_t PilotClient::RunVoiceSession(
     // the format with the bounded Pilot headers below.
     esp_http_client_set_header(client, "Content-Type", "application/octet-stream");
     esp_http_client_set_header(client, "X-Pilot-Sample-Rate", "16000");
-    esp_http_client_set_header(client, "X-Pilot-Language", "en");
+    esp_http_client_set_header(client, "X-Pilot-Language", kVoiceLanguage);
 
     esp_err_t status = audio.StartCapture(kVoiceSampleRate);
     if (status != ESP_OK) {
@@ -623,7 +639,7 @@ esp_err_t PilotClient::RunVoiceSession(
     if (status == ESP_OK) {
         esp_http_client_fetch_headers(client);
         const int http_status = esp_http_client_get_status_code(client);
-        std::array<char, 1024> read_buffer = {};
+        std::array<char, 256> read_buffer = {};
         while (true) {
             const int read = esp_http_client_read(
                 client, read_buffer.data(), read_buffer.size()
@@ -633,7 +649,16 @@ esp_err_t PilotClient::RunVoiceSession(
             }
         }
         if (http_status != 200) {
-            ESP_LOGW(kTag, "Voice request returned HTTP %d", http_status);
+            const int detail_length = static_cast<int>(
+                std::min<std::size_t>(response.length, 256)
+            );
+            ESP_LOGW(
+                kTag,
+                "Voice request returned HTTP %d: %.*s",
+                http_status,
+                detail_length,
+                response.data
+            );
             status = ESP_FAIL;
         }
     }
@@ -643,7 +668,7 @@ esp_err_t PilotClient::RunVoiceSession(
         return status == ESP_OK ? ESP_FAIL : status;
     }
 
-    cJSON *root = cJSON_Parse(response_data.data());
+    cJSON *root = cJSON_Parse(response_data.get());
     cJSON *audio_response = root == nullptr
         ? nullptr
         : cJSON_GetObjectItemCaseSensitive(root, "audio");
@@ -657,6 +682,7 @@ esp_err_t PilotClient::RunVoiceSession(
         copy_json_string(audio_response, "download_url", download_path);
     }
     cJSON_Delete(root);
+    response_data.reset();
     if (download_path[0] == '\0') {
         return ESP_ERR_NOT_FOUND;
     }

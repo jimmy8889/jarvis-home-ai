@@ -164,7 +164,7 @@ acceptance test.
 
 ```text
 Hardware: Waveshare ESP32-C6-Touch-AMOLED-2.16
-Deployed firmware: Pilot Display Node 0.2.4
+Deployed firmware: Pilot Display Node 0.2.5
 Published firmware: Pilot Display Node 0.2.4
 Display: 480 x 480 AMOLED
 Time: Australia/Brisbane via NTP with PCF85063 RTC fallback
@@ -187,8 +187,18 @@ Wi-Fi, NTP/RTC, weather, the stationary IMU dim/off sequence, authenticated
 download and SHA-256 validation, alternate-slot boot, and the healthy-image
 mark that cancels automatic rollback. Pilot Core and the embedded client now
 both enforce semantic-version upgrades, so an older published release cannot
-cause a downgrade loop. Interactive touch, motion wake, live microphone
-capture, and audible speaker response still require hands-on acceptance.
+cause a downgrade loop.
+
+Hands-on Talk to Pilot testing then exposed and repaired two embedded voice
+faults. Version 0.2.5 moves the HTTP response buffer off the voice-task stack,
+increases the task allocation from 7 KiB to 12 KiB, and logs measured stack
+headroom and bounded server failures. Two consecutive requests completed with
+more than 8 KiB of stack remaining and no reset. The ES7210's four interleaved
+TDM microphone channels are now converted to a real 16 kHz mono stream; the
+corrected stream was accepted by Home Assistant STT and reached local intent
+processing. The embedded TTS locale now matches the installed
+`en_US-amy-low` Piper voice. Version 0.2.5 remains a USB acceptance build until
+onboard response playback is heard; the immutable OTA release remains 0.2.4.
 
 ## 5. Hardware plan
 
@@ -563,8 +573,8 @@ deployed integration, hardware boundary, or milestone status changes.
 
 ## 14. Immediate next steps
 
-1. Physically validate Pilot Display Node 0.2.4 touch, motion wake, microphone
-   capture, speaker response, and a deliberately failed-image rollback.
+1. Hear and confirm Pilot Display Node 0.2.5's onboard Piper response, then
+   publish the accepted image through Pilot Core's firmware service.
 2. Validate wake word through spoken response on the Office K3.
 3. Validate a local lossless Music Assistant track.
 4. Complete the supervised K3 acceptance receipt and explicitly arm room
@@ -656,3 +666,7 @@ deployed integration, hardware boundary, or milestone status changes.
   the embedded client, moved OTA transfer storage off the network task stack,
   and verified the complete 0.2.3-to-0.2.4 alternate-slot update and
   healthy-image confirmation path.
+- **2.0** — Repaired the Bedroom node's Talk to Pilot stack exhaustion,
+  converted ES7210 four-channel TDM capture to true 16 kHz mono, physically
+  verified Home Assistant transcription and intent processing without a
+  reset, and aligned the device locale with the installed Piper voice.

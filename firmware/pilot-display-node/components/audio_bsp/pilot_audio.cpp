@@ -205,13 +205,27 @@ esp_err_t PilotAudio::StartCapture(int sample_rate, float gain_db) {
 }
 
 int PilotAudio::Read(int16_t *samples, std::size_t sample_count) {
-    if (!capturing_ || samples == nullptr || sample_count == 0) {
+    if (
+        !capturing_ || samples == nullptr || sample_count == 0 ||
+        sample_count > kMaximumCaptureFrames
+    ) {
         return -1;
     }
     const int result = esp_codec_dev_read(
-        input_, samples, sample_count * sizeof(int16_t)
+        input_,
+        capture_scratch_.data(),
+        sample_count * kCaptureChannels * sizeof(int16_t)
     );
-    return result == ESP_CODEC_DEV_OK ? static_cast<int>(sample_count) : -1;
+    if (result != ESP_CODEC_DEV_OK) {
+        return -1;
+    }
+    // ES7210 emits four interleaved TDM microphone channels. Pilot Core and
+    // Home Assistant expect a true 16 kHz mono stream, so select one stable
+    // channel rather than labelling the 64 ksample/s interleaved stream mono.
+    for (std::size_t frame = 0; frame < sample_count; ++frame) {
+        samples[frame] = capture_scratch_[frame * kCaptureChannels];
+    }
+    return static_cast<int>(sample_count);
 }
 
 void PilotAudio::StopCapture() {

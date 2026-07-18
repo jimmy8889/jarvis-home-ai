@@ -81,6 +81,7 @@ constexpr int kMotionConfirmationSamples = 2;
 constexpr TickType_t kWeatherInterval = pdMS_TO_TICKS(30 * 60 * 1000);
 constexpr TickType_t kOtaInterval = pdMS_TO_TICKS(6 * 60 * 60 * 1000);
 constexpr gpio_num_t kActionButton = GPIO_NUM_9;
+constexpr uint32_t kVoiceTaskStackBytes = 12288;
 
 enum class ClockSource {
     build,
@@ -974,6 +975,11 @@ void voice_task(void *) {
 
         voice_state.store(VoiceState::listening);
         esp_err_t result = ESP_ERR_TIMEOUT;
+        ESP_LOGI(
+            kTag,
+            "Voice session starting; task stack headroom=%lu bytes",
+            static_cast<unsigned long>(uxTaskGetStackHighWaterMark(nullptr))
+        );
         if (
             network_mutex != nullptr &&
             xSemaphoreTake(network_mutex, pdMS_TO_TICKS(3000)) == pdTRUE
@@ -987,6 +993,12 @@ void voice_task(void *) {
             );
             xSemaphoreGive(network_mutex);
         }
+        ESP_LOGI(
+            kTag,
+            "Voice session finished; result=%s stack headroom=%lu bytes",
+            esp_err_to_name(result),
+            static_cast<unsigned long>(uxTaskGetStackHighWaterMark(nullptr))
+        );
         if (result != ESP_OK) {
             ESP_LOGW(kTag, "Voice session failed: %s", esp_err_to_name(result));
             voice_state.store(VoiceState::error);
@@ -1156,7 +1168,17 @@ extern "C" void app_main() {
     xTaskCreate(
         motion_power_task, "pilot_motion_power", 4096, nullptr, 5, nullptr
     );
-    xTaskCreate(voice_task, "pilot_voice", 7168, nullptr, 5, nullptr);
+    const BaseType_t voice_task_result = xTaskCreate(
+        voice_task,
+        "pilot_voice",
+        kVoiceTaskStackBytes,
+        nullptr,
+        5,
+        nullptr
+    );
+    if (voice_task_result != pdPASS) {
+        ESP_LOGE(kTag, "Unable to create Pilot voice task");
+    }
     xTaskCreate(action_button_task, "pilot_button", 2048, nullptr, 4, nullptr);
     xTaskCreate(network_task, "pilot_network", 12288, nullptr, 5, nullptr);
 }

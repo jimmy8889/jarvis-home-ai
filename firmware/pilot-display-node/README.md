@@ -93,7 +93,7 @@ idf.py -p /dev/cu.usbmodem2101 monitor
 Expected diagnostics include:
 
 ```text
-Pilot display node 0.2.4 starting
+Pilot display node 0.2.5 starting
 Wi-Fi connected
 NTP synchronised using time.cloudflare.com
 ES7210 microphone and ES8311 speaker codec initialized
@@ -109,6 +109,10 @@ Pilot Core features configured
 - The screen stays awake throughout listening, processing, and response
   playback.
 - Touch, button activity, or detectable movement restores normal brightness.
+- The ES7210 is captured as four-channel TDM internally; firmware selects one
+  stable channel and sends true signed 16-bit, 16 kHz mono PCM to Pilot Core.
+- USB diagnostics report voice-task stack headroom and a bounded error detail
+  when Pilot Core rejects a request.
 
 The response path is deliberately local:
 

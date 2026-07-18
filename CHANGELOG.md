@@ -1,5 +1,18 @@
 # Changelog
 
+## 2026-07-19
+
+- Added and physically flashed Pilot Display Node 0.2.5 after Talk to Pilot
+  exposed a voice-task stack overflow. The response buffer now lives on the
+  heap, the voice task has measured stack headroom, task creation is checked,
+  and bounded Pilot Core error details are visible over USB diagnostics.
+- Corrected ES7210 capture from four-channel interleaved TDM to true 16 kHz
+  mono before streaming. Physical testing now reaches Home Assistant STT and
+  produces an intent response without resetting the display.
+- Aligned the embedded request language with the configured
+  `en_US-amy-low` Piper voice after reproducing Home Assistant's 500 response
+  for the generic `en` language and a successful response for `en_US`.
+
 ## 2026-07-18
 
 - Added Pilot Display Node 0.2.3/0.2.4 and Pilot Core downgrade protection

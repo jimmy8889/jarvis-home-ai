@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
@@ -9,22 +10,51 @@
 
 #include "pilot_audio.h"
 
+constexpr std::size_t kPilotTemperatureSampleCount = 24;
+
+struct PilotTemperatureHistory {
+    bool available = false;
+    char temperature_unit[8] = {};
+    float current = 0;
+    float minimum = 0;
+    float maximum = 0;
+    int period_hours = 24;
+    std::size_t sample_count = 0;
+    std::array<float, kPilotTemperatureSampleCount> samples{};
+};
+
 struct PilotWeather {
     bool available = false;
     char condition[40] = {};
     char forecast_condition[40] = {};
+    char wind_speed_unit[16] = {};
+    char wind_bearing[12] = {};
+    char precipitation_unit[8] = {};
+    char tomorrow_condition[40] = {};
     char temperature_unit[8] = {};
     float temperature = 0;
     float apparent_temperature = 0;
     float high_temperature = 0;
     float low_temperature = 0;
     float humidity = 0;
+    float wind_speed = 0;
+    float precipitation = 0;
     float precipitation_probability = 0;
+    float tomorrow_high_temperature = 0;
+    float tomorrow_low_temperature = 0;
+    float tomorrow_precipitation_probability = 0;
     bool has_apparent_temperature = false;
     bool has_high_temperature = false;
     bool has_low_temperature = false;
     bool has_humidity = false;
+    bool has_wind_speed = false;
+    bool has_precipitation = false;
     bool has_precipitation_probability = false;
+    bool has_tomorrow_high_temperature = false;
+    bool has_tomorrow_low_temperature = false;
+    bool has_tomorrow_precipitation_probability = false;
+    PilotTemperatureHistory outside_temperature = {};
+    PilotTemperatureHistory inside_temperature = {};
 };
 
 struct PilotVoiceResult {

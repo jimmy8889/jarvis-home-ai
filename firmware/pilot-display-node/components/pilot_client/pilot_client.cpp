@@ -31,6 +31,7 @@ constexpr int64_t kNoSpeechTimeoutUs = 5'000'000;
 constexpr int64_t kEndSilenceUs = 1'100'000;
 constexpr float kVoiceThreshold = 350.0f;
 constexpr std::size_t kOtaBufferSize = 4096;
+constexpr std::size_t kSnapshotResponseBufferSize = 6144;
 constexpr std::size_t kVoiceResponseBufferSize = 4096;
 
 struct FileWriter {
@@ -53,6 +54,66 @@ bool json_number(cJSON *object, const char *name, float *destination) {
         return false;
     }
     *destination = static_cast<float>(value->valuedouble);
+    return true;
+}
+
+bool json_integer(cJSON *object, const char *name, int *destination) {
+    cJSON *value = cJSON_GetObjectItemCaseSensitive(object, name);
+    if (!cJSON_IsNumber(value)) {
+        return false;
+    }
+    *destination = value->valueint;
+    return true;
+}
+
+bool parse_temperature_history(
+    cJSON *parent,
+    const char *name,
+    PilotTemperatureHistory *destination
+) {
+    if (parent == nullptr || destination == nullptr) {
+        return false;
+    }
+    cJSON *value = cJSON_GetObjectItemCaseSensitive(parent, name);
+    cJSON *status = value == nullptr
+        ? nullptr
+        : cJSON_GetObjectItemCaseSensitive(value, "status");
+    if (
+        !cJSON_IsObject(value) ||
+        !cJSON_IsString(status) ||
+        status->valuestring == nullptr ||
+        std::strcmp(status->valuestring, "ok") != 0
+    ) {
+        return false;
+    }
+
+    PilotTemperatureHistory parsed = {};
+    if (
+        !json_number(value, "current", &parsed.current) ||
+        !json_number(value, "minimum", &parsed.minimum) ||
+        !json_number(value, "maximum", &parsed.maximum)
+    ) {
+        return false;
+    }
+    copy_json_string(value, "temperature_unit", parsed.temperature_unit);
+    json_integer(value, "period_hours", &parsed.period_hours);
+    cJSON *samples = cJSON_GetObjectItemCaseSensitive(value, "samples");
+    if (cJSON_IsArray(samples)) {
+        const int count = std::min(
+            cJSON_GetArraySize(samples),
+            static_cast<int>(parsed.samples.size())
+        );
+        for (int index = 0; index < count; ++index) {
+            cJSON *sample = cJSON_GetArrayItem(samples, index);
+            if (!cJSON_IsNumber(sample)) {
+                continue;
+            }
+            parsed.samples[parsed.sample_count++] =
+                static_cast<float>(sample->valuedouble);
+        }
+    }
+    parsed.available = true;
+    *destination = parsed;
     return true;
 }
 
@@ -462,54 +523,129 @@ esp_err_t PilotClient::FetchSnapshot(PilotWeather *weather) {
     std::snprintf(
         path, sizeof(path), "/v1/devices/%s/snapshot", device_id_
     );
-    std::array<char, 4096> response = {};
-    const esp_err_t result = GetJson(path, response.data(), response.size());
+    std::unique_ptr<char, decltype(&heap_caps_free)> response(
+        static_cast<char *>(
+            heap_caps_calloc(
+                kSnapshotResponseBufferSize,
+                sizeof(char),
+                MALLOC_CAP_8BIT
+            )
+        ),
+        &heap_caps_free
+    );
+    if (response == nullptr) {
+        weather->available = false;
+        return ESP_ERR_NO_MEM;
+    }
+    const esp_err_t result = GetJson(
+        path, response.get(), kSnapshotResponseBufferSize
+    );
     if (result != ESP_OK) {
         weather->available = false;
         return result;
     }
 
-    cJSON *root = cJSON_Parse(response.data());
-    cJSON *value = root == nullptr
-        ? nullptr
-        : cJSON_GetObjectItemCaseSensitive(root, "weather");
+    cJSON *root = cJSON_Parse(response.get());
+    if (root == nullptr) {
+        weather->available = false;
+        return ESP_ERR_INVALID_RESPONSE;
+    }
+    PilotWeather snapshot = {};
+    cJSON *value = cJSON_GetObjectItemCaseSensitive(root, "weather");
     cJSON *status = value == nullptr
         ? nullptr
         : cJSON_GetObjectItemCaseSensitive(value, "status");
     if (
-        !cJSON_IsObject(value) ||
-        !cJSON_IsString(status) ||
-        std::strcmp(status->valuestring, "ok") != 0
+        cJSON_IsObject(value) &&
+        cJSON_IsString(status) &&
+        status->valuestring != nullptr &&
+        std::strcmp(status->valuestring, "ok") == 0
     ) {
-        cJSON_Delete(root);
-        weather->available = false;
-        return ESP_ERR_NOT_FOUND;
+        snapshot.available = true;
+        copy_json_string(value, "condition", snapshot.condition);
+        copy_json_string(
+            value, "forecast_condition", snapshot.forecast_condition
+        );
+        copy_json_string(
+            value, "temperature_unit", snapshot.temperature_unit
+        );
+        copy_json_string(
+            value, "wind_speed_unit", snapshot.wind_speed_unit
+        );
+        copy_json_string(value, "wind_bearing", snapshot.wind_bearing);
+        copy_json_string(
+            value, "precipitation_unit", snapshot.precipitation_unit
+        );
+        copy_json_string(
+            value, "tomorrow_condition", snapshot.tomorrow_condition
+        );
+        json_number(value, "temperature", &snapshot.temperature);
+        snapshot.has_apparent_temperature = json_number(
+            value,
+            "apparent_temperature",
+            &snapshot.apparent_temperature
+        );
+        snapshot.has_high_temperature = json_number(
+            value, "high_temperature", &snapshot.high_temperature
+        );
+        snapshot.has_low_temperature = json_number(
+            value, "low_temperature", &snapshot.low_temperature
+        );
+        snapshot.has_humidity = json_number(
+            value, "humidity", &snapshot.humidity
+        );
+        snapshot.has_wind_speed = json_number(
+            value, "wind_speed", &snapshot.wind_speed
+        );
+        snapshot.has_precipitation = json_number(
+            value, "precipitation", &snapshot.precipitation
+        );
+        snapshot.has_precipitation_probability = json_number(
+            value,
+            "precipitation_probability",
+            &snapshot.precipitation_probability
+        );
+        snapshot.has_tomorrow_high_temperature = json_number(
+            value,
+            "tomorrow_high_temperature",
+            &snapshot.tomorrow_high_temperature
+        );
+        snapshot.has_tomorrow_low_temperature = json_number(
+            value,
+            "tomorrow_low_temperature",
+            &snapshot.tomorrow_low_temperature
+        );
+        snapshot.has_tomorrow_precipitation_probability = json_number(
+            value,
+            "tomorrow_precipitation_probability",
+            &snapshot.tomorrow_precipitation_probability
+        );
     }
 
-    *weather = PilotWeather{};
-    weather->available = true;
-    copy_json_string(value, "condition", weather->condition);
-    copy_json_string(value, "forecast_condition", weather->forecast_condition);
-    copy_json_string(value, "temperature_unit", weather->temperature_unit);
-    json_number(value, "temperature", &weather->temperature);
-    weather->has_apparent_temperature = json_number(
-        value, "apparent_temperature", &weather->apparent_temperature
+    cJSON *temperature_extremes = cJSON_GetObjectItemCaseSensitive(
+        root, "temperature_extremes"
     );
-    weather->has_high_temperature = json_number(
-        value, "high_temperature", &weather->high_temperature
-    );
-    weather->has_low_temperature = json_number(
-        value, "low_temperature", &weather->low_temperature
-    );
-    weather->has_humidity = json_number(
-        value, "humidity", &weather->humidity
-    );
-    weather->has_precipitation_probability = json_number(
-        value,
-        "precipitation_probability",
-        &weather->precipitation_probability
-    );
+    if (cJSON_IsObject(temperature_extremes)) {
+        parse_temperature_history(
+            temperature_extremes,
+            "outside",
+            &snapshot.outside_temperature
+        );
+        parse_temperature_history(
+            temperature_extremes,
+            "inside",
+            &snapshot.inside_temperature
+        );
+    }
     cJSON_Delete(root);
+    *weather = snapshot;
+    if (
+        !snapshot.available &&
+        !snapshot.outside_temperature.available &&
+        !snapshot.inside_temperature.available
+    ) {
+        return ESP_ERR_NOT_FOUND;
+    }
     return ESP_OK;
 }
 

@@ -4,7 +4,8 @@ Firmware for the Waveshare `ESP32-C6-Touch-AMOLED-2.16` room node.
 
 Version 0.2 turns the clock into the first bedroom Pilot node:
 
-- 480 x 480 clock and touch-scrollable daily weather pages;
+- 480 x 480 clock, detailed forecast, and touch-scrollable temperature pages;
+- rolling 24-hour indoor/outdoor current, minimum, maximum, and line graphs;
 - a 20-second two-percent dim state and a fully dark display after 30 seconds;
 - motion, touch, or the physical action button wakes the display;
 - a touch and physical push-to-talk control;
@@ -93,16 +94,22 @@ idf.py -p /dev/cu.usbmodem2101 monitor
 Expected diagnostics include:
 
 ```text
-Pilot display node 0.2.5 starting
+Pilot display node 0.2.6 starting
 Wi-Fi connected
 NTP synchronised using time.cloudflare.com
 ES7210 microphone and ES8311 speaker codec initialized
 Pilot Core features configured
+Weather refresh succeeded
 ```
 
 ## Interaction
 
-- Swipe left from the clock to see today's weather; swipe right to return.
+- Swipe left through Clock, Forecast, Outside, and Bedroom pages; swipe right
+  to return.
+- Forecast includes the current condition, high/low, apparent temperature,
+  humidity, rain chance and amount, wind, and tomorrow's outlook.
+- Outside and Bedroom show a rolling 24-hour minimum/maximum and a fixed
+  24-point graph sourced from Home Assistant.
 - Tap `TALK TO PILOT` or press GPIO 9 to start listening.
 - Tap the listening overlay or press GPIO 9 again to stop early.
 - Normal speech end is detected after approximately 1.1 seconds of silence.
@@ -157,6 +164,8 @@ The validation baseline for version 0.2 is:
 - clean ESP-IDF 5.5.3 compilation with the pinned dependency lock;
 - application image fits one 4 MB OTA slot;
 - all Pilot Core server tests pass;
+- authenticated display snapshots contain at most 24 graph samples for each
+  configured temperature sensor;
 - Home Assistant exposes a local STT Assist pipeline and Piper WAV output;
 - streaming WAV headers with unknown RIFF/data sizes are bounded to the actual
   downloaded payload before playback;

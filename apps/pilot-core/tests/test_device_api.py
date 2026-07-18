@@ -43,6 +43,8 @@ class DisplayNodeApiTests(unittest.TestCase):
                 home_assistant_url="http://homeassistant.test:8123",
                 home_assistant_assist_pipeline_id="local-pipeline",
                 weather_entity_id="weather.home",
+                outdoor_temperature_entity_id="sensor.outdoor_temperature",
+                indoor_temperature_entity_id="sensor.bedroom_temperature",
                 tts_provider="home_assistant",
                 tts_engine_id="tts.piper",
             ),
@@ -105,6 +107,10 @@ class DisplayNodeApiTests(unittest.TestCase):
                     "apparent_temperature": 21.8,
                     "temperature_unit": "°C",
                     "humidity": 61,
+                    "wind_speed": 18,
+                    "wind_speed_unit": "km/h",
+                    "wind_bearing": "S",
+                    "precipitation_unit": "mm",
                     "private_attribute": "must not leak",
                 },
             },
@@ -116,18 +122,57 @@ class DisplayNodeApiTests(unittest.TestCase):
                                 "condition": "partlycloudy",
                                 "temperature": 26,
                                 "templow": 15,
+                                "precipitation": 2.4,
                                 "precipitation_probability": 20,
                                 "private_forecast": "must not leak",
-                            }
+                            },
+                            {
+                                "condition": "rainy",
+                                "temperature": 24,
+                                "templow": 16,
+                                "precipitation_probability": 70,
+                            },
                         ]
                     }
                 }
             },
         }
-        with patch.object(
-            Integrations,
-            "home_assistant_weather",
-            new=AsyncMock(return_value=raw_weather),
+
+        def temperature_history(entity_id: str) -> dict:
+            is_outside = entity_id == "sensor.outdoor_temperature"
+            return {
+                "entity_id": entity_id,
+                "period_hours": 24,
+                "current": {
+                    "state": "24.5" if is_outside else "21.5",
+                    "last_updated": "2026-07-19T02:00:00+00:00",
+                    "attributes": {"unit_of_measurement": "°C"},
+                },
+                "history": [
+                    [
+                        {
+                            "state": "16.5" if is_outside else "20.0",
+                            "last_changed": "2026-07-18T02:00:00+00:00",
+                        },
+                        {
+                            "state": "27.0" if is_outside else "23.0",
+                            "last_changed": "2026-07-19T01:00:00+00:00",
+                        },
+                    ]
+                ],
+            }
+
+        with (
+            patch.object(
+                Integrations,
+                "home_assistant_weather",
+                new=AsyncMock(return_value=raw_weather),
+            ),
+            patch.object(
+                Integrations,
+                "home_assistant_temperature_history",
+                new=AsyncMock(side_effect=temperature_history),
+            ),
         ):
             response = self.client.get(
                 "/v1/devices/pilot-bedroom-display/snapshot",
@@ -139,13 +184,26 @@ class DisplayNodeApiTests(unittest.TestCase):
         self.assertEqual(payload["room_id"], "bedroom")
         self.assertEqual(payload["weather"]["temperature"], 22.5)
         self.assertEqual(payload["weather"]["high_temperature"], 26)
+        self.assertEqual(payload["weather"]["wind_speed"], 18)
+        self.assertEqual(payload["weather"]["precipitation"], 2.4)
+        self.assertEqual(payload["weather"]["tomorrow_condition"], "rainy")
+        self.assertEqual(
+            payload["temperature_extremes"]["outside"]["minimum"],
+            16.5,
+        )
+        self.assertEqual(
+            payload["temperature_extremes"]["inside"]["maximum"],
+            23.0,
+        )
+        self.assertEqual(
+            len(payload["temperature_extremes"]["outside"]["samples"]),
+            24,
+        )
         self.assertNotIn("private_attribute", json.dumps(payload))
         self.assertTrue(payload["voice"]["configured"])
         self.assertTrue(payload["tts"]["configured"])
         self.assertEqual(
-            self.client.get(
-                "/v1/devices/pilot-bedroom-display/snapshot"
-            ).status_code,
+            self.client.get("/v1/devices/pilot-bedroom-display/snapshot").status_code,
             422,
         )
 
@@ -199,13 +257,13 @@ class DisplayNodeApiTests(unittest.TestCase):
         payload = response.json()
         self.assertEqual(payload["transcript"], "What is the weather?")
         self.assertEqual(payload["response_text"], "It is sunny and 22 degrees.")
-        self.assertTrue(payload["audio"]["download_url"].startswith("/v1/audio-assets/"))
+        self.assertTrue(
+            payload["audio"]["download_url"].startswith("/v1/audio-assets/")
+        )
         self.assertNotIn("path", payload["audio"])
 
     def test_firmware_manifest_and_image_require_device_credentials(self) -> None:
-        release_dir = (
-            Path(self.root.name) / "firmware" / "esp32-c6-touch-amoled-2.16"
-        )
+        release_dir = Path(self.root.name) / "firmware" / "esp32-c6-touch-amoled-2.16"
         release_dir.mkdir(parents=True)
         image = b"pilot-firmware-image"
         filename = "pilot-display-node-0.2.0.bin"

@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import asynccontextmanager
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
+import math
 import os
 from pathlib import Path
 import secrets
@@ -375,11 +376,7 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
         if not database.authenticate_device(device_id, _bearer(authorization)):
             raise HTTPException(status_code=401, detail="invalid device credentials")
         device = next(
-            (
-                item
-                for item in database.list_devices()
-                if item["id"] == device_id
-            ),
+            (item for item in database.list_devices() if item["id"] == device_id),
             None,
         )
         if device is None:
@@ -407,6 +404,9 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
             else []
         )
         today = forecast[0] if forecast and isinstance(forecast[0], dict) else {}
+        tomorrow = (
+            forecast[1] if len(forecast) > 1 and isinstance(forecast[1], dict) else {}
+        )
 
         def value(source: dict[str, Any], key: str) -> Any:
             candidate = source.get(key)
@@ -419,13 +419,107 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
             "apparent_temperature": value(attributes, "apparent_temperature"),
             "temperature_unit": value(attributes, "temperature_unit"),
             "humidity": value(attributes, "humidity"),
+            "wind_speed": value(attributes, "wind_speed"),
+            "wind_speed_unit": value(attributes, "wind_speed_unit"),
+            "wind_bearing": value(attributes, "wind_bearing"),
             "high_temperature": value(today, "temperature"),
             "low_temperature": value(today, "templow"),
-            "precipitation_probability": value(
-                today, "precipitation_probability"
-            ),
+            "precipitation": value(today, "precipitation"),
+            "precipitation_unit": value(attributes, "precipitation_unit"),
+            "precipitation_probability": value(today, "precipitation_probability"),
             "forecast_condition": value(today, "condition"),
+            "tomorrow_high_temperature": value(tomorrow, "temperature"),
+            "tomorrow_low_temperature": value(tomorrow, "templow"),
+            "tomorrow_precipitation_probability": value(
+                tomorrow, "precipitation_probability"
+            ),
+            "tomorrow_condition": value(tomorrow, "condition"),
             "updated_at": value(current, "last_updated"),
+        }
+
+    def safe_temperature_history(raw: dict[str, Any]) -> dict[str, Any]:
+        entity_id = str(raw.get("entity_id") or "")
+        current = raw.get("current") or {}
+        attributes = current.get("attributes") or {}
+        history = raw.get("history") or []
+
+        def numeric(candidate: Any) -> float | None:
+            try:
+                value = float(candidate)
+            except (TypeError, ValueError):
+                return None
+            return value if math.isfinite(value) and -100 <= value <= 100 else None
+
+        def timestamp(candidate: Any) -> datetime | None:
+            if not isinstance(candidate, str):
+                return None
+            try:
+                parsed = datetime.fromisoformat(candidate.replace("Z", "+00:00"))
+            except ValueError:
+                return None
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=UTC)
+            return parsed.astimezone(UTC)
+
+        values: list[float] = []
+        points: list[tuple[datetime, float]] = []
+        current_value = numeric(current.get("state"))
+        if current_value is not None:
+            values.append(current_value)
+            current_time = timestamp(
+                current.get("last_updated") or current.get("last_changed")
+            )
+            if current_time is not None:
+                points.append((current_time, current_value))
+        if isinstance(history, list):
+            for series in history:
+                if not isinstance(series, list):
+                    continue
+                for state in series:
+                    if not isinstance(state, dict):
+                        continue
+                    candidate = numeric(state.get("state"))
+                    if candidate is not None:
+                        values.append(candidate)
+                        changed_at = timestamp(
+                            state.get("last_changed") or state.get("last_updated")
+                        )
+                        if changed_at is not None:
+                            points.append((changed_at, candidate))
+
+        sample_count = 24
+        period_hours = int(raw.get("period_hours") or 24)
+        samples: list[float] = []
+        if points:
+            points.sort(key=lambda point: point[0])
+            ended_at = points[-1][0]
+            started_at = ended_at - timedelta(hours=period_hours)
+            buckets: list[float | None] = [None] * sample_count
+            period_seconds = max(1.0, (ended_at - started_at).total_seconds())
+            for changed_at, candidate in points:
+                if changed_at < started_at:
+                    continue
+                position = (changed_at - started_at).total_seconds() / period_seconds
+                index = min(sample_count - 1, int(position * sample_count))
+                buckets[index] = candidate
+            previous = points[0][1]
+            for candidate in buckets:
+                if candidate is not None:
+                    previous = candidate
+                samples.append(round(previous, 2))
+
+        unit = attributes.get("unit_of_measurement")
+        updated_at = current.get("last_updated")
+        return {
+            "status": "ok" if current_value is not None and values else "unavailable",
+            "entity_id": entity_id,
+            "current": current_value,
+            "minimum": min(values) if values else None,
+            "maximum": max(values) if values else None,
+            "temperature_unit": unit if isinstance(unit, str) else None,
+            "period_hours": period_hours,
+            "samples": samples,
+            "updated_at": updated_at if isinstance(updated_at, str) else None,
         }
 
     async def queue_device_command(
@@ -1227,21 +1321,45 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
         x_pilot_device_id: str = Header(),
         authorization: str | None = Header(default=None),
     ) -> dict[str, Any]:
-        device = authenticated_device(
-            device_id, x_pilot_device_id, authorization
-        )
+        device = authenticated_device(device_id, x_pilot_device_id, authorization)
         response.headers["Cache-Control"] = "no-store"
-        try:
-            weather = safe_weather(await integrations.home_assistant_weather())
-        except IntegrationUnavailable as error:
-            weather = {"status": "not_configured", "detail": str(error)}
-        except IntegrationRequestFailed as error:
-            weather = {"status": "unavailable", "detail": str(error)}
+
+        async def weather_snapshot() -> dict[str, Any]:
+            try:
+                return safe_weather(await integrations.home_assistant_weather())
+            except IntegrationUnavailable as error:
+                return {"status": "not_configured", "detail": str(error)}
+            except IntegrationRequestFailed as error:
+                return {"status": "unavailable", "detail": str(error)}
+
+        async def temperature_snapshot(entity_id: str) -> dict[str, Any]:
+            if not entity_id:
+                return {
+                    "status": "not_configured",
+                    "detail": "temperature entity is not configured",
+                }
+            try:
+                raw = await integrations.home_assistant_temperature_history(entity_id)
+                return safe_temperature_history(raw)
+            except IntegrationUnavailable as error:
+                return {"status": "not_configured", "detail": str(error)}
+            except IntegrationRequestFailed as error:
+                return {"status": "unavailable", "detail": str(error)}
+
+        weather, outside_temperature, inside_temperature = await asyncio.gather(
+            weather_snapshot(),
+            temperature_snapshot(settings.integrations.outdoor_temperature_entity_id),
+            temperature_snapshot(settings.integrations.indoor_temperature_entity_id),
+        )
         return {
             "device_id": device_id,
             "room_id": device["room_id"],
             "server_time": datetime.now(UTC).isoformat(),
             "weather": weather,
+            "temperature_extremes": {
+                "outside": outside_temperature,
+                "inside": inside_temperature,
+            },
             "voice": voice_pipeline.status(),
             "tts": local_tts.status(),
         }
@@ -1257,9 +1375,7 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
         x_pilot_language: str | None = Header(default=None),
         x_pilot_conversation_id: str | None = Header(default=None),
     ) -> dict[str, Any]:
-        device = authenticated_device(
-            device_id, x_pilot_device_id, authorization
-        )
+        device = authenticated_device(device_id, x_pilot_device_id, authorization)
         if "voice" not in device["capabilities"]:
             raise HTTPException(
                 status_code=403, detail="device does not have voice capability"
@@ -1274,7 +1390,9 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
         if declared_length:
             try:
                 if int(declared_length) > settings.server.voice_audio_max_bytes:
-                    raise HTTPException(status_code=413, detail="voice audio is too large")
+                    raise HTTPException(
+                        status_code=413, detail="voice audio is too large"
+                    )
             except ValueError:
                 raise HTTPException(
                     status_code=400, detail="invalid content length"
@@ -1301,9 +1419,7 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
         except VoicePipelineUnavailable as error:
             raise HTTPException(status_code=503, detail=str(error)) from None
         except VoicePipelineFailed as error:
-            status_code = (
-                413 if "size limit" in str(error).lower() else 502
-            )
+            status_code = 413 if "size limit" in str(error).lower() else 502
             raise HTTPException(status_code=status_code, detail=str(error)) from None
         if total_bytes < x_pilot_sample_rate // 2:
             raise HTTPException(status_code=422, detail="voice audio is too short")
@@ -1351,9 +1467,7 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
         x_pilot_device_id: str = Header(),
         authorization: str | None = Header(default=None),
     ) -> dict[str, Any]:
-        device = authenticated_device(
-            device_id, x_pilot_device_id, authorization
-        )
+        device = authenticated_device(device_id, x_pilot_device_id, authorization)
         if "ota" not in device["capabilities"]:
             raise HTTPException(
                 status_code=403, detail="device does not have OTA capability"
@@ -1372,9 +1486,7 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
         return {
             "target": target,
             "current_version": current_version,
-            "update_available": is_newer_version(
-                release.version, current_version
-            ),
+            "update_available": is_newer_version(release.version, current_version),
             "release": {
                 **release.manifest(),
                 "download_url": (
@@ -1390,9 +1502,7 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
         x_pilot_device_id: str = Header(),
         authorization: str | None = Header(default=None),
     ) -> FileResponse:
-        device = authenticated_device(
-            device_id, x_pilot_device_id, authorization
-        )
+        device = authenticated_device(device_id, x_pilot_device_id, authorization)
         if "ota" not in device["capabilities"]:
             raise HTTPException(
                 status_code=403, detail="device does not have OTA capability"

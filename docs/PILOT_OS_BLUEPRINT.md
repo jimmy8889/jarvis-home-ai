@@ -1,8 +1,8 @@
 # Pilot OS Blueprint
 
-Version 1.8
+Version 2.1
 
-Last updated: 2026-07-18
+Last updated: 2026-07-19
 
 Status: Canonical architecture reference
 
@@ -90,7 +90,7 @@ Music streams: TCP 8097
 Sendspin server: TCP 8927
 Pilot Core: 10.0.1.64:8770
 Pilot Core host: debian-docker / Debian 12
-Pilot Core image: jarvis-home-ai/pilot-core:core-0.11.0-20260718.2
+Pilot Core image: jarvis-home-ai/pilot-core:core-0.12.0-20260719.1
 ```
 
 The Home Assistant add-on is the preferred initial Music Assistant deployment.
@@ -105,9 +105,10 @@ LAN health/readiness, authenticated API, invalid-token, disabled legacy
 bootstrap, container-restart persistence, backup-integrity, and log checks.
 Dedicated Home Assistant and Music Assistant credentials are installed through
 the root-owned file-backed secret store, and both read-only diagnostics are
-healthy. Pilot Core 0.11 enables the local Home Assistant Assist pipeline,
+healthy. Pilot Core 0.12 enables the local Home Assistant Assist pipeline,
 Piper TTS, the Geebung weather entity, and authenticated embedded-node voice,
-weather, and firmware APIs. Piper has been validated to return 16 kHz, mono,
+weather, rolling temperature-history, and firmware APIs. Piper has been
+validated to return 16 kHz, mono,
 16-bit WAV when all preferred audio properties are requested. A same-origin
 operations dashboard is available at `/dashboard`;
 its room, device, integration, safety, command, event, and deployment data
@@ -164,8 +165,8 @@ acceptance test.
 
 ```text
 Hardware: Waveshare ESP32-C6-Touch-AMOLED-2.16
-Deployed firmware: Pilot Display Node 0.2.5
-Published firmware: Pilot Display Node 0.2.4
+Deployed firmware: Pilot Display Node 0.2.6
+Published firmware: Pilot Display Node 0.2.6
 Display: 480 x 480 AMOLED
 Time: Australia/Brisbane via NTP with PCF85063 RTC fallback
 Network: Hazell IoT VLAN over 2.4 GHz Wi-Fi
@@ -175,7 +176,8 @@ The deployed display node presents a burn-in-conscious clock, reconnects to
 Wi-Fi, synchronizes time using Cloudflare NTP, refreshes the hardware RTC, and
 continues as an offline clock if networking is unavailable. It adds QMI8658
 motion wake, 20-second dimming, a dark display after 30 seconds,
-touch-scrollable current/daily weather, touch and GPIO push-to-talk, animated
+touch-scrollable clock, detailed forecast, Outside temperature, and Bedroom
+temperature pages, touch and GPIO push-to-talk, animated
 listening/processing/responding states, ES7210 microphone streaming to Pilot
 Core, ES8311 Piper response playback, and authenticated device snapshots.
 Native USB diagnostics, pinned dependencies, reproducible scripts, and a
@@ -197,8 +199,16 @@ more than 8 KiB of stack remaining and no reset. The ES7210's four interleaved
 TDM microphone channels are now converted to a real 16 kHz mono stream; the
 corrected stream was accepted by Home Assistant STT and reached local intent
 processing. The embedded TTS locale now matches the installed
-`en_US-amy-low` Piper voice. Version 0.2.5 remains a USB acceptance build until
-onboard response playback is heard; the immutable OTA release remains 0.2.4.
+`en_US-amy-low` Piper voice.
+
+Version 0.2.6 adds rain amount, wind, and tomorrow's outlook to the forecast.
+Pilot Core reads `sensor.gw1100c_outdoor_temperature` and
+`sensor.temp3_temperature`, calculates rolling 24-hour current/minimum/maximum
+values, and downsamples each recorder history to 24 bounded graph points.
+The USB rollout verified image integrity, boot, Wi-Fi, NTP, authenticated data
+refresh, dimming, and panel-off behavior without a reset. The identical
+immutable image is now published through Pilot Core; visual page navigation and
+onboard response playback remain hands-on acceptance items.
 
 ## 5. Hardware plan
 
@@ -320,10 +330,11 @@ absent until in-person acceptance.
 
 Pilot Display Node 0.2 is the first complete ESP32 room client. It owns local
 time/offline behavior, motion and touch UX, short push-to-talk capture, response
-playback, weather rendering, and rollback-safe updates. Pilot Core owns Home
-Assistant credentials, Assist/STT orchestration, TTS synthesis, weather
-normalization, and release authorization. The node stores only Wi-Fi
-credentials and its revocable per-device token.
+playback, weather and temperature-graph rendering, and rollback-safe updates.
+Pilot Core owns Home Assistant credentials, Assist/STT orchestration, TTS
+synthesis, weather normalization, bounded history projection, and release
+authorization. The node stores only Wi-Fi credentials and its revocable
+per-device token.
 
 The bedroom node deliberately keeps the ESP32 awake with the panel fully dark
 so the QMI8658 can wake the screen immediately. Deep sleep is deferred until an
@@ -518,6 +529,7 @@ deployed integration, hardware boundary, or milestone status changes.
 - [x] Reproducible firmware build, flash, and rollback documentation
 - [x] Authenticated Pilot Core weather, voice, reply-audio, and OTA transport
 - [x] Touch weather navigation and push-to-talk control
+- [x] Detailed forecast and rolling indoor/outdoor min/max graph pages
 - [x] Motion-aware bedroom dim/off and immediate wake behavior
 - [x] Authenticated, checksum-verified OTA update workflow
 - [x] Physical USB boot, stationary IMU dim/off, alternate-slot OTA, and healthy-image mark
@@ -573,8 +585,8 @@ deployed integration, hardware boundary, or milestone status changes.
 
 ## 14. Immediate next steps
 
-1. Hear and confirm Pilot Display Node 0.2.5's onboard Piper response, then
-   publish the accepted image through Pilot Core's firmware service.
+1. Visually confirm Pilot Display Node 0.2.6's Forecast, Outside, and Bedroom
+   pages and hear its onboard Piper response.
 2. Validate wake word through spoken response on the Office K3.
 3. Validate a local lossless Music Assistant track.
 4. Complete the supervised K3 acceptance receipt and explicitly arm room
@@ -670,3 +682,8 @@ deployed integration, hardware boundary, or milestone status changes.
   converted ES7210 four-channel TDM capture to true 16 kHz mono, physically
   verified Home Assistant transcription and intent processing without a
   reset, and aligned the device locale with the installed Piper voice.
+- **2.1** — Deployed Pilot Core 0.12 and Pilot Display Node 0.2.6 with bounded
+  rolling histories for the outdoor weather-station and bedroom sensors,
+  richer today/tomorrow forecast data, current/min/max temperature pages, and
+  24-point line graphs. The release passed server tests, physical USB boot,
+  authenticated refresh, dim/off, and immutable OTA publication checks.

@@ -33,6 +33,9 @@ class IntegrationSettings:
     home_assistant_assist_language: str = "en"
     home_assistant_assist_timeout_seconds: int = 60
     weather_entity_id: str = ""
+    outdoor_temperature_entity_id: str = ""
+    indoor_temperature_entity_id: str = ""
+    temperature_history_hours: int = 24
     tts_provider: str = ""
     tts_url: str = ""
     tts_token_env: str = "PILOT_TTS_TOKEN"
@@ -271,9 +274,16 @@ def load_settings(path: str | Path) -> Settings:
         home_assistant_assist_timeout_seconds=int(
             integration_values.get("home_assistant_assist_timeout_seconds", 60)
         ),
-        weather_entity_id=str(
-            integration_values.get("weather_entity_id", "")
+        weather_entity_id=str(integration_values.get("weather_entity_id", "")).strip(),
+        outdoor_temperature_entity_id=str(
+            integration_values.get("outdoor_temperature_entity_id", "")
         ).strip(),
+        indoor_temperature_entity_id=str(
+            integration_values.get("indoor_temperature_entity_id", "")
+        ).strip(),
+        temperature_history_hours=int(
+            integration_values.get("temperature_history_hours", 24)
+        ),
         tts_provider=str(integration_values.get("tts_provider", "")).strip(),
         tts_url=str(integration_values.get("tts_url", "")).rstrip("/"),
         tts_token_env=str(integration_values.get("tts_token_env", "PILOT_TTS_TOKEN")),
@@ -283,9 +293,7 @@ def load_settings(path: str | Path) -> Settings:
         tts_format=str(integration_values.get("tts_format", "wav")).strip(),
         tts_language=str(integration_values.get("tts_language", "en")).strip(),
         tts_sample_rate=int(integration_values.get("tts_sample_rate", 16000)),
-        tts_sample_channels=int(
-            integration_values.get("tts_sample_channels", 1)
-        ),
+        tts_sample_channels=int(integration_values.get("tts_sample_channels", 1)),
         tts_sample_bytes=int(integration_values.get("tts_sample_bytes", 2)),
         tts_timeout_seconds=int(integration_values.get("tts_timeout_seconds", 60)),
     )
@@ -310,6 +318,16 @@ def load_settings(path: str | Path) -> Settings:
         "weather."
     ):
         raise ValueError("integrations.weather_entity_id must be a weather entity")
+    for setting_name, entity_id in (
+        ("outdoor_temperature_entity_id", integrations.outdoor_temperature_entity_id),
+        ("indoor_temperature_entity_id", integrations.indoor_temperature_entity_id),
+    ):
+        if entity_id and not entity_id.startswith("sensor."):
+            raise ValueError(f"integrations.{setting_name} must be a sensor entity")
+    if not 1 <= integrations.temperature_history_hours <= 168:
+        raise ValueError(
+            "integrations.temperature_history_hours must be between 1 and 168"
+        )
     if integrations.tts_provider == "home_assistant":
         if not integrations.home_assistant_url:
             raise ValueError(

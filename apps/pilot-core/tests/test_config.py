@@ -124,6 +124,31 @@ tts_provider = "home_assistant"
         with self.assertRaisesRegex(ValueError, "home_assistant_url"):
             self._load(invalid)
 
+    def test_validates_display_temperature_sensors(self) -> None:
+        configured = VALID_CONFIG.replace(
+            "[[rooms]]",
+            """[integrations]
+outdoor_temperature_entity_id = "sensor.outdoor_temperature"
+indoor_temperature_entity_id = "sensor.bedroom_temperature"
+temperature_history_hours = 24
+
+[[rooms]]""",
+            1,
+        )
+        settings = self._load(configured)
+        self.assertEqual(
+            settings.integrations.outdoor_temperature_entity_id,
+            "sensor.outdoor_temperature",
+        )
+        self.assertEqual(settings.integrations.temperature_history_hours, 24)
+
+        invalid = configured.replace(
+            'outdoor_temperature_entity_id = "sensor.outdoor_temperature"',
+            'outdoor_temperature_entity_id = "weather.home"',
+        )
+        with self.assertRaisesRegex(ValueError, "must be a sensor entity"):
+            self._load(invalid)
+
 
 if __name__ == "__main__":
     unittest.main()

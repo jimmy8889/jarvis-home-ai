@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import UTC, datetime, timedelta
 import re
 import time
 from typing import Any
@@ -143,6 +144,50 @@ class Integrations:
             "entity_id": entity_id,
             "current": current,
             "forecast_response": forecast_response,
+        }
+
+    async def home_assistant_temperature_history(
+        self,
+        entity_id: str,
+    ) -> dict[str, Any]:
+        if not _ENTITY_ID.fullmatch(entity_id) or not entity_id.startswith("sensor."):
+            raise IntegrationRequestFailed(
+                "Home Assistant temperature entity ID is invalid"
+            )
+        current = await self.home_assistant_state(entity_id)
+        token = read_secret(self.settings.home_assistant_token_env)
+        if not token:
+            raise IntegrationUnavailable("Home Assistant token is not configured")
+        started_at = datetime.now(UTC) - timedelta(
+            hours=self.settings.temperature_history_hours
+        )
+        period = started_at.isoformat().replace("+00:00", "Z")
+        try:
+            async with httpx.AsyncClient(
+                timeout=20, transport=self.transport, follow_redirects=False
+            ) as client:
+                response = await client.get(
+                    (f"{self.settings.home_assistant_url}/api/history/period/{period}"),
+                    headers={"Authorization": f"Bearer {token}"},
+                    params={
+                        "filter_entity_id": entity_id,
+                        "minimal_response": "",
+                        "no_attributes": "",
+                    },
+                )
+                response.raise_for_status()
+                history = response.json()
+                if not isinstance(history, list):
+                    raise ValueError("history response is not an array")
+        except (httpx.HTTPError, ValueError) as error:
+            raise IntegrationRequestFailed(
+                f"Home Assistant temperature history request failed: {error}"
+            ) from error
+        return {
+            "entity_id": entity_id,
+            "period_hours": self.settings.temperature_history_hours,
+            "current": current,
+            "history": history,
         }
 
     async def diagnostics(self) -> dict[str, Any]:

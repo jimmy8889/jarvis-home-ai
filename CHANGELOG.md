@@ -2,6 +2,15 @@
 
 ## 2026-07-19
 
+- Added Pilot Core 0.12 display telemetry: read-only Home Assistant history for
+  configured indoor and outdoor temperature sensors, rolling 24-hour
+  min/max values, and a fixed 24-point downsampled series that bounds the
+  embedded payload regardless of recorder density.
+- Added and physically flashed Pilot Display Node 0.2.6 with a richer forecast
+  page plus dedicated Outside and Bedroom pages containing current
+  temperature, rolling minimum/maximum, and automatically scaled line graphs.
+  The new image completed Wi-Fi, NTP, authenticated snapshot, dim, and
+  screen-off checks without resetting and is published through Pilot Core.
 - Added and physically flashed Pilot Display Node 0.2.5 after Talk to Pilot
   exposed a voice-task stack overflow. The response buffer now lives on the
   heap, the voice task has measured stack headroom, task creation is checked,

@@ -140,6 +140,18 @@ lv_obj_t *weather_temperature = nullptr;
 lv_obj_t *weather_condition = nullptr;
 lv_obj_t *weather_range = nullptr;
 lv_obj_t *weather_details = nullptr;
+lv_obj_t *weather_tomorrow = nullptr;
+
+struct TemperaturePageWidgets {
+    lv_obj_t *current = nullptr;
+    lv_obj_t *range = nullptr;
+    lv_obj_t *chart = nullptr;
+    lv_chart_series_t *series = nullptr;
+    lv_obj_t *status = nullptr;
+};
+
+TemperaturePageWidgets outside_temperature_widgets = {};
+TemperaturePageWidgets inside_temperature_widgets = {};
 lv_obj_t *voice_overlay = nullptr;
 lv_obj_t *voice_status_label = nullptr;
 lv_obj_t *voice_detail_label = nullptr;
@@ -502,7 +514,7 @@ void create_clock_tile(lv_obj_t *tile) {
 }
 
 void create_weather_tile(lv_obj_t *tile) {
-    create_heading(tile, "TODAY  /  WEATHER");
+    create_heading(tile, "TODAY  /  FORECAST");
     weather_temperature = lv_label_create(tile);
     lv_label_set_text(weather_temperature, "--");
     lv_obj_set_style_text_color(
@@ -511,7 +523,7 @@ void create_weather_tile(lv_obj_t *tile) {
     lv_obj_set_style_text_font(
         weather_temperature, &lv_font_montserrat_48, 0
     );
-    lv_obj_align(weather_temperature, LV_ALIGN_TOP_MID, 0, 92);
+    lv_obj_align(weather_temperature, LV_ALIGN_TOP_MID, 0, 78);
 
     weather_condition = lv_label_create(tile);
     lv_label_set_text(weather_condition, "WAITING FOR PILOT CORE");
@@ -523,23 +535,101 @@ void create_weather_tile(lv_obj_t *tile) {
     );
     lv_obj_set_width(weather_condition, 400);
     lv_obj_set_style_text_align(weather_condition, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_align(weather_condition, LV_ALIGN_TOP_MID, 0, 164);
+    lv_obj_align(weather_condition, LV_ALIGN_TOP_MID, 0, 137);
 
     weather_range = lv_label_create(tile);
     lv_label_set_text(weather_range, "HIGH --   /   LOW --");
     lv_obj_set_style_text_color(weather_range, lv_color_hex(0xAAB9B6), 0);
     lv_obj_set_style_text_font(weather_range, &lv_font_montserrat_16, 0);
     lv_obj_set_style_text_letter_space(weather_range, 1, 0);
-    lv_obj_align(weather_range, LV_ALIGN_TOP_MID, 0, 221);
+    lv_obj_align(weather_range, LV_ALIGN_TOP_MID, 0, 180);
 
     weather_details = lv_label_create(tile);
-    lv_label_set_text(weather_details, "SWIPE RIGHT FOR CLOCK");
-    lv_obj_set_style_text_color(weather_details, lv_color_hex(0x5C716D), 0);
+    lv_label_set_text(
+        weather_details,
+        "FEELS --  |  HUMIDITY --\nRAIN --  |  WIND --"
+    );
+    lv_obj_set_style_text_color(weather_details, lv_color_hex(0xAAB9B6), 0);
     lv_obj_set_style_text_font(weather_details, &lv_font_montserrat_12, 0);
     lv_obj_set_width(weather_details, 400);
+    lv_obj_set_style_text_line_space(weather_details, 8, 0);
     lv_obj_set_style_text_align(weather_details, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_align(weather_details, LV_ALIGN_TOP_MID, 0, 267);
+    lv_obj_align(weather_details, LV_ALIGN_TOP_MID, 0, 219);
+
+    weather_tomorrow = lv_label_create(tile);
+    lv_label_set_text(
+        weather_tomorrow,
+        "TOMORROW  --\nHIGH --  /  LOW --  /  RAIN --"
+    );
+    lv_obj_set_style_text_color(weather_tomorrow, lv_color_hex(0x5C716D), 0);
+    lv_obj_set_style_text_font(weather_tomorrow, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_line_space(weather_tomorrow, 7, 0);
+    lv_obj_set_width(weather_tomorrow, 410);
+    lv_obj_set_style_text_align(weather_tomorrow, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_align(weather_tomorrow, LV_ALIGN_TOP_MID, 0, 296);
     create_voice_button(tile);
+}
+
+TemperaturePageWidgets create_temperature_tile(
+    lv_obj_t *tile,
+    const char *heading
+) {
+    TemperaturePageWidgets widgets = {};
+    create_heading(tile, heading);
+
+    widgets.current = lv_label_create(tile);
+    lv_label_set_text(widgets.current, "--");
+    lv_obj_set_style_text_color(widgets.current, lv_color_hex(0xE8FAF6), 0);
+    lv_obj_set_style_text_font(widgets.current, &lv_font_montserrat_48, 0);
+    lv_obj_align(widgets.current, LV_ALIGN_TOP_MID, 0, 78);
+
+    widgets.range = lv_label_create(tile);
+    lv_label_set_text(widgets.range, "MIN --   /   MAX --");
+    lv_obj_set_style_text_color(widgets.range, lv_color_hex(0xAAB9B6), 0);
+    lv_obj_set_style_text_font(widgets.range, &lv_font_montserrat_16, 0);
+    lv_obj_set_style_text_letter_space(widgets.range, 1, 0);
+    lv_obj_align(widgets.range, LV_ALIGN_TOP_MID, 0, 146);
+
+    widgets.chart = lv_chart_create(tile);
+    lv_obj_set_size(widgets.chart, 400, 145);
+    lv_obj_align(widgets.chart, LV_ALIGN_TOP_MID, 0, 193);
+    lv_chart_set_type(widgets.chart, LV_CHART_TYPE_LINE);
+    lv_chart_set_point_count(
+        widgets.chart, kPilotTemperatureSampleCount
+    );
+    lv_chart_set_div_line_count(widgets.chart, 3, 6);
+    lv_obj_set_style_bg_opa(widgets.chart, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(widgets.chart, 0, 0);
+    lv_obj_set_style_pad_all(widgets.chart, 4, 0);
+    lv_obj_set_style_line_color(
+        widgets.chart, lv_color_hex(0x123A35), LV_PART_MAIN
+    );
+    lv_obj_set_style_line_width(widgets.chart, 1, LV_PART_MAIN);
+    lv_obj_set_style_line_width(widgets.chart, 3, LV_PART_ITEMS);
+    lv_obj_set_style_width(widgets.chart, 0, LV_PART_INDICATOR);
+    lv_obj_set_style_height(widgets.chart, 0, LV_PART_INDICATOR);
+    widgets.series = lv_chart_add_series(
+        widgets.chart,
+        lv_color_hex(0x17C3A2),
+        LV_CHART_AXIS_PRIMARY_Y
+    );
+    if (widgets.series != nullptr) {
+        lv_chart_set_all_values(
+            widgets.chart, widgets.series, LV_CHART_POINT_NONE
+        );
+    }
+
+    widgets.status = lv_label_create(tile);
+    lv_label_set_text(
+        widgets.status, "24 HOURS AGO                         NOW"
+    );
+    lv_obj_set_style_text_color(widgets.status, lv_color_hex(0x5C716D), 0);
+    lv_obj_set_style_text_font(widgets.status, &lv_font_montserrat_12, 0);
+    lv_obj_set_width(widgets.status, 400);
+    lv_obj_set_style_text_align(widgets.status, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_align(widgets.status, LV_ALIGN_TOP_MID, 0, 352);
+    create_voice_button(tile);
+    return widgets;
 }
 
 void create_voice_overlay(lv_obj_t *screen) {
@@ -606,15 +696,41 @@ void create_ui() {
         tiles, 0, 0, LV_DIR_RIGHT
     );
     lv_obj_t *weather_tile = lv_tileview_add_tile(
-        tiles, 1, 0, LV_DIR_LEFT
+        tiles,
+        1,
+        0,
+        static_cast<lv_dir_t>(LV_DIR_LEFT | LV_DIR_RIGHT)
     );
-    for (lv_obj_t *tile : {clock_tile, weather_tile}) {
+    lv_obj_t *outside_temperature_tile = lv_tileview_add_tile(
+        tiles,
+        2,
+        0,
+        static_cast<lv_dir_t>(LV_DIR_LEFT | LV_DIR_RIGHT)
+    );
+    lv_obj_t *inside_temperature_tile = lv_tileview_add_tile(
+        tiles, 3, 0, LV_DIR_LEFT
+    );
+    for (
+        lv_obj_t *tile
+        : {
+            clock_tile,
+            weather_tile,
+            outside_temperature_tile,
+            inside_temperature_tile,
+        }
+    ) {
         lv_obj_set_style_bg_color(tile, lv_color_hex(0x000000), 0);
         lv_obj_set_style_bg_opa(tile, LV_OPA_COVER, 0);
         lv_obj_set_style_border_width(tile, 0, 0);
     }
     create_clock_tile(clock_tile);
     create_weather_tile(weather_tile);
+    outside_temperature_widgets = create_temperature_tile(
+        outside_temperature_tile, "OUTSIDE  /  24 HOURS"
+    );
+    inside_temperature_widgets = create_temperature_tile(
+        inside_temperature_tile, "BEDROOM  /  24 HOURS"
+    );
     create_voice_overlay(screen);
 }
 
@@ -679,6 +795,145 @@ void update_clock_ui() {
     lv_obj_align(time_row, LV_ALIGN_CENTER, offset[0], -32 + offset[1]);
 }
 
+void uppercase_condition(
+    const char *source,
+    char *destination,
+    std::size_t capacity
+) {
+    if (destination == nullptr || capacity == 0) {
+        return;
+    }
+    destination[0] = '\0';
+    if (source == nullptr) {
+        return;
+    }
+    std::strncpy(destination, source, capacity - 1);
+    destination[capacity - 1] = '\0';
+    for (
+        char *character = destination;
+        *character != '\0';
+        ++character
+    ) {
+        if (*character == '-') {
+            *character = ' ';
+        } else {
+            *character = static_cast<char>(
+                std::toupper(static_cast<unsigned char>(*character))
+            );
+        }
+    }
+}
+
+void format_rounded(
+    char *destination,
+    std::size_t capacity,
+    bool available,
+    float value
+) {
+    if (available) {
+        std::snprintf(
+            destination,
+            capacity,
+            "%d",
+            static_cast<int>(std::round(value))
+        );
+    } else if (capacity > 0) {
+        std::strncpy(destination, "--", capacity - 1);
+        destination[capacity - 1] = '\0';
+    }
+}
+
+void update_temperature_page(
+    const TemperaturePageWidgets &widgets,
+    const PilotTemperatureHistory &history
+) {
+    if (
+        widgets.current == nullptr ||
+        widgets.range == nullptr ||
+        widgets.chart == nullptr ||
+        widgets.series == nullptr ||
+        widgets.status == nullptr
+    ) {
+        return;
+    }
+    if (!history.available) {
+        lv_label_set_text(widgets.current, "--");
+        lv_label_set_text(widgets.range, "MIN --   /   MAX --");
+        lv_label_set_text(widgets.status, "TEMPERATURE HISTORY UNAVAILABLE");
+        lv_chart_set_all_values(
+            widgets.chart, widgets.series, LV_CHART_POINT_NONE
+        );
+        return;
+    }
+
+    const char *unit = (
+        history.temperature_unit[0] != '\0'
+            ? history.temperature_unit
+            : " C"
+    );
+    char current[32] = {};
+    std::snprintf(
+        current, sizeof(current), "%.1f%s", history.current, unit
+    );
+    lv_label_set_text(widgets.current, current);
+
+    char range[96] = {};
+    std::snprintf(
+        range,
+        sizeof(range),
+        "MIN %.1f%s   /   MAX %.1f%s",
+        history.minimum,
+        unit,
+        history.maximum,
+        unit
+    );
+    lv_label_set_text(widgets.range, range);
+
+    int32_t axis_min = static_cast<int32_t>(
+        std::floor(history.minimum * 10.0f)
+    ) - 5;
+    int32_t axis_max = static_cast<int32_t>(
+        std::ceil(history.maximum * 10.0f)
+    ) + 5;
+    if (axis_max - axis_min < 30) {
+        const int32_t centre = (axis_max + axis_min) / 2;
+        axis_min = centre - 15;
+        axis_max = centre + 15;
+    }
+    lv_chart_set_axis_range(
+        widgets.chart,
+        LV_CHART_AXIS_PRIMARY_Y,
+        axis_min,
+        axis_max
+    );
+    lv_chart_set_all_values(
+        widgets.chart, widgets.series, LV_CHART_POINT_NONE
+    );
+    for (
+        std::size_t index = 0;
+        index < history.sample_count;
+        ++index
+    ) {
+        lv_chart_set_next_value(
+            widgets.chart,
+            widgets.series,
+            static_cast<int32_t>(
+                std::round(history.samples[index] * 10.0f)
+            )
+        );
+    }
+    lv_chart_refresh(widgets.chart);
+
+    char status[80] = {};
+    std::snprintf(
+        status,
+        sizeof(status),
+        "%d HOURS AGO                         NOW",
+        history.period_hours
+    );
+    lv_label_set_text(widgets.status, status);
+}
+
 void update_weather_ui() {
     PilotWeather snapshot = {};
     if (
@@ -688,6 +943,13 @@ void update_weather_ui() {
         snapshot = weather;
         xSemaphoreGive(weather_mutex);
     }
+    update_temperature_page(
+        outside_temperature_widgets, snapshot.outside_temperature
+    );
+    update_temperature_page(
+        inside_temperature_widgets, snapshot.inside_temperature
+    );
+
     if (!snapshot.available) {
         lv_label_set_text(weather_temperature, "--");
         lv_label_set_text(
@@ -697,75 +959,170 @@ void update_weather_ui() {
                 : "CONNECT PILOT CORE"
         );
         lv_label_set_text(weather_range, "HIGH --   /   LOW --");
-        lv_label_set_text(weather_details, "SWIPE RIGHT FOR CLOCK");
+        lv_label_set_text(
+            weather_details,
+            "FEELS --  |  HUMIDITY --\nRAIN --  |  WIND --"
+        );
+        lv_label_set_text(
+            weather_tomorrow,
+            "TOMORROW  --\nHIGH --  /  LOW --  /  RAIN --"
+        );
         return;
     }
+
+    const char *unit = (
+        snapshot.temperature_unit[0] != '\0'
+            ? snapshot.temperature_unit
+            : " C"
+    );
     char temperature[32] = {};
     std::snprintf(
         temperature,
         sizeof(temperature),
         "%.0f%s",
         snapshot.temperature,
-        snapshot.temperature_unit[0] != '\0'
-            ? snapshot.temperature_unit
-            : " C"
+        unit
     );
     lv_label_set_text(weather_temperature, temperature);
+
     const char *condition = (
         snapshot.forecast_condition[0] != '\0'
             ? snapshot.forecast_condition
             : snapshot.condition
     );
     char condition_text[64] = {};
-    std::strncpy(condition_text, condition, sizeof(condition_text) - 1);
-    for (char &character : condition_text) {
-        if (character == '-') {
-            character = ' ';
-        } else {
-            character = static_cast<char>(
-                std::toupper(static_cast<unsigned char>(character))
-            );
-        }
-    }
+    uppercase_condition(
+        condition, condition_text, sizeof(condition_text)
+    );
     lv_label_set_text(weather_condition, condition_text);
 
+    char high[16] = {};
+    char low[16] = {};
+    format_rounded(
+        high,
+        sizeof(high),
+        snapshot.has_high_temperature,
+        snapshot.high_temperature
+    );
+    format_rounded(
+        low,
+        sizeof(low),
+        snapshot.has_low_temperature,
+        snapshot.low_temperature
+    );
     char range[96] = {};
     std::snprintf(
         range,
         sizeof(range),
-        "HIGH %s   /   LOW %s",
-        snapshot.has_high_temperature
-            ? std::to_string(
-                static_cast<int>(std::round(snapshot.high_temperature))
-            ).c_str()
-            : "--",
-        snapshot.has_low_temperature
-            ? std::to_string(
-                static_cast<int>(std::round(snapshot.low_temperature))
-            ).c_str()
-            : "--"
+        "HIGH %s%s   /   LOW %s%s",
+        high,
+        snapshot.has_high_temperature ? unit : "",
+        low,
+        snapshot.has_low_temperature ? unit : ""
     );
     lv_label_set_text(weather_range, range);
 
-    char details[128] = {};
+    char feels[16] = {};
+    char humidity[16] = {};
+    char rain_chance[16] = {};
+    char rain_amount[16] = {};
+    char wind_speed[16] = {};
+    format_rounded(
+        feels,
+        sizeof(feels),
+        snapshot.has_apparent_temperature,
+        snapshot.apparent_temperature
+    );
+    format_rounded(
+        humidity,
+        sizeof(humidity),
+        snapshot.has_humidity,
+        snapshot.humidity
+    );
+    format_rounded(
+        rain_chance,
+        sizeof(rain_chance),
+        snapshot.has_precipitation_probability,
+        snapshot.precipitation_probability
+    );
+    if (snapshot.has_precipitation) {
+        std::snprintf(
+            rain_amount,
+            sizeof(rain_amount),
+            "%.1f",
+            snapshot.precipitation
+        );
+    } else {
+        std::strncpy(rain_amount, "--", sizeof(rain_amount) - 1);
+    }
+    format_rounded(
+        wind_speed,
+        sizeof(wind_speed),
+        snapshot.has_wind_speed,
+        snapshot.wind_speed
+    );
+    char details[192] = {};
     std::snprintf(
         details,
         sizeof(details),
-        "HUMIDITY %s   |   RAIN %s",
-        snapshot.has_humidity
-            ? std::to_string(
-                static_cast<int>(std::round(snapshot.humidity))
-            ).c_str()
+        "FEELS %s%s  |  HUMIDITY %s%%\n"
+        "RAIN %s%% / %s%s  |  WIND %s %s%s",
+        feels,
+        snapshot.has_apparent_temperature ? unit : "",
+        humidity,
+        rain_chance,
+        rain_amount,
+        snapshot.has_precipitation
+            ? snapshot.precipitation_unit
+            : "",
+        snapshot.wind_bearing[0] != '\0'
+            ? snapshot.wind_bearing
             : "--",
-        snapshot.has_precipitation_probability
-            ? std::to_string(
-                static_cast<int>(
-                    std::round(snapshot.precipitation_probability)
-                )
-            ).c_str()
-            : "--"
+        wind_speed,
+        snapshot.has_wind_speed
+            ? snapshot.wind_speed_unit
+            : ""
     );
     lv_label_set_text(weather_details, details);
+
+    char tomorrow_condition[64] = {};
+    uppercase_condition(
+        snapshot.tomorrow_condition,
+        tomorrow_condition,
+        sizeof(tomorrow_condition)
+    );
+    char tomorrow_high[16] = {};
+    char tomorrow_low[16] = {};
+    char tomorrow_rain[16] = {};
+    format_rounded(
+        tomorrow_high,
+        sizeof(tomorrow_high),
+        snapshot.has_tomorrow_high_temperature,
+        snapshot.tomorrow_high_temperature
+    );
+    format_rounded(
+        tomorrow_low,
+        sizeof(tomorrow_low),
+        snapshot.has_tomorrow_low_temperature,
+        snapshot.tomorrow_low_temperature
+    );
+    format_rounded(
+        tomorrow_rain,
+        sizeof(tomorrow_rain),
+        snapshot.has_tomorrow_precipitation_probability,
+        snapshot.tomorrow_precipitation_probability
+    );
+    char tomorrow[160] = {};
+    std::snprintf(
+        tomorrow,
+        sizeof(tomorrow),
+        "TOMORROW  %s\nHIGH %s  /  LOW %s  /  RAIN %s%%",
+        tomorrow_condition[0] != '\0' ? tomorrow_condition : "--",
+        tomorrow_high,
+        tomorrow_low,
+        tomorrow_rain
+    );
+    lv_label_set_text(weather_tomorrow, tomorrow);
 }
 
 void update_voice_ui() {

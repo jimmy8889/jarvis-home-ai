@@ -36,6 +36,7 @@ ExecStart=/usr/bin/dbus-run-session -- /usr/bin/cage -s -- /usr/bin/chromium \
   --ozone-platform=wayland \
   --enable-features=UseOzonePlatform \
   --touch-events=enabled \
+  --hide-scrollbars \
   --autoplay-policy=no-user-gesture-required \
   --disk-cache-size={{ display_node_chromium_disk_cache_bytes }} \
   --media-cache-size={{ display_node_chromium_media_cache_bytes }} \

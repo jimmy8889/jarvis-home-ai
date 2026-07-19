@@ -88,12 +88,15 @@ class CoreStatusTests(unittest.TestCase):
 
         for name in ("solar", "grid", "battery"):
             self.assertIn(f'id="flow-{name}"', html)
+            self.assertIn(f'id="particles-{name}"', html)
         self.assertIn('id="node-home"', html)
         self.assertIn("setFlow(elements.flow_grid", script)
         self.assertIn("grid < 0", script)
         self.assertIn("battery < 0", script)
         self.assertIn("@keyframes energy-flow-forward", styles)
         self.assertIn("@keyframes energy-flow-reverse", styles)
+        self.assertIn("cursor: none !important", styles)
+        self.assertIn(".flow-particles.reverse .particles-reverse", styles)
 
 
 if __name__ == "__main__":

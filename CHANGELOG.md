@@ -2,6 +2,10 @@
 
 ## 2026-07-19
 
+- Added Pilot Linux Display 0.3.1 with a fully hidden kiosk pointer and bright
+  moving SVG particles that make source-to-home direction explicit. Battery
+  discharge now visibly travels Battery to Home; charging and grid export use
+  dedicated reverse paths.
 - Added Pilot Linux Display 0.3's animated energy-flow view. Solar, Grid,
   Battery, and Home are joined by live directional paths; animation speed and
   intensity scale with power, grid import/export and battery

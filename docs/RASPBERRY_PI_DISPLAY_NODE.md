@@ -47,7 +47,8 @@ The touch surface provides:
 - Brisbane time and date
 - live solar, home load, grid direction, battery power/direction, and battery SOC
 - an animated power-flow diagram whose direction, speed, glow, and active
-  paths follow the live Home Assistant values
+  paths follow the live Home Assistant values; bright moving particles make
+  Battery-to-Home discharge and reversed charging/export paths explicit
 - now-playing title, artist, player, state, and volume for every active Music
   Assistant endpoint
 - Pilot Core connection and registry state
@@ -55,6 +56,7 @@ The touch surface provides:
 - Node address, CPU temperature, and free storage
 - large Home, Energy, Music, and System touch targets
 - tap and horizontal-swipe navigation
+- a hidden mouse pointer in both the page styling and kiosk configuration
 
 The Pi is enrolled provisionally in the Office room with only the `display`
 capability. This provides read access to the bounded surface and cannot send

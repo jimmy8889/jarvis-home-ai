@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pilot-display-node"
-version = "0.3.0"
+version = "0.3.1"
 description = "Local status surface for Pilot Linux display appliances"
 requires-python = ">=3.11"
 dependencies = []

@@ -6,7 +6,8 @@ const elements = Object.fromEntries(
     "energy-state", "energy-solar", "energy-home", "energy-grid",
     "energy-grid-direction", "energy-battery", "energy-battery-direction",
     "energy-soc", "soc-fill", "energy-flow", "flow-solar", "flow-grid",
-    "flow-battery", "node-solar", "node-grid", "node-home", "node-battery",
+    "flow-battery", "particles-solar", "particles-grid", "particles-battery",
+    "node-solar", "node-grid", "node-home", "node-battery",
     "music-state", "now-playing-list",
   ].map((id) => [id.replaceAll("-", "_"), document.querySelector(`#${id}`)]),
 );
@@ -42,11 +43,13 @@ function gigabytes(bytes) {
   return typeof bytes === "number" ? `${number.format(bytes / 1e9)} GB` : "—";
 }
 
-function setFlow(path, node, value, reverse = false) {
+function setFlow(path, particles, node, value, reverse = false) {
   const magnitude = typeof value === "number" ? Math.abs(value) : 0;
   const active = magnitude >= 25;
   path.classList.toggle("active", active);
   path.classList.toggle("reverse", active && reverse);
+  particles.classList.toggle("active", active);
+  particles.classList.toggle("reverse", active && reverse);
   node.classList.toggle("active", active);
   const normalized = Math.min(1, magnitude / 6000);
   path.style.setProperty("--flow-speed", `${(2.5 - (normalized * 1.7)).toFixed(2)}s`);
@@ -75,9 +78,15 @@ function renderEnergy(energy = {}) {
   const clampedSoc = typeof soc === "number" ? Math.max(0, Math.min(100, soc)) : 0;
   elements.soc_fill.style.width = `${clampedSoc}%`;
 
-  setFlow(elements.flow_solar, elements.node_solar, solar);
-  setFlow(elements.flow_grid, elements.node_grid, grid, grid < 0);
-  setFlow(elements.flow_battery, elements.node_battery, battery, battery < 0);
+  setFlow(elements.flow_solar, elements.particles_solar, elements.node_solar, solar);
+  setFlow(elements.flow_grid, elements.particles_grid, elements.node_grid, grid, grid < 0);
+  setFlow(
+    elements.flow_battery,
+    elements.particles_battery,
+    elements.node_battery,
+    battery,
+    battery < 0,
+  );
   elements.node_home.classList.toggle("active", typeof home === "number" && home >= 25);
   elements.energy_flow.setAttribute(
     "aria-label",

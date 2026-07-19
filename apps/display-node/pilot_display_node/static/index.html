@@ -71,6 +71,30 @@
               <path id="flow-solar" class="flow-active solar-flow" pathLength="100" d="M460 88 C460 112 460 124 460 148"></path>
               <path id="flow-grid" class="flow-active grid-flow" pathLength="100" d="M204 207 C282 207 330 207 382 207"></path>
               <path id="flow-battery" class="flow-active battery-flow" pathLength="100" d="M716 207 C638 207 590 207 538 207"></path>
+              <g id="particles-solar" class="flow-particles solar-particles">
+                <circle r="5"><animateMotion dur="1.5s" begin="0s" repeatCount="indefinite" path="M460 88 C460 112 460 124 460 148"></animateMotion></circle>
+                <circle r="3"><animateMotion dur="1.5s" begin="-0.75s" repeatCount="indefinite" path="M460 88 C460 112 460 124 460 148"></animateMotion></circle>
+              </g>
+              <g id="particles-grid" class="flow-particles grid-particles">
+                <g class="particles-forward">
+                  <circle r="5"><animateMotion dur="1.6s" begin="0s" repeatCount="indefinite" path="M204 207 C282 207 330 207 382 207"></animateMotion></circle>
+                  <circle r="3"><animateMotion dur="1.6s" begin="-0.8s" repeatCount="indefinite" path="M204 207 C282 207 330 207 382 207"></animateMotion></circle>
+                </g>
+                <g class="particles-reverse">
+                  <circle r="5"><animateMotion dur="1.6s" begin="0s" repeatCount="indefinite" path="M382 207 C330 207 282 207 204 207"></animateMotion></circle>
+                  <circle r="3"><animateMotion dur="1.6s" begin="-0.8s" repeatCount="indefinite" path="M382 207 C330 207 282 207 204 207"></animateMotion></circle>
+                </g>
+              </g>
+              <g id="particles-battery" class="flow-particles battery-particles">
+                <g class="particles-forward">
+                  <circle r="6"><animateMotion dur="1.35s" begin="0s" repeatCount="indefinite" path="M716 207 C638 207 590 207 538 207"></animateMotion></circle>
+                  <circle r="4"><animateMotion dur="1.35s" begin="-0.675s" repeatCount="indefinite" path="M716 207 C638 207 590 207 538 207"></animateMotion></circle>
+                </g>
+                <g class="particles-reverse">
+                  <circle r="6"><animateMotion dur="1.35s" begin="0s" repeatCount="indefinite" path="M538 207 C590 207 638 207 716 207"></animateMotion></circle>
+                  <circle r="4"><animateMotion dur="1.35s" begin="-0.675s" repeatCount="indefinite" path="M538 207 C590 207 638 207 716 207"></animateMotion></circle>
+                </g>
+              </g>
             </svg>
 
             <article id="node-solar" class="flow-node solar-node">

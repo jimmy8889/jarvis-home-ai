@@ -5,7 +5,11 @@
   color: #f2f7ff;
 }
 
-* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+* {
+  box-sizing: border-box;
+  cursor: none !important;
+  -webkit-tap-highlight-color: transparent;
+}
 
 body {
   margin: 0;
@@ -140,6 +144,28 @@ article {
 .battery-flow { stroke: url("#battery-gradient"); filter: drop-shadow(0 0 7px rgba(0,230,190,.72)); }
 @keyframes energy-flow-forward { to { stroke-dashoffset: -28; } }
 @keyframes energy-flow-reverse { to { stroke-dashoffset: 28; } }
+.flow-particles {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .3s ease;
+}
+.flow-particles.active { opacity: 1; }
+.flow-particles .particles-reverse { display: none; }
+.flow-particles.reverse .particles-forward { display: none; }
+.flow-particles.reverse .particles-reverse { display: inline; }
+.flow-particles circle { stroke: rgba(255,255,255,.9); stroke-width: 1.5; }
+.solar-particles circle {
+  fill: #ffd35d;
+  filter: drop-shadow(0 0 6px #ffb347);
+}
+.grid-particles circle {
+  fill: #4bb8ff;
+  filter: drop-shadow(0 0 7px #4bb8ff);
+}
+.battery-particles circle {
+  fill: #00f0c6;
+  filter: drop-shadow(0 0 8px #00e6be);
+}
 
 .flow-node {
   position: absolute;

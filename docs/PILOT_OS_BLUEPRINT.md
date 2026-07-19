@@ -239,7 +239,7 @@ Hardware: Raspberry Pi 4 Model B, 2 GB / 16 GB microSD
 Display: 10-inch 1024 x 600 HDMI with ILITEK USB touch
 OS: 64-bit Debian 13 Trixie
 Runtime: Cage Wayland compositor + Chromium kiosk
-Surface: Pilot Linux Display 0.3
+Surface: Pilot Linux Display 0.3.1
 ```
 
 This node is deployed as a minimal appliance rather than a full desktop. A
@@ -774,3 +774,6 @@ deployed integration, hardware boundary, or milestone status changes.
 - **2.6** — Added Pilot Linux Display 0.3's animated power-flow diagram with
   magnitude-scaled motion, source glow, grid import/export direction, battery
   charge/discharge direction, and retained live SOC telemetry.
+- **2.7** — Added Pilot Linux Display 0.3.1 with a hidden kiosk pointer and
+  explicit moving energy particles, including dedicated Battery-to-Home
+  discharge and reversed charging/export paths.

@@ -5,7 +5,7 @@
 - Added Pilot Core 0.13's room- and device-scoped conversation sessions,
   retained turn history, linked Home Assistant conversation continuity, fast
   deterministic routing, and an optional local OpenAI-compatible reasoning
-  path with six typed Home Assistant/Music Assistant tools.
+  path with seven typed Home Assistant/Music Assistant tools.
 - Added administrator conversation/status APIs and dashboard visibility for
   the assistant engine without exposing transcripts in the operational
   snapshot.

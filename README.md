@@ -87,6 +87,10 @@ The Raspberry Pi 4 large-format touch display appliance, minimal Wayland kiosk,
 storage controls, deployment, acceptance, and rollback are documented in
 [docs/RASPBERRY_PI_DISPLAY_NODE.md](docs/RASPBERRY_PI_DISPLAY_NODE.md).
 
+The native-HDMI N150 Media Console, fullscreen music/video shell, supervised
+mpv/Jellyfin playback, Shield boundary, and iOS remote contract are documented
+in [docs/N150_MEDIA_CONSOLE.md](docs/N150_MEDIA_CONSOLE.md).
+
 Pilot Core's room-scoped dialogue, deterministic Home Assistant fast path,
 optional local model fallback, and typed tool boundary are documented in
 [docs/CONTEXTUAL_ASSISTANT.md](docs/CONTEXTUAL_ASSISTANT.md).

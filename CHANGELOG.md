@@ -2,6 +2,11 @@
 
 ## 2026-07-19
 
+- Added the N150 Media Console architecture and delivery plan. A
+  display-capable native-Debian N150 will provide the fullscreen Pilot shell,
+  Music Assistant presentation, supervised mpv/Jellyfin local video, HDMI
+  output, assistant overlays, and iOS control through Pilot Core. The Shield
+  remains the Dolby Vision, DRM, and commercial-streaming engine.
 - Added Pilot Linux Display 0.3.1 with a fully hidden kiosk pointer and bright
   moving SVG particles that make source-to-home direction explicit. Battery
   discharge now visibly travels Battery to Home; charging and grid export use

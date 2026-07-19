@@ -288,7 +288,10 @@ non-mutating `display` capability.
 
 - Denon AVC-X8500H
 - NVIDIA Shield for licensed Dolby Vision playback
-- Optional HDMI-connected N150 for Pilot audio and dashboard output
+- HDMI-connected N150 Media Console for Pilot audio, local video, dashboards,
+  assistant overlays, and iOS-controlled room sessions
+- Shield retained as the licensed Dolby Vision, DRM, and commercial-streaming
+  engine
 
 ## 6. Software components
 
@@ -369,7 +372,8 @@ Planned responsibilities:
 ### Client applications
 
 - macOS: dictation, push-to-talk, AI compose, and menu bar controls
-- iOS: meeting recording, remote assistant, and notifications
+- iOS: meeting recording, remote assistant, notifications, and secure
+  room/media-console control
 - Shield TV: dashboard, media browser, assistant overlay, and home controls
 
 Pilot TV 0.1 now exists as a buildable Kotlin/Compose for TV application. It
@@ -377,6 +381,20 @@ reads the authenticated operations snapshot, renders rooms, integrations,
 safety, endpoints, players, and now-playing state, and stores its administrator
 credential only in process memory. Media and Home Assistant mutations remain
 absent until in-person acceptance.
+
+### N150 Media Console
+
+The display-capable N150 role combines Room Agent and the audio stack with a
+ten-foot Pilot shell and supervised local-video engine. Native Debian owns
+Intel graphics, HDMI, PipeWire, Sendspin, a lightweight Wayland session, and
+mpv. Pilot Core remains authoritative for rooms, queues, playback sessions,
+engine selection, permissions, and audit history.
+
+Music remains under Music Assistant. Local/Jellyfin video suitable for the
+tested Linux path uses mpv. The Shield remains the engine for Dolby Vision,
+DRM, and commercial services. iOS controls both through device/user-bound
+Pilot Core APIs instead of connecting directly to the N150, Denon, Shield, or
+mpv socket. The full plan is in `docs/N150_MEDIA_CONSOLE.md`.
 
 ### Embedded display nodes
 
@@ -599,8 +617,17 @@ deployed integration, hardware boundary, or milestone status changes.
 - [x] Provider-neutral Denon and Shield state
 - [x] Fail-closed Media Room control gate
 - [ ] In-person Denon control acceptance
-- [ ] Shield application foundation
-- [ ] N150 HDMI design and passthrough decision
+- [x] Shield application foundation
+- [ ] Shield device pairing and physical deployment
+- [x] N150 Media Console architecture and native-HDMI boundary
+- [ ] Media-console agent and authenticated session commands
+- [ ] Fullscreen N150 idle/music/assistant shell
+- [ ] Supervised mpv local-video playback
+- [ ] Jellyfin browse, resume, subtitle, and audio-track integration
+- [ ] iOS room/media remote
+- [ ] HDMI/CEC/Denon power and source coordination
+- [ ] N150 HDR10 and HD-audio acceptance
+- [ ] N150/Shield playback-engine selection and handoff
 - [ ] Multi-room sync and announcements
 
 ### Phase 4 — Productivity and meetings
@@ -777,3 +804,7 @@ deployed integration, hardware boundary, or milestone status changes.
 - **2.7** — Added Pilot Linux Display 0.3.1 with a hidden kiosk pointer and
   explicit moving energy particles, including dedicated Battery-to-Home
   discharge and reversed charging/export paths.
+- **2.8** — Added the N150 Media Console architecture: a native-HDMI Debian
+  room role with a fullscreen Pilot shell, Music Assistant presentation,
+  supervised mpv/Jellyfin local video, iOS control through Pilot Core, and a
+  strict Shield boundary for Dolby Vision, DRM, and commercial streaming.

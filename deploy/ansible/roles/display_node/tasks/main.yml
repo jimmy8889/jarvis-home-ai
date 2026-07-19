@@ -62,7 +62,10 @@
     group: "{{ item.group | default('root') }}"
     mode: "{{ item.mode }}"
   loop:
-    - { path: /etc/pilot-display, mode: "0750" }
+    - path: /etc/pilot-display
+      owner: root
+      group: "{{ display_node_user }}"
+      mode: "0750"
     - { path: /opt/pilot-display/releases, mode: "0755" }
     - { path: /var/backups/pilot-display, mode: "0700" }
     - path: /var/lib/pilot-display

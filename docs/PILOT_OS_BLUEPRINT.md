@@ -173,7 +173,7 @@ acceptance test.
 
 ```text
 Hardware: Waveshare ESP32-C6-Touch-AMOLED-2.16
-Deployed firmware: Pilot Display Node 0.2.7
+Deployed firmware: Pilot Display Node 0.2.8
 Published firmware: Pilot Display Node 0.2.8
 Display: 480 x 480 AMOLED
 Time: Australia/Brisbane via NTP with PCF85063 RTC fallback
@@ -228,8 +228,8 @@ authenticated snapshot, and reported `current_version=0.2.7`.
 
 Version 0.2.8 retains Pilot Core's opaque conversation ID in RAM for up to 15
 minutes and sends it with follow-up voice requests. It never writes dialogue
-state to flash. The release is published for OTA; physical installation remains
-to be confirmed by the node.
+state to flash. The release was published through Pilot Core, installed over
+OTA, rebooted successfully, and reported `current_version=0.2.8`.
 
 ## 5. Hardware plan
 
@@ -610,8 +610,8 @@ deployed integration, hardware boundary, or milestone status changes.
 
 ## 14. Immediate next steps
 
-1. Confirm Pilot Display Node 0.2.8 installs over OTA and that a follow-up
-   request reuses the same Pilot conversation session.
+1. Confirm a display follow-up request reuses the same Pilot conversation
+   session through speech and local TTS.
 2. Make the RTX 3080 inference endpoint reachable from Pilot Core, select a
    tool-capable local model, and enable the 0.13 reasoning provider.
 3. Run contextual acceptance prompts for pronouns, follow-ups, room-relative

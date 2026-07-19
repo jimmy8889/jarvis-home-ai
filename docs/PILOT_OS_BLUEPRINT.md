@@ -239,7 +239,7 @@ Hardware: Raspberry Pi 4 Model B, 2 GB / 16 GB microSD
 Display: 10-inch 1024 x 600 HDMI with ILITEK USB touch
 OS: 64-bit Debian 13 Trixie
 Runtime: Cage Wayland compositor + Chromium kiosk
-Surface: Pilot Linux Display 0.2
+Surface: Pilot Linux Display 0.3
 ```
 
 This node is deployed as a minimal appliance rather than a full desktop. A
@@ -248,10 +248,12 @@ registry counts, bounded local health, whole-network now-playing state, and the
 SAJ energy system. A device-only credential stays in the local service; the
 browser receives no credential and the Pi receives no Home Assistant, Music
 Assistant, or administrator token. Touch-native Home, Energy, Music, and System
-pages support large tap targets and horizontal swipes. Chromium caches, system
-journals, release count, and APT archives are bounded for the 16 GB card;
-automatic security updates do not reboot the node. The display's incomplete
-EDID is overridden through a reversible KMS
+pages support large tap targets and horizontal swipes. The Energy page uses a
+live flow diagram whose path direction represents grid import/export and
+battery charge/discharge, while animation speed and intensity scale with
+watts. Chromium caches, system journals, release count, and APT archives are
+bounded for the 16 GB card; automatic security updates do not reboot the node.
+The display's incomplete EDID is overridden through a reversible KMS
 `video=HDMI-A-1:1024x600M@60D` argument.
 
 Physical acceptance verified native mode, ILITEK input on `seat0`, Pilot Core
@@ -769,3 +771,6 @@ deployed integration, hardware boundary, or milestone status changes.
   enrolled the Raspberry Pi with a display-only device credential, and added
   touch-native Home, Energy, Music, and System pages with tap and swipe
   navigation.
+- **2.6** — Added Pilot Linux Display 0.3's animated power-flow diagram with
+  magnitude-scaled motion, source glow, grid import/export direction, battery
+  charge/discharge direction, and retained live SOC telemetry.

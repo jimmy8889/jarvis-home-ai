@@ -2,6 +2,11 @@
 
 ## 2026-07-19
 
+- Added Pilot Linux Display 0.3's animated energy-flow view. Solar, Grid,
+  Battery, and Home are joined by live directional paths; animation speed and
+  intensity scale with power, grid import/export and battery
+  charge/discharge reverse the appropriate path, and inactive paths remain
+  subdued.
 - Added Pilot Core 0.14's device-authenticated display surface with a bounded
   five-sensor Home Assistant energy projection and safe whole-network Music
   Assistant now-playing metadata. Provider URLs, raw attributes, media URIs,

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 import unittest
 from unittest.mock import MagicMock, patch
 
@@ -78,6 +79,21 @@ class CoreStatusTests(unittest.TestCase):
         request = urlopen.call_args.args[0]
         self.assertEqual(request.headers["Authorization"], "Bearer device-secret")
         self.assertNotIn("device-secret", json.dumps(result))
+
+    def test_energy_surface_has_directional_flow_paths(self) -> None:
+        static = Path(__file__).parents[1] / "pilot_display_node" / "static"
+        html = (static / "index.html").read_text(encoding="utf-8")
+        script = (static / "app.js").read_text(encoding="utf-8")
+        styles = (static / "styles.css").read_text(encoding="utf-8")
+
+        for name in ("solar", "grid", "battery"):
+            self.assertIn(f'id="flow-{name}"', html)
+        self.assertIn('id="node-home"', html)
+        self.assertIn("setFlow(elements.flow_grid", script)
+        self.assertIn("grid < 0", script)
+        self.assertIn("battery < 0", script)
+        self.assertIn("@keyframes energy-flow-forward", styles)
+        self.assertIn("@keyframes energy-flow-reverse", styles)
 
 
 if __name__ == "__main__":

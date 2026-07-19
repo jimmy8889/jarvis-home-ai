@@ -49,31 +49,57 @@
             </div>
             <span id="energy-state" class="data-state">Waiting</span>
           </div>
-          <div class="energy-grid">
-            <article class="energy-card solar">
-              <span>Solar</span>
-              <strong id="energy-solar">—</strong>
-              <small>PV generation</small>
+          <div id="energy-flow" class="energy-flow" role="img" aria-label="Waiting for live energy flow">
+            <svg class="flow-lines" viewBox="0 0 920 310" aria-hidden="true">
+              <defs>
+                <linearGradient id="solar-gradient" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0" stop-color="#ffd35d"></stop>
+                  <stop offset="1" stop-color="#ff9f43"></stop>
+                </linearGradient>
+                <linearGradient id="grid-gradient" x1="0" y1="0" x2="1" y2="0">
+                  <stop offset="0" stop-color="#4bb8ff"></stop>
+                  <stop offset="1" stop-color="#697dff"></stop>
+                </linearGradient>
+                <linearGradient id="battery-gradient" x1="1" y1="0" x2="0" y2="0">
+                  <stop offset="0" stop-color="#00e6be"></stop>
+                  <stop offset="1" stop-color="#3ba7ff"></stop>
+                </linearGradient>
+              </defs>
+              <path class="flow-base" d="M460 88 C460 112 460 124 460 148"></path>
+              <path class="flow-base" d="M204 207 C282 207 330 207 382 207"></path>
+              <path class="flow-base" d="M716 207 C638 207 590 207 538 207"></path>
+              <path id="flow-solar" class="flow-active solar-flow" pathLength="100" d="M460 88 C460 112 460 124 460 148"></path>
+              <path id="flow-grid" class="flow-active grid-flow" pathLength="100" d="M204 207 C282 207 330 207 382 207"></path>
+              <path id="flow-battery" class="flow-active battery-flow" pathLength="100" d="M716 207 C638 207 590 207 538 207"></path>
+            </svg>
+
+            <article id="node-solar" class="flow-node solar-node">
+              <span class="node-icon">☀</span>
+              <div><small>Solar</small><strong id="energy-solar">—</strong></div>
             </article>
-            <article class="energy-card home">
-              <span>Home load</span>
-              <strong id="energy-home">—</strong>
-              <small>Current demand</small>
+            <article id="node-grid" class="flow-node grid-node">
+              <span class="node-icon">⇄</span>
+              <div>
+                <small>Grid</small>
+                <strong id="energy-grid">—</strong>
+                <em id="energy-grid-direction">Waiting</em>
+              </div>
             </article>
-            <article class="energy-card grid">
-              <span>Grid</span>
-              <strong id="energy-grid">—</strong>
-              <small id="energy-grid-direction">Waiting</small>
+            <article id="node-home" class="flow-node home-node">
+              <span class="node-icon">⌂</span>
+              <div><small>Home load</small><strong id="energy-home">—</strong></div>
             </article>
-            <article class="energy-card battery">
-              <span>Battery</span>
-              <strong id="energy-battery">—</strong>
-              <small id="energy-battery-direction">Waiting</small>
-            </article>
-            <article class="energy-card soc">
-              <span>Battery SOC</span>
-              <strong id="energy-soc">—</strong>
-              <div class="soc-track"><i id="soc-fill"></i></div>
+            <article id="node-battery" class="flow-node battery-node">
+              <span class="node-icon">▰</span>
+              <div>
+                <small>Battery</small>
+                <strong id="energy-battery">—</strong>
+                <em id="energy-battery-direction">Waiting</em>
+              </div>
+              <div class="battery-soc">
+                <span id="energy-soc">—</span>
+                <div class="soc-track"><i id="soc-fill"></i></div>
+              </div>
             </article>
           </div>
         </section>

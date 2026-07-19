@@ -95,28 +95,119 @@ article {
 [data-page="energy"], [data-page="music"], [data-page="system"] {
   grid-template-rows: 55px 1fr; gap: 10px;
 }
-.energy-grid {
+.energy-flow {
+  position: relative;
   min-height: 0;
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  grid-template-rows: 1fr 1fr;
+  overflow: hidden;
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 24px;
+  background:
+    radial-gradient(circle at 50% 53%, rgba(96,107,255,.13), transparent 31%),
+    linear-gradient(145deg, rgba(11,18,29,.86), rgba(7,13,22,.78));
+}
+.energy-flow::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  opacity: .12;
+  background-image: radial-gradient(rgba(255,255,255,.28) .6px, transparent .6px);
+  background-size: 18px 18px;
+}
+.flow-lines { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+.flow-base {
+  fill: none;
+  stroke: rgba(116,137,165,.2);
+  stroke-width: 7;
+  stroke-linecap: round;
+}
+.flow-active {
+  --flow-speed: 1.8s;
+  --flow-strength: .7;
+  fill: none;
+  stroke-width: 7;
+  stroke-linecap: round;
+  stroke-dasharray: 3 11;
+  opacity: 0;
+  transition: opacity .4s ease;
+}
+.flow-active.active {
+  opacity: var(--flow-strength);
+  animation: energy-flow-forward var(--flow-speed) linear infinite;
+}
+.flow-active.active.reverse { animation-name: energy-flow-reverse; }
+.solar-flow { stroke: url("#solar-gradient"); filter: drop-shadow(0 0 7px rgba(255,190,72,.75)); }
+.grid-flow { stroke: url("#grid-gradient"); filter: drop-shadow(0 0 7px rgba(75,184,255,.75)); }
+.battery-flow { stroke: url("#battery-gradient"); filter: drop-shadow(0 0 7px rgba(0,230,190,.72)); }
+@keyframes energy-flow-forward { to { stroke-dashoffset: -28; } }
+@keyframes energy-flow-reverse { to { stroke-dashoffset: 28; } }
+
+.flow-node {
+  position: absolute;
+  z-index: 2;
+  min-width: 190px;
+  min-height: 82px;
+  padding: 13px 15px;
+  display: flex;
+  align-items: center;
   gap: 12px;
+  border-radius: 20px;
+  background: rgba(14,22,34,.95);
+  transition: border-color .35s ease, box-shadow .35s ease, transform .2s ease;
 }
-.energy-card { position: relative; overflow: hidden; }
-.energy-card::after {
-  content: ""; position: absolute; width: 90px; height: 90px; right: -25px; bottom: -35px;
-  border-radius: 50%; background: var(--glow); filter: blur(16px); opacity: .25;
+.flow-node.active { box-shadow: 0 0 28px color-mix(in srgb, var(--node-color) 25%, transparent); }
+.flow-node small, .flow-node strong, .flow-node em { display: block; font-style: normal; }
+.flow-node small { color: #8d9db2; font-size: 12px; text-transform: uppercase; letter-spacing: .08em; }
+.flow-node strong { margin-top: 3px; font-size: 23px; white-space: nowrap; }
+.flow-node em { margin-top: 2px; color: #77889f; font-size: 11px; text-transform: capitalize; }
+.node-icon {
+  flex: 0 0 auto;
+  width: 43px;
+  height: 43px;
+  display: grid;
+  place-items: center;
+  border-radius: 14px;
+  color: var(--node-color);
+  font-size: 23px;
+  background: color-mix(in srgb, var(--node-color) 14%, transparent);
+  box-shadow: inset 0 0 18px color-mix(in srgb, var(--node-color) 9%, transparent);
 }
-.energy-card span { display: block; color: #9babc0; font-size: 14px; }
-.energy-card strong { display: block; margin-top: 8px; font-size: 29px; }
-.energy-card small { display: block; margin-top: 6px; color: #718199; text-transform: capitalize; }
-.energy-card.solar { --glow: #ffd35d; }
-.energy-card.home { --glow: #a991ff; }
-.energy-card.grid { --glow: #4bb8ff; }
-.energy-card.battery { --glow: #00e6be; }
-.energy-card.soc { --glow: #00e6be; grid-column: 1 / -1; }
-.energy-card.soc strong { font-size: 36px; }
-.soc-track { width: 100%; height: 13px; margin-top: 14px; border-radius: 999px; background: #263144; overflow: hidden; }
+.flow-node.active .node-icon { animation: node-breathe 2.2s ease-in-out infinite; }
+@keyframes node-breathe {
+  50% { transform: scale(1.08); filter: brightness(1.25); }
+}
+.solar-node {
+  --node-color: #ffd35d;
+  top: 8px;
+  left: 50%;
+  min-width: 208px;
+  transform: translateX(-50%);
+}
+.grid-node {
+  --node-color: #4bb8ff;
+  top: 148px;
+  left: 18px;
+}
+.home-node {
+  --node-color: #a991ff;
+  top: 148px;
+  left: 50%;
+  min-width: 208px;
+  transform: translateX(-50%);
+  border-color: rgba(169,145,255,.26);
+}
+.battery-node {
+  --node-color: #00e6be;
+  top: 137px;
+  right: 18px;
+  min-width: 218px;
+  display: grid;
+  grid-template-columns: 43px 1fr;
+}
+.battery-node .node-icon { grid-row: 1; }
+.battery-node > div:nth-child(2) { grid-row: 1; }
+.battery-soc { grid-column: 1 / -1; display: grid; grid-template-columns: 38px 1fr; align-items: center; gap: 9px; }
+.battery-soc > span { color: #a7b7c9; font-size: 12px; font-variant-numeric: tabular-nums; }
+.soc-track { width: 100%; height: 7px; border-radius: 999px; background: #263144; overflow: hidden; }
 .soc-track i { display: block; height: 100%; width: 0; border-radius: inherit; background: linear-gradient(90deg,#3a63ff,#00e6be); transition: width .4s ease; }
 
 .now-playing-list { min-height: 0; display: grid; align-content: start; gap: 10px; overflow: hidden; }

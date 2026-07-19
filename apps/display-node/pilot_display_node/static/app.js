@@ -5,7 +5,9 @@ const elements = Object.fromEntries(
     "home-load", "home-soc", "home-track", "home-artist", "home-player",
     "energy-state", "energy-solar", "energy-home", "energy-grid",
     "energy-grid-direction", "energy-battery", "energy-battery-direction",
-    "energy-soc", "soc-fill", "music-state", "now-playing-list",
+    "energy-soc", "soc-fill", "energy-flow", "flow-solar", "flow-grid",
+    "flow-battery", "node-solar", "node-grid", "node-home", "node-battery",
+    "music-state", "now-playing-list",
   ].map((id) => [id.replaceAll("-", "_"), document.querySelector(`#${id}`)]),
 );
 
@@ -40,6 +42,17 @@ function gigabytes(bytes) {
   return typeof bytes === "number" ? `${number.format(bytes / 1e9)} GB` : "—";
 }
 
+function setFlow(path, node, value, reverse = false) {
+  const magnitude = typeof value === "number" ? Math.abs(value) : 0;
+  const active = magnitude >= 25;
+  path.classList.toggle("active", active);
+  path.classList.toggle("reverse", active && reverse);
+  node.classList.toggle("active", active);
+  const normalized = Math.min(1, magnitude / 6000);
+  path.style.setProperty("--flow-speed", `${(2.5 - (normalized * 1.7)).toFixed(2)}s`);
+  path.style.setProperty("--flow-strength", String((0.45 + (normalized * 0.55)).toFixed(2)));
+}
+
 function renderEnergy(energy = {}) {
   const solar = energy.solar?.value;
   const home = energy.home_load?.value;
@@ -61,6 +74,21 @@ function renderEnergy(energy = {}) {
   elements.energy_state.className = `data-state ${energy.status === "ok" ? "online" : "offline"}`;
   const clampedSoc = typeof soc === "number" ? Math.max(0, Math.min(100, soc)) : 0;
   elements.soc_fill.style.width = `${clampedSoc}%`;
+
+  setFlow(elements.flow_solar, elements.node_solar, solar);
+  setFlow(elements.flow_grid, elements.node_grid, grid, grid < 0);
+  setFlow(elements.flow_battery, elements.node_battery, battery, battery < 0);
+  elements.node_home.classList.toggle("active", typeof home === "number" && home >= 25);
+  elements.energy_flow.setAttribute(
+    "aria-label",
+    `Solar ${watts(solar)}, home load ${watts(home)}, grid ${
+      energy.grid?.direction || "unknown"
+    } ${watts(grid)}, battery ${
+      energy.battery?.direction || "unknown"
+    } ${watts(battery)}, state of charge ${
+      typeof soc === "number" ? `${number.format(soc)} percent` : "unknown"
+    }`,
+  );
 }
 
 function textNode(tag, className, text) {
@@ -126,8 +154,12 @@ function showPage(name) {
 }
 
 document.querySelectorAll("nav button").forEach((button) => {
-  button.addEventListener("click", () => showPage(button.dataset.target));
+  button.addEventListener("click", () => {
+    showPage(button.dataset.target);
+    window.location.hash = button.dataset.target;
+  });
 });
+window.addEventListener("hashchange", () => showPage(window.location.hash.slice(1)));
 
 let swipeStart = null;
 const pages = document.querySelector("#pages");
@@ -189,6 +221,7 @@ async function updateStatus() {
 }
 
 updateClock();
+showPage(window.location.hash.slice(1) || "home");
 updateStatus();
 setInterval(updateClock, 1000);
 setInterval(updateStatus, 10000);

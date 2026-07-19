@@ -46,6 +46,8 @@ The touch surface provides:
 
 - Brisbane time and date
 - live solar, home load, grid direction, battery power/direction, and battery SOC
+- an animated power-flow diagram whose direction, speed, glow, and active
+  paths follow the live Home Assistant values
 - now-playing title, artist, player, state, and volume for every active Music
   Assistant endpoint
 - Pilot Core connection and registry state

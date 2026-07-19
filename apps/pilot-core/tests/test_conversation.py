@@ -125,6 +125,12 @@ class ConversationEngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(second.session_id, first.session_id)
         self.assertEqual(second.provider, "home_assistant")
         self.assertEqual(
+            integrations.home_assistant_conversation.await_args_list[0].kwargs[
+                "agent_id"
+            ],
+            "conversation.home_assistant",
+        )
+        self.assertEqual(
             integrations.home_assistant_conversation.await_args_list[1].args[2],
             "ha-1",
         )

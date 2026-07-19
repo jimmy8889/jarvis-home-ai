@@ -12,6 +12,8 @@
 - Added Pilot Display Node 0.2.8 conversation continuity. The node retains the
   opaque Pilot session ID in RAM for 15 minutes and supplies it on follow-up
   voice requests without writing dialogue state to flash.
+- Corrected the deterministic Home Assistant selector to the accepted
+  `conversation.home_assistant` agent ID after live API acceptance testing.
 - Fixed Pilot Display Node 0.2.7 microphone capture after live speech exposed
   a TDM channel-filtering regression. ESP-IDF already packs the selected
   ES7210 slot as mono; removing a second, erroneous four-to-one decimation

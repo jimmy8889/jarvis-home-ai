@@ -20,6 +20,9 @@ from .secret_values import read_secret
 from .storage import Store
 
 
+HOME_ASSISTANT_AGENT_ID = "conversation.home_assistant"
+
+
 class AssistantUnavailable(RuntimeError):
     """No configured assistant provider could answer the request."""
 
@@ -348,7 +351,7 @@ class AssistantTools:
                 command.strip(),
                 language,
                 provider_conversation_id,
-                agent_id="home_assistant",
+                agent_id=HOME_ASSISTANT_AGENT_ID,
             )
             return {
                 "success": _ha_matched(result),
@@ -464,7 +467,7 @@ class ConversationEngine:
                 text,
                 language,
                 provider_id,
-                agent_id="home_assistant",
+                agent_id=HOME_ASSISTANT_AGENT_ID,
             )
             if isinstance(raw, dict):
                 ha_result = raw

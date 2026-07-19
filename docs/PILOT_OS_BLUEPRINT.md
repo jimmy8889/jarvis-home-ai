@@ -231,6 +231,30 @@ minutes and sends it with follow-up voice requests. It never writes dialogue
 state to flash. The release was published through Pilot Core, installed over
 OTA, rebooted successfully, and reported `current_version=0.2.8`.
 
+### Large-format Raspberry Pi display node
+
+```text
+Host: pilot-display-pi / 10.0.2.26
+Hardware: Raspberry Pi 4 Model B, 2 GB / 16 GB microSD
+Display: 10-inch 1024 x 600 HDMI with ILITEK USB touch
+OS: 64-bit Debian 13 Trixie
+Runtime: Cage Wayland compositor + Chromium kiosk
+Surface: Pilot Display Node 0.1
+```
+
+This node is deployed as a minimal appliance rather than a full desktop. A
+loopback-only Python service renders Brisbane time, Pilot Core readiness,
+registry counts, and bounded local health. The browser receives no
+administrator credential. Chromium caches, system journals, release count, and
+APT archives are bounded for the 16 GB card; automatic security updates do not
+reboot the node. The display's incomplete EDID is overridden through a
+reversible KMS `video=HDMI-A-1:1024x600M@60D` argument.
+
+Physical acceptance verified native mode, touch discovery, Pilot Core
+connectivity, zero kiosk restarts, 7.8 GB free storage, no throttling, and
+two-way application rollback. Logical room assignment and a device-scoped
+credential are intentionally pending.
+
 ## 5. Hardware plan
 
 ### Core cluster
@@ -360,6 +384,11 @@ per-device token.
 The bedroom node deliberately keeps the ESP32 awake with the panel fully dark
 so the QMI8658 can wake the screen immediately. Deep sleep is deferred until an
 interrupt-driven IMU path is accepted on the physical board.
+
+Large-format Linux displays use the same thin-client principle at a different
+scale. The Raspberry Pi owns only local presentation, touch, offline status,
+and kiosk recovery; Pilot Core remains authoritative for rooms, home state,
+assistant context, and future control authorization.
 
 ## 7. Voice and AI pipeline
 
@@ -607,24 +636,27 @@ deployed integration, hardware boundary, or milestone status changes.
 - [x] Add Pilot-owned conversation continuity and administrator session APIs
 - [x] Add deterministic Home Assistant routing with local-model fallback
 - [x] Add bounded typed tools for home state/control, weather, and music
+- [x] Deploy the first Raspberry Pi large-format Pilot display appliance
 
 ## 14. Immediate next steps
 
-1. Confirm a display follow-up request reuses the same Pilot conversation
+1. Assign the 10-inch Raspberry Pi panel to its physical room and define its
+   room-specific pages and controls.
+2. Confirm a display follow-up request reuses the same Pilot conversation
    session through speech and local TTS.
-2. Make the RTX 3080 inference endpoint reachable from Pilot Core, select a
+3. Make the RTX 3080 inference endpoint reachable from Pilot Core, select a
    tool-capable local model, and enable the 0.13 reasoning provider.
-3. Run contextual acceptance prompts for pronouns, follow-ups, room-relative
+4. Run contextual acceptance prompts for pronouns, follow-ups, room-relative
    language, live weather, and typed home/music tools.
-4. Validate wake word through spoken response on the Office K3.
-5. Validate a local lossless Music Assistant track.
-6. Complete the supervised K3 acceptance receipt and explicitly arm room
+5. Validate wake word through spoken response on the Office K3.
+6. Validate a local lossless Music Assistant track.
+7. Complete the supervised K3 acceptance receipt and explicitly arm room
    playback.
-7. Validate assistant ducking and gain restoration at a safe listening volume.
-8. Validate the native Intel Bluetooth controller; add a dedicated adapter only
+8. Validate assistant ducking and gain restoration at a safe listening volume.
+9. Validate the native Intel Bluetooth controller; add a dedicated adapter only
    if its receiver behavior is inadequate.
-9. Train and deploy the **Hey Pilot** wake model.
-10. Complete the in-person Denon power, source, playback, and safe-volume
+10. Train and deploy the **Hey Pilot** wake model.
+11. Complete the in-person Denon power, source, playback, and safe-volume
    acceptance before enabling Media Room control.
 
 ## 15. Decision log
@@ -724,3 +756,7 @@ deployed integration, hardware boundary, or milestone status changes.
   Home Assistant provider continuity, deterministic-first routing, a bounded
   local-model tool loop, administrator session visibility, and Pilot Display
   Node 0.2.8 in-memory follow-up continuity.
+- **2.4** — Added and deployed the first large-format Pilot Linux display on a
+  2 GB Raspberry Pi 4 with a 16 GB card, native 1024 x 600 touch output, a
+  minimal Cage/Chromium appliance, bounded storage, reproducible Ansible
+  deployment, and verified two-way rollback.

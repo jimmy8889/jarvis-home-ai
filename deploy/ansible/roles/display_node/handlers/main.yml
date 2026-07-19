@@ -1,0 +1,14 @@
+---
+- name: Reload systemd
+  ansible.builtin.systemd_service:
+    daemon_reload: true
+
+- name: Restart Pilot display web
+  ansible.builtin.systemd_service:
+    name: pilot-display-web.service
+    state: restarted
+
+- name: Restart Pilot display kiosk
+  ansible.builtin.systemd_service:
+    name: pilot-display-kiosk.service
+    state: restarted

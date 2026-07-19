@@ -43,3 +43,13 @@ all:
           # Prefer an Ansible Vault variable in production. For one-time local
           # enrollment, this may point at a mode-0600 controller file.
           room_endpoint_core_device_token_source_file: ""
+    pilot_display_nodes:
+      hosts:
+        pilot-display-pi:
+          ansible_host: 192.0.2.40
+          ansible_user: pi-admin
+          ansible_python_interpreter: /usr/bin/python3
+          display_node_hostname: pilot-display-pi
+          display_node_core_url: http://192.0.2.30:8770
+          display_node_resolution: 1024x600
+          display_node_hdmi_connector: HDMI-A-1

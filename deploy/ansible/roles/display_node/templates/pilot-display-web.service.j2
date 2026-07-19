@@ -1,0 +1,28 @@
+[Unit]
+Description=Pilot display local web surface
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User={{ display_node_user }}
+Group={{ display_node_user }}
+EnvironmentFile=/etc/pilot-display/display.env
+ExecStart=/opt/pilot-display/current/.venv/bin/pilot-display-node
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictNamespaces=true
+LockPersonality=true
+CapabilityBoundingSet=
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target

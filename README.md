@@ -83,6 +83,10 @@ weather, touch push-to-talk, local voice responses, authenticated OTA,
 reproducible builds, and factory-image rollback, is documented in
 [firmware/pilot-display-node/README.md](firmware/pilot-display-node/README.md).
 
+The Raspberry Pi 4 large-format touch display appliance, minimal Wayland kiosk,
+storage controls, deployment, acceptance, and rollback are documented in
+[docs/RASPBERRY_PI_DISPLAY_NODE.md](docs/RASPBERRY_PI_DISPLAY_NODE.md).
+
 Pilot Core's room-scoped dialogue, deterministic Home Assistant fast path,
 optional local model fallback, and typed tool boundary are documented in
 [docs/CONTEXTUAL_ASSISTANT.md](docs/CONTEXTUAL_ASSISTANT.md).

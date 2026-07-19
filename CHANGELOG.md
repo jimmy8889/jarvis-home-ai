@@ -2,6 +2,11 @@
 
 ## 2026-07-19
 
+- Added and deployed the first large-format Pilot Linux display on a 2 GB
+  Raspberry Pi 4 with a 16 GB card and 1024 x 600 ILITEK touch panel. The
+  minimal Cage/Chromium appliance includes a local Pilot status surface,
+  loopback-only web service, native KMS mode, bounded storage, unattended
+  security updates, immutable releases, and verified two-way rollback.
 - Added Pilot Core 0.13's room- and device-scoped conversation sessions,
   retained turn history, linked Home Assistant conversation continuity, fast
   deterministic routing, and an optional local OpenAI-compatible reasoning

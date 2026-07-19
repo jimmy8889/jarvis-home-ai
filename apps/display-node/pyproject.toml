@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pilot-display-node"
+version = "0.1.0"
+description = "Local status surface for Pilot Linux display appliances"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.scripts]
+pilot-display-node = "pilot_display_node.server:main"
+
+[tool.setuptools.package-data]
+pilot_display_node = ["static/*"]

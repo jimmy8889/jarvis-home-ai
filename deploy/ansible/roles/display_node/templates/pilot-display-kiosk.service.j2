@@ -1,0 +1,59 @@
+[Unit]
+Description=Pilot fullscreen Wayland kiosk
+After=network-online.target seatd.service pilot-display-web.service
+Wants=network-online.target
+Requires=seatd.service pilot-display-web.service
+Conflicts=getty@tty1.service
+
+[Service]
+Type=simple
+User={{ display_node_user }}
+Group={{ display_node_user }}
+PAMName=login
+TTYPath=/dev/tty1
+StandardInput=tty
+StandardOutput=journal
+StandardError=journal
+TTYReset=true
+TTYVHangup=true
+TTYVTDisallocate=true
+UtmpIdentifier=tty1
+UtmpMode=user
+Environment=XDG_RUNTIME_DIR=/run/user/{{ display_node_uid.stdout }}
+Environment=XDG_SESSION_TYPE=wayland
+Environment=LIBSEAT_BACKEND=logind
+ExecStart=/usr/bin/dbus-run-session -- /usr/bin/cage -s -- /usr/bin/chromium \
+  --kiosk \
+  --no-first-run \
+  --no-default-browser-check \
+  --noerrdialogs \
+  --disable-infobars \
+  --disable-session-crashed-bubble \
+  --disable-translate \
+  --disable-features=Translate,OptimizationHints,MediaRouter \
+  --password-store=basic \
+  --use-mock-keychain \
+  --ozone-platform=wayland \
+  --enable-features=UseOzonePlatform \
+  --touch-events=enabled \
+  --autoplay-policy=no-user-gesture-required \
+  --disk-cache-size={{ display_node_chromium_disk_cache_bytes }} \
+  --media-cache-size={{ display_node_chromium_media_cache_bytes }} \
+  --user-data-dir=/var/lib/pilot-display/chromium \
+  {{ display_node_kiosk_url }}
+Restart=always
+RestartSec=4
+TimeoutStopSec=15
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/pilot-display
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+CapabilityBoundingSet=
+
+[Install]
+WantedBy=multi-user.target

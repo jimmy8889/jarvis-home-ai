@@ -1,0 +1,29 @@
+---
+display_node_user: pilot-display
+display_node_hostname: pilot-display
+display_node_timezone: Australia/Brisbane
+display_node_core_url: http://10.0.1.64:8770
+display_node_listen_host: 127.0.0.1
+display_node_listen_port: 8780
+display_node_kiosk_url: "http://127.0.0.1:{{ display_node_listen_port }}/"
+display_node_resolution: 1024x600
+display_node_refresh_rate: 60
+display_node_hdmi_connector: HDMI-A-1
+display_node_force_resolution: true
+display_node_release_id: "{{ ansible_facts['date_time']['iso8601_basic_short'] }}"
+display_node_project_root: "{{ role_path }}/../../../.."
+display_node_chromium_disk_cache_bytes: 52428800
+display_node_chromium_media_cache_bytes: 10485760
+display_node_packages:
+  - ca-certificates
+  - cage
+  - chromium
+  - dbus-user-session
+  - fonts-noto-color-emoji
+  - fonts-noto-core
+  - python3
+  - python3-packaging
+  - python3-venv
+  - seatd
+  - unattended-upgrades
+  - wlr-randr

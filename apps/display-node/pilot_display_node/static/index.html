@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+    <title>Pilot</title>
+    <link rel="stylesheet" href="/styles.css">
+    <script src="/app.js" defer></script>
+  </head>
+  <body>
+    <main>
+      <header>
+        <div class="brand">
+          <span class="orb" aria-hidden="true"></span>
+          <span>PILOT</span>
+        </div>
+        <div id="core-state" class="state pending">Connecting</div>
+      </header>
+
+      <section class="hero">
+        <time id="clock">--:--</time>
+        <div id="date">Starting…</div>
+      </section>
+
+      <section class="cards" aria-live="polite">
+        <article>
+          <span class="label">Pilot Core</span>
+          <strong id="core-detail">Checking</strong>
+          <small id="registry">—</small>
+        </article>
+        <article>
+          <span class="label">Rooms</span>
+          <strong id="rooms">—</strong>
+          <small id="players">—</small>
+        </article>
+        <article>
+          <span class="label">This node</span>
+          <strong id="hostname">Raspberry Pi</strong>
+          <small id="node-detail">—</small>
+        </article>
+      </section>
+
+      <footer>
+        <span id="temperature">CPU —</span>
+        <span id="storage">Storage —</span>
+        <span id="updated">Waiting for status</span>
+      </footer>
+    </main>
+  </body>
+</html>

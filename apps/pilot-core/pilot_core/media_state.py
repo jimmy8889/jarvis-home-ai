@@ -124,6 +124,68 @@ class MediaStateReader:
             "players": states,
         }
 
+    async def now_playing(self) -> dict[str, Any]:
+        """Return a small, read-only view of every active Music Assistant player."""
+
+        observed_at = datetime.now(UTC).isoformat()
+        try:
+            raw = await self.integrations.music_assistant("players/all", {})
+        except IntegrationUnavailable:
+            return {
+                "status": "not_configured",
+                "observed_at": observed_at,
+                "items": [],
+            }
+        except IntegrationRequestFailed:
+            return {"status": "unavailable", "observed_at": observed_at, "items": []}
+        if not isinstance(raw, list):
+            return {"status": "unavailable", "observed_at": observed_at, "items": []}
+
+        items: list[dict[str, Any]] = []
+        for row in raw:
+            if not isinstance(row, dict):
+                continue
+            state = str(row.get("state") or "unknown").lower()
+            media = row.get("current_media")
+            if state not in {"playing", "paused"} or not isinstance(media, dict):
+                continue
+            duration = media.get("duration")
+            elapsed = row.get("elapsed_time")
+            volume = row.get("volume_level")
+            items.append(
+                {
+                    "player_id": str(row.get("player_id") or "")[:200],
+                    "player_name": str(
+                        row.get("display_name") or row.get("name") or "Unknown player"
+                    )[:200],
+                    "state": state,
+                    "volume_percent": (
+                        int(round(volume))
+                        if isinstance(volume, (int, float))
+                        else None
+                    ),
+                    "title": str(media.get("title") or "Unknown title")[:300],
+                    "artist": str(media.get("artist") or "")[:300] or None,
+                    "album": str(media.get("album") or "")[:300] or None,
+                    "media_type": str(media.get("media_type") or "")[:50] or None,
+                    "duration_seconds": (
+                        round(float(duration), 1)
+                        if isinstance(duration, (int, float))
+                        else None
+                    ),
+                    "elapsed_seconds": (
+                        round(float(elapsed), 1)
+                        if isinstance(elapsed, (int, float))
+                        else None
+                    ),
+                }
+            )
+        return {
+            "status": "ok",
+            "observed_at": observed_at,
+            "items": items[:8],
+        }
+
     def _player_state(
         self,
         player: Player,

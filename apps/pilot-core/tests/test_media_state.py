@@ -160,6 +160,52 @@ class MediaStateTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(snapshot["players"]["media-heos"]["status"], "unresolved")
         self.assertFalse(called)
 
+    async def test_now_playing_projects_all_active_music_assistant_players(
+        self,
+    ) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(
+                200,
+                json=[
+                    {
+                        "player_id": "office-extra",
+                        "name": "Officen150",
+                        "state": "playing",
+                        "volume_level": 41.4,
+                        "elapsed_time": 19.2,
+                        "current_media": {
+                            "uri": "tidal://private-provider-id",
+                            "media_type": "track",
+                            "title": "Washed Up",
+                            "artist": "Charlie Puth",
+                            "album": "Whatever's Clever!",
+                            "duration": 181,
+                            "custom_data": {"must": "not leak"},
+                        },
+                    },
+                    {
+                        "player_id": "idle",
+                        "name": "Idle player",
+                        "state": "idle",
+                        "current_media": None,
+                    },
+                ],
+            )
+
+        config = self.settings()
+        reader = MediaStateReader(
+            Registry.from_settings(config),
+            Integrations(config.integrations, httpx.MockTransport(handler)),
+        )
+        result = await reader.now_playing()
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(len(result["items"]), 1)
+        self.assertEqual(result["items"][0]["player_name"], "Officen150")
+        self.assertEqual(result["items"][0]["title"], "Washed Up")
+        self.assertEqual(result["items"][0]["volume_percent"], 41)
+        self.assertNotIn("uri", json.dumps(result))
+        self.assertNotIn("custom_data", json.dumps(result))
+
 
 if __name__ == "__main__":
     unittest.main()

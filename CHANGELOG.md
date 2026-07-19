@@ -2,6 +2,14 @@
 
 ## 2026-07-19
 
+- Added Pilot Core 0.14's device-authenticated display surface with a bounded
+  five-sensor Home Assistant energy projection and safe whole-network Music
+  Assistant now-playing metadata. Provider URLs, raw attributes, media URIs,
+  and central credentials remain server-side.
+- Added Pilot Linux Display 0.2 with touch-native Home, Energy, Music, and
+  System pages, large tap targets, horizontal swipe navigation, live energy
+  directions and battery state of charge, and active music from every Music
+  Assistant player rather than only configured Pilot registry players.
 - Added and deployed the first large-format Pilot Linux display on a 2 GB
   Raspberry Pi 4 with a 16 GB card and 1024 x 600 ILITEK touch panel. The
   minimal Cage/Chromium appliance includes a local Pilot status surface,

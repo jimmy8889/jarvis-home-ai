@@ -196,6 +196,39 @@ class Integrations:
             "history": history,
         }
 
+    async def home_assistant_energy(self) -> dict[str, dict[str, Any]]:
+        """Read the configured energy sensors without exposing unrelated HA state."""
+
+        entity_ids = {
+            "solar": self.settings.energy_solar_power_entity_id,
+            "grid": self.settings.energy_grid_power_entity_id,
+            "battery": self.settings.energy_battery_power_entity_id,
+            "battery_soc": self.settings.energy_battery_soc_entity_id,
+            "home_load": self.settings.energy_home_load_entity_id,
+        }
+        if not all(entity_ids.values()):
+            raise IntegrationUnavailable(
+                "Home Assistant energy entities are not fully configured"
+            )
+        results = await asyncio.gather(
+            *(self.home_assistant_state(entity_id) for entity_id in entity_ids.values()),
+            return_exceptions=True,
+        )
+        states: dict[str, dict[str, Any]] = {}
+        failed: list[str] = []
+        for (name, _entity_id), result in zip(
+            entity_ids.items(), results, strict=True
+        ):
+            if isinstance(result, dict):
+                states[name] = result
+            else:
+                failed.append(name)
+        if failed:
+            raise IntegrationRequestFailed(
+                "Home Assistant energy state unavailable: " + ", ".join(failed)
+            )
+        return states
+
     async def diagnostics(self) -> dict[str, Any]:
         """Run read-only provider checks without returning URLs or credentials."""
 

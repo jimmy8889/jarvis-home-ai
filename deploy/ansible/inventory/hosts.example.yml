@@ -51,5 +51,7 @@ all:
           ansible_python_interpreter: /usr/bin/python3
           display_node_hostname: pilot-display-pi
           display_node_core_url: http://192.0.2.30:8770
+          display_node_device_id: pilot-display-pi
+          display_node_device_token_source_file: /secure/pilot-display-pi-token
           display_node_resolution: 1024x600
           display_node_hdmi_connector: HDMI-A-1

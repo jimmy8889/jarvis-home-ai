@@ -543,6 +543,61 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
             "updated_at": updated_at if isinstance(updated_at, str) else None,
         }
 
+    def safe_energy(raw: dict[str, dict[str, Any]]) -> dict[str, Any]:
+        def measurement(name: str, *, percent: bool = False) -> dict[str, Any]:
+            state = raw.get(name) or {}
+            attributes = state.get("attributes") or {}
+            unit = str(attributes.get("unit_of_measurement") or "")
+            try:
+                value: float | None = float(state.get("state"))
+                if not math.isfinite(value):
+                    value = None
+            except (TypeError, ValueError):
+                value = None
+            if value is not None and not percent:
+                if unit.casefold() == "kw":
+                    value *= 1000
+                elif unit.casefold() not in {"w", "watt", "watts"}:
+                    value = None
+            if value is not None:
+                value = round(value, 1)
+            return {
+                "value": value,
+                "unit": "%" if percent else "W",
+                "observed_at": state.get("last_updated") or state.get("last_changed"),
+            }
+
+        solar = measurement("solar")
+        grid = measurement("grid")
+        battery = measurement("battery")
+        battery_soc = measurement("battery_soc", percent=True)
+        home_load = measurement("home_load")
+
+        def direction(value: object, positive: str, negative: str) -> str:
+            if not isinstance(value, (int, float)) or abs(value) < 25:
+                return "idle"
+            return positive if value > 0 else negative
+
+        grid["direction"] = direction(grid["value"], "importing", "exporting")
+        battery["direction"] = direction(
+            battery["value"], "discharging", "charging"
+        )
+        return {
+            "status": (
+                "ok"
+                if all(
+                    item["value"] is not None
+                    for item in (solar, grid, battery, battery_soc, home_load)
+                )
+                else "partial"
+            ),
+            "solar": solar,
+            "grid": grid,
+            "battery": battery,
+            "battery_soc": battery_soc,
+            "home_load": home_load,
+        }
+
     async def queue_device_command(
         device_id: str, payload: dict[str, Any], expires_in_seconds: int
     ) -> dict[str, Any]:
@@ -1385,6 +1440,40 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
             },
             "voice": voice_pipeline.status(),
             "tts": local_tts.status(),
+        }
+
+    @app.get("/v1/devices/{device_id}/surface")
+    async def display_node_surface(
+        device_id: str,
+        response: Response,
+        x_pilot_device_id: str = Header(),
+        authorization: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        device = authenticated_device(device_id, x_pilot_device_id, authorization)
+        if "display" not in device["capabilities"]:
+            raise HTTPException(
+                status_code=403, detail="device does not have display capability"
+            )
+        response.headers["Cache-Control"] = "no-store"
+
+        async def energy_snapshot() -> dict[str, Any]:
+            try:
+                return safe_energy(await integrations.home_assistant_energy())
+            except IntegrationUnavailable as error:
+                return {"status": "not_configured", "detail": str(error)}
+            except IntegrationRequestFailed as error:
+                return {"status": "unavailable", "detail": str(error)}
+
+        energy, now_playing = await asyncio.gather(
+            energy_snapshot(),
+            media_states.now_playing(),
+        )
+        return {
+            "device_id": device_id,
+            "room_id": device["room_id"],
+            "server_time": datetime.now(UTC).isoformat(),
+            "energy": energy,
+            "now_playing": now_playing,
         }
 
     @app.post("/v1/devices/{device_id}/voice")

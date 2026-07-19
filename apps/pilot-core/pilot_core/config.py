@@ -38,6 +38,11 @@ class IntegrationSettings:
     outdoor_temperature_entity_id: str = ""
     indoor_temperature_entity_id: str = ""
     temperature_history_hours: int = 24
+    energy_solar_power_entity_id: str = ""
+    energy_grid_power_entity_id: str = ""
+    energy_battery_power_entity_id: str = ""
+    energy_battery_soc_entity_id: str = ""
+    energy_home_load_entity_id: str = ""
     tts_provider: str = ""
     tts_url: str = ""
     tts_token_env: str = "PILOT_TTS_TOKEN"
@@ -303,6 +308,21 @@ def load_settings(path: str | Path) -> Settings:
         temperature_history_hours=int(
             integration_values.get("temperature_history_hours", 24)
         ),
+        energy_solar_power_entity_id=str(
+            integration_values.get("energy_solar_power_entity_id", "")
+        ).strip(),
+        energy_grid_power_entity_id=str(
+            integration_values.get("energy_grid_power_entity_id", "")
+        ).strip(),
+        energy_battery_power_entity_id=str(
+            integration_values.get("energy_battery_power_entity_id", "")
+        ).strip(),
+        energy_battery_soc_entity_id=str(
+            integration_values.get("energy_battery_soc_entity_id", "")
+        ).strip(),
+        energy_home_load_entity_id=str(
+            integration_values.get("energy_home_load_entity_id", "")
+        ).strip(),
         tts_provider=str(integration_values.get("tts_provider", "")).strip(),
         tts_url=str(integration_values.get("tts_url", "")).rstrip("/"),
         tts_token_env=str(integration_values.get("tts_token_env", "PILOT_TTS_TOKEN")),
@@ -355,6 +375,11 @@ def load_settings(path: str | Path) -> Settings:
     for setting_name, entity_id in (
         ("outdoor_temperature_entity_id", integrations.outdoor_temperature_entity_id),
         ("indoor_temperature_entity_id", integrations.indoor_temperature_entity_id),
+        ("energy_solar_power_entity_id", integrations.energy_solar_power_entity_id),
+        ("energy_grid_power_entity_id", integrations.energy_grid_power_entity_id),
+        ("energy_battery_power_entity_id", integrations.energy_battery_power_entity_id),
+        ("energy_battery_soc_entity_id", integrations.energy_battery_soc_entity_id),
+        ("energy_home_load_entity_id", integrations.energy_home_load_entity_id),
     ):
         if entity_id and not entity_id.startswith("sensor."):
             raise ValueError(f"integrations.{setting_name} must be a sensor entity")

@@ -77,6 +77,41 @@
       mode: "0755"
     - { path: /etc/systemd/journald.conf.d, mode: "0755" }
 
+- name: Validate display device credential settings
+  ansible.builtin.assert:
+    that:
+      - display_node_device_id | length > 0
+      - display_node_device_token_source_file | length > 0
+    fail_msg: >-
+      Set display_node_device_id and a private
+      display_node_device_token_source_file for the authenticated surface.
+
+- name: Inspect display device token on controller
+  ansible.builtin.stat:
+    path: "{{ display_node_device_token_source_file }}"
+  delegate_to: localhost
+  become: false
+  register: display_node_device_token_source
+
+- name: Assert display device token is private
+  ansible.builtin.assert:
+    that:
+      - display_node_device_token_source.stat.exists
+      - display_node_device_token_source.stat.isreg
+      - display_node_device_token_source.stat.mode == "0600"
+    fail_msg: >-
+      The display device token must exist on the controller as a mode-0600 file.
+
+- name: Install display device token
+  ansible.builtin.copy:
+    src: "{{ display_node_device_token_source_file }}"
+    dest: /etc/pilot-display/device-token
+    owner: root
+    group: "{{ display_node_user }}"
+    mode: "0640"
+  no_log: true
+  notify: Restart Pilot display web
+
 - name: Back up boot configuration
   ansible.builtin.copy:
     src: "{{ item }}"

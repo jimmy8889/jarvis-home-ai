@@ -3,6 +3,8 @@ display_node_user: pilot-display
 display_node_hostname: pilot-display
 display_node_timezone: Australia/Brisbane
 display_node_core_url: http://10.0.1.64:8770
+display_node_device_id: ""
+display_node_device_token_source_file: ""
 display_node_listen_host: 127.0.0.1
 display_node_listen_port: 8780
 display_node_kiosk_url: "http://127.0.0.1:{{ display_node_listen_port }}/"
@@ -21,6 +23,8 @@ display_node_packages:
   - dbus-user-session
   - fonts-noto-color-emoji
   - fonts-noto-core
+  - evtest
+  - libinput-tools
   - python3
   - python3-packaging
   - python3-venv

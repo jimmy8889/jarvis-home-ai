@@ -177,6 +177,32 @@ temperature_history_hours = 24
         with self.assertRaisesRegex(ValueError, "must be a sensor entity"):
             self._load(invalid)
 
+    def test_validates_display_energy_sensors(self) -> None:
+        configured = VALID_CONFIG.replace(
+            "[[rooms]]",
+            """[integrations]
+energy_solar_power_entity_id = "sensor.solar_power"
+energy_grid_power_entity_id = "sensor.grid_power"
+energy_battery_power_entity_id = "sensor.battery_power"
+energy_battery_soc_entity_id = "sensor.battery_soc"
+energy_home_load_entity_id = "sensor.home_load"
+
+[[rooms]]""",
+            1,
+        )
+        settings = self._load(configured)
+        self.assertEqual(
+            settings.integrations.energy_battery_soc_entity_id,
+            "sensor.battery_soc",
+        )
+
+        invalid = configured.replace(
+            'energy_home_load_entity_id = "sensor.home_load"',
+            'energy_home_load_entity_id = "weather.home"',
+        )
+        with self.assertRaisesRegex(ValueError, "must be a sensor entity"):
+            self._load(invalid)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
     <title>Pilot</title>
     <link rel="stylesheet" href="/styles.css">
     <script src="/app.js" defer></script>
@@ -17,32 +17,125 @@
         <div id="core-state" class="state pending">Connecting</div>
       </header>
 
-      <section class="hero">
-        <time id="clock">--:--</time>
-        <div id="date">Starting…</div>
-      </section>
+      <div id="pages" class="pages">
+        <section class="page active" data-page="home" aria-label="Overview">
+          <div class="overview-clock">
+            <time id="clock">--:--</time>
+            <div id="date">Starting…</div>
+          </div>
+          <div class="overview-panels">
+            <article class="overview-card">
+              <span class="eyebrow">Energy now</span>
+              <div class="quick-energy">
+                <div><span>Solar</span><strong id="home-solar">—</strong></div>
+                <div><span>Home</span><strong id="home-load">—</strong></div>
+                <div><span>Battery</span><strong id="home-soc">—</strong></div>
+              </div>
+            </article>
+            <article class="overview-card playing-summary">
+              <span class="eyebrow">Now playing</span>
+              <strong id="home-track">Nothing playing</strong>
+              <span id="home-artist">Pilot network is quiet</span>
+              <small id="home-player">—</small>
+            </article>
+          </div>
+        </section>
 
-      <section class="cards" aria-live="polite">
-        <article>
-          <span class="label">Pilot Core</span>
-          <strong id="core-detail">Checking</strong>
-          <small id="registry">—</small>
-        </article>
-        <article>
-          <span class="label">Rooms</span>
-          <strong id="rooms">—</strong>
-          <small id="players">—</small>
-        </article>
-        <article>
-          <span class="label">This node</span>
-          <strong id="hostname">Raspberry Pi</strong>
-          <small id="node-detail">—</small>
-        </article>
-      </section>
+        <section class="page" data-page="energy" aria-label="Energy">
+          <div class="page-title">
+            <div>
+              <span class="eyebrow">Home Assistant</span>
+              <h1>Energy system</h1>
+            </div>
+            <span id="energy-state" class="data-state">Waiting</span>
+          </div>
+          <div class="energy-grid">
+            <article class="energy-card solar">
+              <span>Solar</span>
+              <strong id="energy-solar">—</strong>
+              <small>PV generation</small>
+            </article>
+            <article class="energy-card home">
+              <span>Home load</span>
+              <strong id="energy-home">—</strong>
+              <small>Current demand</small>
+            </article>
+            <article class="energy-card grid">
+              <span>Grid</span>
+              <strong id="energy-grid">—</strong>
+              <small id="energy-grid-direction">Waiting</small>
+            </article>
+            <article class="energy-card battery">
+              <span>Battery</span>
+              <strong id="energy-battery">—</strong>
+              <small id="energy-battery-direction">Waiting</small>
+            </article>
+            <article class="energy-card soc">
+              <span>Battery SOC</span>
+              <strong id="energy-soc">—</strong>
+              <div class="soc-track"><i id="soc-fill"></i></div>
+            </article>
+          </div>
+        </section>
+
+        <section class="page" data-page="music" aria-label="Music">
+          <div class="page-title">
+            <div>
+              <span class="eyebrow">Music Assistant</span>
+              <h1>Now playing</h1>
+            </div>
+            <span id="music-state" class="data-state">Waiting</span>
+          </div>
+          <div id="now-playing-list" class="now-playing-list">
+            <article class="empty">
+              <span class="music-note">♪</span>
+              <strong>Nothing playing</strong>
+              <small>Active music across the Pilot network will appear here.</small>
+            </article>
+          </div>
+        </section>
+
+        <section class="page" data-page="system" aria-label="System">
+          <div class="page-title">
+            <div>
+              <span class="eyebrow">Appliance</span>
+              <h1>System status</h1>
+            </div>
+          </div>
+          <div class="system-grid">
+            <article>
+              <span class="label">Pilot Core</span>
+              <strong id="core-detail">Checking</strong>
+              <small id="registry">—</small>
+            </article>
+            <article>
+              <span class="label">Rooms</span>
+              <strong id="rooms">—</strong>
+              <small id="players">—</small>
+            </article>
+            <article>
+              <span class="label">This node</span>
+              <strong id="hostname">Raspberry Pi</strong>
+              <small id="node-detail">—</small>
+            </article>
+            <article>
+              <span class="label">Thermals</span>
+              <strong id="temperature">CPU —</strong>
+              <small id="storage">Storage —</small>
+            </article>
+          </div>
+        </section>
+      </div>
+
+      <nav aria-label="Dashboard pages">
+        <button type="button" class="active" data-target="home"><span>⌂</span>Home</button>
+        <button type="button" data-target="energy"><span>ϟ</span>Energy</button>
+        <button type="button" data-target="music"><span>♪</span>Music</button>
+        <button type="button" data-target="system"><span>●</span>System</button>
+      </nav>
 
       <footer>
-        <span id="temperature">CPU —</span>
-        <span id="storage">Storage —</span>
+        <span>Tap a page or swipe left and right</span>
         <span id="updated">Waiting for status</span>
       </footer>
     </main>

@@ -70,6 +70,8 @@ Provisioning and device endpoints:
 - `WS /v1/devices/ws?device_id=...` using device ID and device bearer token
 - `GET /v1/devices/{device_id}/snapshot` for bounded weather, rolling
   temperature history, and service state
+- `GET /v1/devices/{device_id}/surface` for bounded energy and whole-network
+  now-playing state
 - `POST /v1/devices/{device_id}/voice` for bounded 16-bit mono PCM
 - `GET /v1/devices/{device_id}/firmware` for the validated OTA manifest
 - `GET /v1/devices/{device_id}/firmware/image` for the private OTA image
@@ -79,11 +81,18 @@ and that device's bearer token. Voice and OTA additionally require the matching
 device capability. Home Assistant credentials, raw provider weather payloads,
 and filesystem paths are never returned to the node.
 
-Version 0.13 reads only the configured indoor and outdoor Home Assistant
+Version 0.14 reads only the configured indoor and outdoor Home Assistant
 temperature sensors for the requested rolling window. It computes current,
 minimum, and maximum values and projects each history to exactly 24
 display-safe points. Raw recorder history and unrelated attributes never reach
 the embedded node.
+
+The authenticated surface additionally normalizes five configured energy
+sensors to watts/percent and projects only active Music Assistant players.
+Positive grid power means importing and negative means exporting; positive
+battery power means discharging and negative means charging for the deployed
+SAJ sensors. Raw Home Assistant attributes, Music Assistant media URIs, image
+proxy URLs, and central credentials are not returned.
 
 The command transport and its queued, delivered, terminal, expiry, reconnect,
 and idempotency behavior are documented in

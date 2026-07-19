@@ -45,6 +45,11 @@ class DisplayNodeApiTests(unittest.TestCase):
                 weather_entity_id="weather.home",
                 outdoor_temperature_entity_id="sensor.outdoor_temperature",
                 indoor_temperature_entity_id="sensor.bedroom_temperature",
+                energy_solar_power_entity_id="sensor.solar_power",
+                energy_grid_power_entity_id="sensor.grid_power",
+                energy_battery_power_entity_id="sensor.battery_power",
+                energy_battery_soc_entity_id="sensor.battery_soc",
+                energy_home_load_entity_id="sensor.home_load",
                 tts_provider="home_assistant",
                 tts_engine_id="tts.piper",
             ),
@@ -204,6 +209,74 @@ class DisplayNodeApiTests(unittest.TestCase):
         self.assertTrue(payload["tts"]["configured"])
         self.assertEqual(
             self.client.get("/v1/devices/pilot-bedroom-display/snapshot").status_code,
+            422,
+        )
+
+    def test_surface_is_authenticated_and_bounded(self) -> None:
+        raw_energy = {
+            "solar": {
+                "state": "4.2",
+                "last_updated": "2026-07-19T02:00:00+00:00",
+                "attributes": {"unit_of_measurement": "kW", "private": "discard"},
+            },
+            "grid": {
+                "state": "-1200",
+                "attributes": {"unit_of_measurement": "W"},
+            },
+            "battery": {
+                "state": "-2500",
+                "attributes": {"unit_of_measurement": "W"},
+            },
+            "battery_soc": {
+                "state": "74.5",
+                "attributes": {"unit_of_measurement": "%"},
+            },
+            "home_load": {
+                "state": "1500",
+                "attributes": {"unit_of_measurement": "W"},
+            },
+        }
+        now_playing = {
+            "status": "ok",
+            "observed_at": "2026-07-19T02:00:00+00:00",
+            "items": [
+                {
+                    "player_id": "office",
+                    "player_name": "Office",
+                    "state": "playing",
+                    "title": "Track",
+                    "artist": "Artist",
+                }
+            ],
+        }
+        with (
+            patch.object(
+                Integrations,
+                "home_assistant_energy",
+                new=AsyncMock(return_value=raw_energy),
+            ),
+            patch(
+                "pilot_core.api.MediaStateReader.now_playing",
+                new=AsyncMock(return_value=now_playing),
+            ),
+        ):
+            response = self.client.get(
+                "/v1/devices/pilot-bedroom-display/surface",
+                headers=self.headers,
+            )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        payload = response.json()
+        self.assertEqual(payload["energy"]["solar"]["value"], 4200)
+        self.assertEqual(payload["energy"]["grid"]["direction"], "exporting")
+        self.assertEqual(payload["energy"]["battery"]["direction"], "charging")
+        self.assertEqual(payload["energy"]["battery_soc"]["value"], 74.5)
+        self.assertEqual(payload["now_playing"]["items"][0]["title"], "Track")
+        self.assertNotIn("private", json.dumps(payload))
+        self.assertEqual(
+            self.client.get(
+                "/v1/devices/pilot-bedroom-display/surface"
+            ).status_code,
             422,
         )
 

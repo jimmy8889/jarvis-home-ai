@@ -98,7 +98,51 @@ def _core_status(core_url: str) -> dict[str, Any]:
         return {"connected": False, "error": str(error)[:240]}
 
 
-def status_payload(core_url: str) -> dict[str, Any]:
+def _core_surface(
+    core_url: str,
+    device_id: str,
+    device_token_file: str,
+) -> dict[str, Any]:
+    if urlsplit(core_url).scheme not in {"http", "https"}:
+        return {"status": "unavailable", "error": "invalid Pilot Core URL"}
+    token = _bounded_text(Path(device_token_file), 4096)
+    if not device_id or not token:
+        return {"status": "not_configured"}
+    request = Request(
+        f"{core_url.rstrip('/')}/v1/devices/{device_id}/surface",
+        headers={
+            "Accept": "application/json",
+            "Authorization": f"Bearer {token}",
+            "X-Pilot-Device-ID": device_id,
+            "User-Agent": "pilot-display-node",
+        },
+    )
+    try:
+        with urlopen(request, timeout=5) as response:  # noqa: S310
+            if response.status != HTTPStatus.OK:
+                raise HTTPError(
+                    request.full_url,
+                    response.status,
+                    "unexpected status",
+                    response.headers,
+                    None,
+                )
+            body = response.read(MAX_CORE_RESPONSE_BYTES + 1)
+            if len(body) > MAX_CORE_RESPONSE_BYTES:
+                raise ValueError("Pilot Core response is too large")
+            payload = json.loads(body)
+            if not isinstance(payload, dict):
+                raise ValueError("Pilot Core surface response is not an object")
+            return payload
+    except (HTTPError, URLError, TimeoutError, ValueError, json.JSONDecodeError) as error:
+        return {"status": "unavailable", "error": str(error)[:240]}
+
+
+def status_payload(
+    core_url: str,
+    device_id: str = "",
+    device_token_file: str = "",
+) -> dict[str, Any]:
     uptime_raw = _bounded_text(Path("/proc/uptime"), 64).partition(" ")[0]
     try:
         uptime_seconds: int | None = int(float(uptime_raw))
@@ -123,6 +167,7 @@ def status_payload(core_url: str) -> dict[str, Any]:
             "free_bytes": disk.free,
         },
         "core": _core_status(core_url),
+        "surface": _core_surface(core_url, device_id, device_token_file),
     }
 
 
@@ -153,7 +198,11 @@ class DisplayHandler(BaseHTTPRequestHandler):
             self._send(b'{"ok":true}', "application/json")
             return
         if path == "/api/status":
-            payload = status_payload(self.server.core_url)  # type: ignore[attr-defined]
+            payload = status_payload(  # type: ignore[attr-defined]
+                self.server.core_url,
+                self.server.device_id,
+                self.server.device_token_file,
+            )
             self._send(
                 json.dumps(payload, separators=(",", ":")).encode(),
                 "application/json",
@@ -183,16 +232,33 @@ class DisplayHandler(BaseHTTPRequestHandler):
 class DisplayServer(ThreadingHTTPServer):
     daemon_threads = True
 
-    def __init__(self, address: tuple[str, int], core_url: str) -> None:
+    def __init__(
+        self,
+        address: tuple[str, int],
+        core_url: str,
+        device_id: str,
+        device_token_file: str,
+    ) -> None:
         super().__init__(address, DisplayHandler)
         self.core_url = core_url
+        self.device_id = device_id
+        self.device_token_file = device_token_file
 
 
 def main() -> None:
     host = os.environ.get("PILOT_DISPLAY_HOST", "127.0.0.1")
     port = int(os.environ.get("PILOT_DISPLAY_PORT", "8780"))
     core_url = os.environ.get("PILOT_CORE_URL", "http://127.0.0.1:8770")
-    server = DisplayServer((host, port), core_url)
+    device_id = os.environ.get("PILOT_DEVICE_ID", "")
+    device_token_file = os.environ.get(
+        "PILOT_DEVICE_TOKEN_FILE", "/etc/pilot-display/device-token"
+    )
+    server = DisplayServer(
+        (host, port),
+        core_url,
+        device_id,
+        device_token_file,
+    )
     try:
         server.serve_forever()
     except KeyboardInterrupt:

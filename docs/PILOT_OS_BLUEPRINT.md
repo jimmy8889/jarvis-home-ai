@@ -90,7 +90,7 @@ Music streams: TCP 8097
 Sendspin server: TCP 8927
 Pilot Core: 10.0.1.64:8770
 Pilot Core host: debian-docker / Debian 12
-Pilot Core image: jarvis-home-ai/pilot-core:core-0.13.0-20260719.2
+Pilot Core image: jarvis-home-ai/pilot-core:core-0.14.0-20260719.1
 ```
 
 The Home Assistant add-on is the preferred initial Music Assistant deployment.
@@ -239,21 +239,26 @@ Hardware: Raspberry Pi 4 Model B, 2 GB / 16 GB microSD
 Display: 10-inch 1024 x 600 HDMI with ILITEK USB touch
 OS: 64-bit Debian 13 Trixie
 Runtime: Cage Wayland compositor + Chromium kiosk
-Surface: Pilot Display Node 0.1
+Surface: Pilot Linux Display 0.2
 ```
 
 This node is deployed as a minimal appliance rather than a full desktop. A
 loopback-only Python service renders Brisbane time, Pilot Core readiness,
-registry counts, and bounded local health. The browser receives no
-administrator credential. Chromium caches, system journals, release count, and
-APT archives are bounded for the 16 GB card; automatic security updates do not
-reboot the node. The display's incomplete EDID is overridden through a
-reversible KMS `video=HDMI-A-1:1024x600M@60D` argument.
+registry counts, bounded local health, whole-network now-playing state, and the
+SAJ energy system. A device-only credential stays in the local service; the
+browser receives no credential and the Pi receives no Home Assistant, Music
+Assistant, or administrator token. Touch-native Home, Energy, Music, and System
+pages support large tap targets and horizontal swipes. Chromium caches, system
+journals, release count, and APT archives are bounded for the 16 GB card;
+automatic security updates do not reboot the node. The display's incomplete
+EDID is overridden through a reversible KMS
+`video=HDMI-A-1:1024x600M@60D` argument.
 
-Physical acceptance verified native mode, touch discovery, Pilot Core
+Physical acceptance verified native mode, ILITEK input on `seat0`, Pilot Core
 connectivity, zero kiosk restarts, 7.8 GB free storage, no throttling, and
-two-way application rollback. Logical room assignment and a device-scoped
-credential are intentionally pending.
+two-way application rollback. Pilot Core 0.14 adds a bounded, authenticated
+display surface. The Pi is provisionally room-bound to Office with only the
+non-mutating `display` capability.
 
 ## 5. Hardware plan
 
@@ -760,3 +765,7 @@ deployed integration, hardware boundary, or milestone status changes.
   2 GB Raspberry Pi 4 with a 16 GB card, native 1024 x 600 touch output, a
   minimal Cage/Chromium appliance, bounded storage, reproducible Ansible
   deployment, and verified two-way rollback.
+- **2.5** — Added Pilot Core 0.14's bounded energy/now-playing display surface,
+  enrolled the Raspberry Pi with a display-only device credential, and added
+  touch-native Home, Energy, Music, and System pages with tap and swipe
+  navigation.

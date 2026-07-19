@@ -30,6 +30,12 @@ weather_entity_id = ""
 outdoor_temperature_entity_id = ""
 indoor_temperature_entity_id = ""
 temperature_history_hours = 24
+# Optional bounded energy summary for authenticated display devices.
+energy_solar_power_entity_id = ""
+energy_grid_power_entity_id = ""
+energy_battery_power_entity_id = ""
+energy_battery_soc_entity_id = ""
+energy_home_load_entity_id = ""
 # Local TTS stays disabled until the provider and engine are confirmed.
 tts_provider = ""
 # To reuse the Home Assistant Piper integration:

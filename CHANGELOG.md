@@ -2,6 +2,16 @@
 
 ## 2026-07-19
 
+- Added Pilot Core 0.13's room- and device-scoped conversation sessions,
+  retained turn history, linked Home Assistant conversation continuity, fast
+  deterministic routing, and an optional local OpenAI-compatible reasoning
+  path with six typed Home Assistant/Music Assistant tools.
+- Added administrator conversation/status APIs and dashboard visibility for
+  the assistant engine without exposing transcripts in the operational
+  snapshot.
+- Added Pilot Display Node 0.2.8 conversation continuity. The node retains the
+  opaque Pilot session ID in RAM for 15 minutes and supplies it on follow-up
+  voice requests without writing dialogue state to flash.
 - Fixed Pilot Display Node 0.2.7 microphone capture after live speech exposed
   a TDM channel-filtering regression. ESP-IDF already packs the selected
   ES7210 slot as mono; removing a second, erroneous four-to-one decimation

@@ -67,9 +67,7 @@ class VoicePipelineTests(unittest.IsolatedAsyncioTestCase):
                             "intent_output": {
                                 "conversation_id": "conversation-1",
                                 "response": {
-                                    "speech": {
-                                        "plain": {"speech": "The light is off."}
-                                    }
+                                    "speech": {"plain": {"speech": "The light is off."}}
                                 },
                             }
                         },
@@ -98,6 +96,46 @@ class VoicePipelineTests(unittest.IsolatedAsyncioTestCase):
             message for message in socket.sent if isinstance(message, bytes)
         ]
         self.assertEqual(binary_messages, [b"\x07\x01\x02", b"\x07\x03\x04", b"\x07"])
+
+    async def test_transcription_stops_before_intent_routing(self) -> None:
+        socket = FakeSocket(
+            [
+                {"type": "auth_required"},
+                {"type": "auth_ok"},
+                {"id": 1, "type": "result", "success": True},
+                {
+                    "type": "event",
+                    "event": {
+                        "type": "run-start",
+                        "data": {"runner_data": {"stt_binary_handler_id": 9}},
+                    },
+                },
+                {"type": "event", "event": {"type": "stt-start", "data": {}}},
+                {
+                    "type": "event",
+                    "event": {
+                        "type": "stt-end",
+                        "data": {"stt_output": {"text": "what about tomorrow"}},
+                    },
+                },
+                {"type": "event", "event": {"type": "run-end", "data": {}}},
+            ]
+        )
+
+        def connector(*_, **__):
+            return FakeConnection(socket)
+
+        async def audio():
+            yield b"\x01\x02"
+
+        pipeline = HomeAssistantVoicePipeline(
+            IntegrationSettings(home_assistant_url="http://ha.local:8123"),
+            connector=connector,
+        )
+        transcript = await pipeline.transcribe(audio(), sample_rate=16000)
+        self.assertEqual(transcript, "what about tomorrow")
+        command = json.loads(socket.sent[1])
+        self.assertEqual(command["end_stage"], "stt")
 
 
 if __name__ == "__main__":

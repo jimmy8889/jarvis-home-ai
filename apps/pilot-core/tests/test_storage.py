@@ -103,6 +103,49 @@ class StorageTests(unittest.TestCase):
         self.assertEqual(event["focus"]["foreground"], "assistant")
         self.assertEqual(event["focus"]["gains"]["music"], 0.2)
 
+    def test_conversation_session_is_room_and_device_scoped(self) -> None:
+        session = self.store.resolve_conversation_session(
+            "office",
+            device_id="office-n150",
+        )
+        self.store.append_conversation_turn(
+            session["id"],
+            "user",
+            "Turn on the light",
+        )
+        self.store.append_conversation_turn(
+            session["id"],
+            "assistant",
+            "The light is on.",
+            {"provider": "home_assistant"},
+        )
+        continued = self.store.resolve_conversation_session(
+            "office",
+            session["id"],
+            device_id="office-n150",
+        )
+        self.assertEqual(continued["id"], session["id"])
+        turns = self.store.conversation_turns(session["id"])
+        self.assertEqual([turn["role"] for turn in turns], ["user", "assistant"])
+
+        other_device = self.store.resolve_conversation_session(
+            "office",
+            session["id"],
+            device_id="another-device",
+        )
+        self.assertNotEqual(other_device["id"], session["id"])
+
+    def test_conversation_provider_id_and_end_are_persisted(self) -> None:
+        session = self.store.resolve_conversation_session("office")
+        self.store.update_conversation_provider_id(session["id"], "ha-session")
+        stored = self.store.get_conversation_session(session["id"])
+        assert stored is not None
+        self.assertEqual(stored["provider_conversation_id"], "ha-session")
+        self.assertTrue(self.store.end_conversation_session(session["id"]))
+        ended = self.store.get_conversation_session(session["id"])
+        assert ended is not None
+        self.assertEqual(ended["status"], "ended")
+
     def test_device_cannot_write_another_room(self) -> None:
         with self.assertRaises(PermissionError):
             self.store.record_event(

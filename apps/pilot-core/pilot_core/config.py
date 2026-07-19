@@ -18,6 +18,8 @@ class ServerSettings:
     firmware_asset_path: str = "/var/lib/pilot-core/firmware"
     firmware_asset_max_bytes: int = 8_000_000
     voice_audio_max_bytes: int = 1_000_000
+    conversation_session_ttl_seconds: int = 900
+    conversation_max_turns: int = 20
     admin_token_env: str = "PILOT_CORE_ADMIN_TOKEN"
     bootstrap_token_env: str = "PILOT_CORE_BOOTSTRAP_TOKEN"
     legacy_bootstrap_enabled: bool = True
@@ -48,6 +50,13 @@ class IntegrationSettings:
     tts_sample_channels: int = 1
     tts_sample_bytes: int = 2
     tts_timeout_seconds: int = 60
+    llm_provider: str = ""
+    llm_url: str = ""
+    llm_token_env: str = "PILOT_LLM_TOKEN"
+    llm_model: str = ""
+    llm_timeout_seconds: int = 60
+    llm_max_tool_rounds: int = 4
+    llm_context_turns: int = 12
 
 
 @dataclass(frozen=True)
@@ -222,6 +231,10 @@ def load_settings(path: str | Path) -> Settings:
         voice_audio_max_bytes=int(
             server_values.get("voice_audio_max_bytes", 1_000_000)
         ),
+        conversation_session_ttl_seconds=int(
+            server_values.get("conversation_session_ttl_seconds", 900)
+        ),
+        conversation_max_turns=int(server_values.get("conversation_max_turns", 20)),
         admin_token_env=str(
             server_values.get("admin_token_env", "PILOT_CORE_ADMIN_TOKEN")
         ),
@@ -244,6 +257,12 @@ def load_settings(path: str | Path) -> Settings:
         raise ValueError(
             "server.voice_audio_max_bytes must be between 32000 and 10000000"
         )
+    if not 60 <= server.conversation_session_ttl_seconds <= 86_400:
+        raise ValueError(
+            "server.conversation_session_ttl_seconds must be between 60 and 86400"
+        )
+    if not 2 <= server.conversation_max_turns <= 100:
+        raise ValueError("server.conversation_max_turns must be between 2 and 100")
     if not 60 <= server.audio_asset_retention_seconds <= 86_400:
         raise ValueError(
             "server.audio_asset_retention_seconds must be between 60 and 86400"
@@ -296,6 +315,13 @@ def load_settings(path: str | Path) -> Settings:
         tts_sample_channels=int(integration_values.get("tts_sample_channels", 1)),
         tts_sample_bytes=int(integration_values.get("tts_sample_bytes", 2)),
         tts_timeout_seconds=int(integration_values.get("tts_timeout_seconds", 60)),
+        llm_provider=str(integration_values.get("llm_provider", "")).strip(),
+        llm_url=str(integration_values.get("llm_url", "")).rstrip("/"),
+        llm_token_env=str(integration_values.get("llm_token_env", "PILOT_LLM_TOKEN")),
+        llm_model=str(integration_values.get("llm_model", "")).strip(),
+        llm_timeout_seconds=int(integration_values.get("llm_timeout_seconds", 60)),
+        llm_max_tool_rounds=int(integration_values.get("llm_max_tool_rounds", 4)),
+        llm_context_turns=int(integration_values.get("llm_context_turns", 12)),
     )
     if integrations.tts_provider not in {"", "home_assistant", "openai"}:
         raise ValueError("integrations.tts_provider must be home_assistant or openai")
@@ -309,6 +335,14 @@ def load_settings(path: str | Path) -> Settings:
         raise ValueError("integrations.tts_sample_bytes must be 2")
     if not 1 <= integrations.tts_timeout_seconds <= 300:
         raise ValueError("integrations.tts_timeout_seconds must be between 1 and 300")
+    if integrations.llm_provider not in {"", "openai"}:
+        raise ValueError("integrations.llm_provider must be openai")
+    if not 1 <= integrations.llm_timeout_seconds <= 300:
+        raise ValueError("integrations.llm_timeout_seconds must be between 1 and 300")
+    if not 1 <= integrations.llm_max_tool_rounds <= 8:
+        raise ValueError("integrations.llm_max_tool_rounds must be between 1 and 8")
+    if not 2 <= integrations.llm_context_turns <= 40:
+        raise ValueError("integrations.llm_context_turns must be between 2 and 40")
     if not 5 <= integrations.home_assistant_assist_timeout_seconds <= 300:
         raise ValueError(
             "integrations.home_assistant_assist_timeout_seconds must be "
@@ -339,6 +373,11 @@ def load_settings(path: str | Path) -> Settings:
             )
     if integrations.tts_provider == "openai" and not integrations.tts_url:
         raise ValueError("tts_url is required for the OpenAI TTS provider")
+    if integrations.llm_provider == "openai":
+        if not integrations.llm_url:
+            raise ValueError("llm_url is required for the OpenAI LLM provider")
+        if not integrations.llm_model:
+            raise ValueError("llm_model is required for the OpenAI LLM provider")
 
     raw_rooms = values.get("rooms", [])
     raw_players = values.get("players", [])

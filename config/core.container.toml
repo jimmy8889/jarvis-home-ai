@@ -10,6 +10,8 @@ meeting_asset_max_bytes = 2000000000
 firmware_asset_path = "/data/firmware"
 firmware_asset_max_bytes = 8000000
 voice_audio_max_bytes = 1000000
+conversation_session_ttl_seconds = 900
+conversation_max_turns = 20
 admin_token_env = "PILOT_CORE_ADMIN_TOKEN"
 bootstrap_token_env = "PILOT_CORE_BOOTSTRAP_TOKEN"
 legacy_bootstrap_enabled = false
@@ -38,6 +40,13 @@ tts_sample_rate = 16000
 tts_sample_channels = 1
 tts_sample_bytes = 2
 tts_timeout_seconds = 60
+llm_provider = ""
+llm_url = ""
+llm_token_env = "PILOT_LLM_TOKEN"
+llm_model = ""
+llm_timeout_seconds = 60
+llm_max_tool_rounds = 4
+llm_context_turns = 12
 
 [[rooms]]
 id = "bedroom"

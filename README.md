@@ -83,6 +83,10 @@ weather, touch push-to-talk, local voice responses, authenticated OTA,
 reproducible builds, and factory-image rollback, is documented in
 [firmware/pilot-display-node/README.md](firmware/pilot-display-node/README.md).
 
+Pilot Core's room-scoped dialogue, deterministic Home Assistant fast path,
+optional local model fallback, and typed tool boundary are documented in
+[docs/CONTEXTUAL_ASSISTANT.md](docs/CONTEXTUAL_ASSISTANT.md).
+
 Read-only Denon HEOS and NVIDIA Shield discovery, Media Room registration, and
 the fail-closed player control gate are documented in
 [docs/MEDIA_ROOM.md](docs/MEDIA_ROOM.md).

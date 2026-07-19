@@ -126,6 +126,56 @@ class HomeAssistantVoicePipeline:
                 f"Home Assistant voice pipeline failed: {error}"
             ) from error
 
+    async def transcribe(
+        self,
+        audio: AsyncIterable[bytes],
+        *,
+        sample_rate: int,
+        language: str | None = None,
+    ) -> str:
+        """Run only STT so Pilot Core can own intent routing and conversation."""
+        token = read_secret(self.settings.home_assistant_token_env)
+        if not self.settings.home_assistant_url or not token:
+            raise VoicePipelineUnavailable(
+                "Home Assistant URL and token are required for voice"
+            )
+        if sample_rate not in {8000, 16000, 24000, 32000, 48000}:
+            raise VoicePipelineFailed("unsupported input sample rate")
+        command: dict[str, Any] = {
+            "id": 1,
+            "type": "assist_pipeline/run",
+            "start_stage": "stt",
+            "end_stage": "stt",
+            "input": {"sample_rate": sample_rate},
+            "timeout": self.settings.home_assistant_assist_timeout_seconds,
+        }
+        _ = language
+        if self.settings.home_assistant_assist_pipeline_id:
+            command["pipeline"] = self.settings.home_assistant_assist_pipeline_id
+
+        websocket_url = _websocket_url(self.settings.home_assistant_url)
+        try:
+            async with self.connector(
+                websocket_url,
+                open_timeout=10,
+                close_timeout=5,
+                max_size=2_000_000,
+            ) as socket:
+                await self._authenticate(socket, token)
+                await socket.send(json.dumps(command))
+                handler_id = await self._wait_for_stt(socket)
+                async for chunk in audio:
+                    if chunk:
+                        await socket.send(bytes((handler_id,)) + chunk)
+                await socket.send(bytes((handler_id,)))
+                return await self._collect_transcript(socket)
+        except (VoicePipelineUnavailable, VoicePipelineFailed):
+            raise
+        except Exception as error:
+            raise VoicePipelineFailed(
+                f"Home Assistant transcription failed: {error}"
+            ) from error
+
     async def _authenticate(self, socket: Any, token: str) -> None:
         message = self._json(await socket.recv())
         if message.get("type") != "auth_required":
@@ -207,6 +257,26 @@ class HomeAssistantVoicePipeline:
             raw_response=intent_output,
         )
 
+    async def _collect_transcript(self, socket: Any) -> str:
+        transcript = ""
+        while True:
+            event = self._event(self._json(await socket.recv()))
+            event_type = event.get("type")
+            data = event.get("data") or {}
+            if event_type == "stt-end":
+                value = (data.get("stt_output") or {}).get("text")
+                if isinstance(value, str):
+                    transcript = value.strip()
+            elif event_type == "error":
+                raise VoicePipelineFailed(
+                    str(data.get("message") or data.get("code") or "STT failed")
+                )
+            elif event_type == "run-end":
+                break
+        if not transcript:
+            raise VoicePipelineFailed("Home Assistant returned no transcript")
+        return transcript
+
     @staticmethod
     def _json(message: Any) -> dict[str, Any]:
         if not isinstance(message, str):
@@ -214,9 +284,7 @@ class HomeAssistantVoicePipeline:
         try:
             value = json.loads(message)
         except (TypeError, ValueError) as error:
-            raise VoicePipelineFailed(
-                "Home Assistant returned invalid JSON"
-            ) from error
+            raise VoicePipelineFailed("Home Assistant returned invalid JSON") from error
         if not isinstance(value, dict):
             raise VoicePipelineFailed("Home Assistant returned an invalid message")
         return value

@@ -61,6 +61,8 @@ class Integrations:
         text: str,
         language: str = "en",
         conversation_id: str | None = None,
+        agent_id: str | None = None,
+        device_id: str | None = None,
     ) -> Any:
         if not self.settings.home_assistant_url:
             raise IntegrationUnavailable("Home Assistant URL is not configured")
@@ -70,6 +72,10 @@ class Integrations:
         payload: dict[str, Any] = {"text": text, "language": language}
         if conversation_id:
             payload["conversation_id"] = conversation_id
+        if agent_id:
+            payload["agent_id"] = agent_id
+        if device_id:
+            payload["device_id"] = device_id
         try:
             async with httpx.AsyncClient(
                 timeout=30, transport=self.transport, follow_redirects=False

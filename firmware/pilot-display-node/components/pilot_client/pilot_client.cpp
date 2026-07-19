@@ -29,6 +29,7 @@ constexpr int kVoiceChunkSamples = 320;
 constexpr int64_t kVoiceMaximumUs = 10'000'000;
 constexpr int64_t kNoSpeechTimeoutUs = 5'000'000;
 constexpr int64_t kEndSilenceUs = 1'100'000;
+constexpr int64_t kConversationTtlUs = 900'000'000;
 constexpr float kVoiceThreshold = 350.0f;
 constexpr std::size_t kOtaBufferSize = 4096;
 constexpr std::size_t kSnapshotResponseBufferSize = 6144;
@@ -710,6 +711,19 @@ esp_err_t PilotClient::RunVoiceSession(
     esp_http_client_set_header(client, "Content-Type", "application/octet-stream");
     esp_http_client_set_header(client, "X-Pilot-Sample-Rate", "16000");
     esp_http_client_set_header(client, "X-Pilot-Language", kVoiceLanguage);
+    const int64_t request_time = esp_timer_get_time();
+    if (
+        conversation_id_[0] != '\0' &&
+        conversation_updated_us_ > 0 &&
+        request_time - conversation_updated_us_ < kConversationTtlUs
+    ) {
+        esp_http_client_set_header(
+            client, "X-Pilot-Conversation-Id", conversation_id_
+        );
+    } else {
+        conversation_id_[0] = '\0';
+        conversation_updated_us_ = 0;
+    }
 
     esp_err_t status = audio.StartCapture(kVoiceSampleRate);
     if (status != ESP_OK) {
@@ -813,6 +827,15 @@ esp_err_t PilotClient::RunVoiceSession(
         copy_json_string(root, "transcript", result->transcript);
         copy_json_string(root, "response_text", result->response_text);
         copy_json_string(root, "conversation_id", result->conversation_id);
+        if (result->conversation_id[0] != '\0') {
+            std::strncpy(
+                conversation_id_,
+                result->conversation_id,
+                sizeof(conversation_id_) - 1
+            );
+            conversation_id_[sizeof(conversation_id_) - 1] = '\0';
+            conversation_updated_us_ = esp_timer_get_time();
+        }
     }
     if (cJSON_IsObject(audio_response)) {
         copy_json_string(audio_response, "download_url", download_path);

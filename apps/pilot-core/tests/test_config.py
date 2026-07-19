@@ -124,6 +124,34 @@ tts_provider = "home_assistant"
         with self.assertRaisesRegex(ValueError, "home_assistant_url"):
             self._load(invalid)
 
+    def test_validates_local_llm_provider_configuration(self) -> None:
+        configured = VALID_CONFIG.replace(
+            "[[rooms]]",
+            """[integrations]
+llm_provider = "openai"
+llm_url = "http://rtx.local:11434/v1"
+llm_model = "qwen3:8b"
+llm_max_tool_rounds = 3
+
+[[rooms]]""",
+            1,
+        )
+        settings = self._load(configured)
+        self.assertEqual(settings.integrations.llm_model, "qwen3:8b")
+        self.assertEqual(settings.integrations.llm_max_tool_rounds, 3)
+
+        invalid = VALID_CONFIG.replace(
+            "[[rooms]]",
+            """[integrations]
+llm_provider = "openai"
+llm_model = "qwen3:8b"
+
+[[rooms]]""",
+            1,
+        )
+        with self.assertRaisesRegex(ValueError, "llm_url"):
+            self._load(invalid)
+
     def test_validates_display_temperature_sensors(self) -> None:
         configured = VALID_CONFIG.replace(
             "[[rooms]]",

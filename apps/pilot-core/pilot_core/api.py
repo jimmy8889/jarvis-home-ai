@@ -27,6 +27,12 @@ from pydantic import BaseModel, Field, model_validator
 from . import __version__
 from .audio_assets import AudioAssetError, AudioAssets
 from .config import Settings
+from .conversation import (
+    AssistantTools,
+    AssistantUnavailable,
+    ConversationEngine,
+    OpenAICompatibleLLM,
+)
 from .firmware import FirmwareReleaseError, FirmwareReleases, is_newer_version
 from .integrations import IntegrationRequestFailed, IntegrationUnavailable, Integrations
 from .media_state import MediaStateReader
@@ -325,6 +331,21 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
     )
     local_tts = LocalTTS(settings.integrations, settings.server.audio_asset_max_bytes)
     voice_pipeline = HomeAssistantVoicePipeline(settings.integrations)
+    local_llm = OpenAICompatibleLLM(settings.integrations)
+    assistant_tools = AssistantTools(
+        registry,
+        orchestrator,
+        integrations,
+        media_states,
+        database,
+    )
+    conversation_engine = ConversationEngine(
+        database,
+        registry,
+        assistant_tools,
+        integrations,
+        local_llm,
+    )
     firmware_releases = FirmwareReleases(
         settings.server.firmware_asset_path,
         settings.server.firmware_asset_max_bytes,
@@ -617,13 +638,6 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
         delivery["synthesis"] = synthesized.metadata()
         return delivery
 
-    def assistant_speech(result: Any) -> str | None:
-        try:
-            speech = result["response"]["speech"]["plain"]["speech"]
-        except (KeyError, TypeError):
-            return None
-        return speech.strip() if isinstance(speech, str) and speech.strip() else None
-
     async def run_media_command(
         player_id: str,
         action: str,
@@ -738,6 +752,7 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
             "room_count": len(registry.rooms),
             "player_count": len(registry.players),
             "tts_configured": local_tts.status()["configured"],
+            "assistant": conversation_engine.status(),
             "legacy_bootstrap_enabled": settings.server.legacy_bootstrap_enabled,
         }
 
@@ -896,6 +911,7 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
         devices = database.list_devices()
         commands = database.list_commands(limit=50)
         events = database.recent_events(limit=50)
+        recent_conversations = database.list_conversation_sessions(limit=8)
 
         armed_rooms: list[str] = []
         unarmed_rooms: list[str] = []
@@ -960,6 +976,13 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
             "commands": commands,
             "command_counts": command_counts,
             "events": events,
+            "assistant": {
+                **conversation_engine.status(),
+                "active_session_count": sum(
+                    item["status"] == "active" for item in recent_conversations
+                ),
+                "recent_conversations": recent_conversations,
+            },
         }
         payload["observability"] = evaluate_observability(payload)
         return payload
@@ -1410,11 +1433,10 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
                     yield chunk
 
         try:
-            result = await voice_pipeline.run(
+            transcript = await voice_pipeline.transcribe(
                 bounded_audio(),
                 sample_rate=x_pilot_sample_rate,
                 language=x_pilot_language,
-                conversation_id=x_pilot_conversation_id,
             )
         except VoicePipelineUnavailable as error:
             raise HTTPException(status_code=503, detail=str(error)) from None
@@ -1423,10 +1445,21 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
             raise HTTPException(status_code=status_code, detail=str(error)) from None
         if total_bytes < x_pilot_sample_rate // 2:
             raise HTTPException(status_code=422, detail="voice audio is too short")
+        try:
+            assistant_result = await conversation_engine.respond(
+                transcript,
+                device["room_id"],
+                language=x_pilot_language
+                or settings.integrations.home_assistant_assist_language,
+                session_id=x_pilot_conversation_id,
+                device_id=device_id,
+            )
+        except AssistantUnavailable as error:
+            raise HTTPException(status_code=503, detail=str(error)) from None
 
         try:
             synthesized = await local_tts.synthesize(
-                result.response_text,
+                assistant_result.response_text,
                 x_pilot_language,
             )
         except TTSUnavailable as error:
@@ -1449,9 +1482,11 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
         return {
             "device_id": device_id,
             "room_id": device["room_id"],
-            "transcript": result.transcript,
-            "response_text": result.response_text,
-            "conversation_id": result.conversation_id,
+            "transcript": transcript,
+            "response_text": assistant_result.response_text,
+            "conversation_id": assistant_result.session_id,
+            "provider": assistant_result.provider,
+            "continue_conversation": assistant_result.continue_conversation,
             "audio": {
                 **audio_assets.public_view(asset),
                 "download_url": f"/v1/audio-assets/{asset['id']}",
@@ -1720,26 +1755,20 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
         if request.room_id not in registry.rooms:
             raise HTTPException(status_code=404, detail="room not found")
         try:
-            response = await integrations.home_assistant_conversation(
+            assistant_result = await conversation_engine.respond(
                 request.text,
-                request.language,
-                request.conversation_id,
+                request.room_id,
+                language=request.language,
+                session_id=request.conversation_id,
+                device_id=request.device_id,
             )
-        except IntegrationUnavailable as error:
+        except AssistantUnavailable as error:
             raise HTTPException(status_code=503, detail=str(error)) from None
-        except IntegrationRequestFailed as error:
-            raise HTTPException(status_code=502, detail=str(error)) from None
-        result: dict[str, Any] = {"room_id": request.room_id, "result": response}
+        result = assistant_result.as_dict()
         if request.speak:
-            text = assistant_speech(response)
-            if not text:
-                raise HTTPException(
-                    status_code=502,
-                    detail="Home Assistant returned no speakable response",
-                )
             result["speech_delivery"] = await synthesize_room_speech(
                 request.room_id,
-                text,
+                assistant_result.response_text,
                 request.language,
                 request.voice,
                 "assistant",
@@ -1750,5 +1779,48 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
                 request.retention_seconds,
             )
         return result
+
+    @app.get("/v1/assistant/status", dependencies=[Depends(require_admin)])
+    async def assistant_status() -> dict[str, Any]:
+        return conversation_engine.status()
+
+    @app.get("/v1/conversations", dependencies=[Depends(require_admin)])
+    async def conversations(
+        room_id: str | None = None,
+        status: str | None = None,
+        limit: int = Query(default=100, ge=1, le=500),
+    ) -> dict[str, Any]:
+        if room_id is not None and room_id not in registry.rooms:
+            raise HTTPException(status_code=404, detail="room not found")
+        try:
+            sessions = database.list_conversation_sessions(room_id, status, limit)
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from None
+        return {"conversations": sessions}
+
+    @app.get(
+        "/v1/conversations/{conversation_id}",
+        dependencies=[Depends(require_admin)],
+    )
+    async def conversation(conversation_id: str) -> dict[str, Any]:
+        session = database.get_conversation_session(
+            conversation_id,
+            include_turns=True,
+        )
+        if session is None:
+            raise HTTPException(status_code=404, detail="conversation not found")
+        return session
+
+    @app.delete(
+        "/v1/conversations/{conversation_id}",
+        dependencies=[Depends(require_admin)],
+        status_code=204,
+    )
+    async def end_conversation(conversation_id: str) -> None:
+        if not database.end_conversation_session(conversation_id):
+            raise HTTPException(
+                status_code=404,
+                detail="active conversation not found",
+            )
 
     return app

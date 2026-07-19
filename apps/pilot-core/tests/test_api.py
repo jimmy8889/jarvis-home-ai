@@ -217,6 +217,7 @@ class ApiTests(unittest.TestCase):
         dashboard = self.client.get("/dashboard")
         self.assertEqual(dashboard.status_code, 200)
         self.assertIn("Pilot Core", dashboard.text)
+        self.assertIn("Assistant engine", dashboard.text)
         self.assertEqual(dashboard.headers["cache-control"], "no-store")
         self.assertIn(
             "frame-ancestors 'none'",
@@ -241,7 +242,7 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.headers["cache-control"], "no-store")
         payload = response.json()
-        self.assertEqual(payload["deployment"]["version"], "0.12.0")
+        self.assertEqual(payload["deployment"]["version"], "0.13.0")
         self.assertEqual(payload["summary"]["room_count"], 2)
         self.assertEqual(payload["summary"]["device_count"], 0)
         self.assertEqual(payload["summary"]["armed_room_count"], 0)
@@ -255,6 +256,8 @@ class ApiTests(unittest.TestCase):
         self.assertIn("music_assistant", payload["integrations"])
         self.assertIn("tts", payload["integrations"])
         self.assertIn("players", payload["media"])
+        self.assertEqual(payload["assistant"]["session_owner"], "pilot_core")
+        self.assertFalse(payload["assistant"]["llm"]["configured"])
         self.assertEqual(payload["integrations"]["tts"]["status"], "not_configured")
         self.assertIn(payload["observability"]["status"], {"guarded", "degraded"})
 
@@ -727,6 +730,27 @@ class ApiTests(unittest.TestCase):
             response.json()["speech_delivery"]["target"]["id"],
             "office-n150",
         )
+        conversation_id = response.json()["conversation_id"]
+        detail = self.client.get(
+            f"/v1/conversations/{conversation_id}",
+            headers={"Authorization": "Bearer admin-test"},
+        )
+        self.assertEqual(detail.status_code, 200)
+        self.assertEqual(
+            [turn["role"] for turn in detail.json()["turns"]],
+            ["user", "assistant"],
+        )
+        listed = self.client.get(
+            "/v1/conversations",
+            headers={"Authorization": "Bearer admin-test"},
+            params={"room_id": "office"},
+        )
+        self.assertEqual(listed.json()["conversations"][0]["id"], conversation_id)
+        status = self.client.get(
+            "/v1/assistant/status",
+            headers={"Authorization": "Bearer admin-test"},
+        )
+        self.assertEqual(status.json()["session_owner"], "pilot_core")
         synthesize.assert_awaited_once_with("The office light is now on.", "en", None)
 
     def test_room_state_combines_registered_device_and_default_targets(self) -> None:

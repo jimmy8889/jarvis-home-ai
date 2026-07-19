@@ -94,7 +94,7 @@ idf.py -p /dev/cu.usbmodem2101 monitor
 Expected diagnostics include:
 
 ```text
-Pilot display node 0.2.7 starting
+Pilot display node 0.2.8 starting
 Wi-Fi connected
 NTP synchronised using time.cloudflare.com
 ES7210 microphone and ES8311 speaker codec initialized
@@ -108,6 +108,8 @@ Weather refresh succeeded
   to return.
 - Forecast includes the current condition, high/low, apparent temperature,
   humidity, rain chance and amount, wind, and tomorrow's outlook.
+- Follow-up voice requests reuse the in-memory Pilot conversation for up to 15
+  minutes. The session ID is not persisted to flash.
 - Outside and Bedroom show a rolling 24-hour minimum/maximum and a fixed
   24-point graph sourced from Home Assistant.
 - Tap `TALK TO PILOT` or press GPIO 9 to start listening.

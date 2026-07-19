@@ -29,6 +29,10 @@ class Store:
         self._connection = sqlite3.connect(path, check_same_thread=False)
         self._connection.row_factory = sqlite3.Row
         self._lock = RLock()
+        self._conversation_ttl_seconds = (
+            settings.server.conversation_session_ttl_seconds
+        )
+        self._conversation_max_turns = settings.server.conversation_max_turns
         self._initialize()
         self.sync_registry(settings)
 
@@ -127,6 +131,32 @@ class Store:
                 );
                 CREATE INDEX IF NOT EXISTS audio_assets_room_created
                     ON audio_assets(room_id, created_at DESC);
+                CREATE TABLE IF NOT EXISTS conversation_sessions (
+                    id TEXT PRIMARY KEY,
+                    room_id TEXT NOT NULL REFERENCES rooms(id),
+                    device_id TEXT,
+                    user_id TEXT,
+                    provider_conversation_id TEXT,
+                    status TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    expires_at TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS conversation_sessions_room_updated
+                    ON conversation_sessions(room_id, updated_at DESC);
+                CREATE INDEX IF NOT EXISTS conversation_sessions_expiry
+                    ON conversation_sessions(status, expires_at);
+                CREATE TABLE IF NOT EXISTS conversation_turns (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    session_id TEXT NOT NULL REFERENCES conversation_sessions(id)
+                        ON DELETE CASCADE,
+                    role TEXT NOT NULL,
+                    content TEXT NOT NULL,
+                    metadata_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS conversation_turns_session
+                    ON conversation_turns(session_id, id);
                 CREATE TABLE IF NOT EXISTS meetings (
                     id TEXT PRIMARY KEY,
                     title TEXT NOT NULL,
@@ -216,6 +246,272 @@ class Store:
                     """ALTER TABLE players ADD COLUMN control_enabled
                        INTEGER NOT NULL DEFAULT 1"""
                 )
+
+    def resolve_conversation_session(
+        self,
+        room_id: str,
+        session_id: str | None = None,
+        device_id: str | None = None,
+        user_id: str | None = None,
+    ) -> dict[str, Any]:
+        now = datetime.now(UTC)
+        expires_at = now + timedelta(seconds=self._conversation_ttl_seconds)
+        with self._lock, self._connection:
+            self._expire_conversations_locked(now)
+            if session_id:
+                row = self._connection.execute(
+                    """SELECT * FROM conversation_sessions
+                       WHERE id = ? AND room_id = ? AND status = 'active'
+                         AND expires_at > ?""",
+                    (session_id, room_id, now.isoformat()),
+                ).fetchone()
+                if row is not None:
+                    if device_id and row["device_id"] not in {None, "", device_id}:
+                        row = None
+                    if (
+                        user_id
+                        and row is not None
+                        and row["user_id"]
+                        not in {
+                            None,
+                            "",
+                            user_id,
+                        }
+                    ):
+                        row = None
+                if row is not None:
+                    self._connection.execute(
+                        """UPDATE conversation_sessions
+                           SET updated_at = ?, expires_at = ? WHERE id = ?""",
+                        (now.isoformat(), expires_at.isoformat(), row["id"]),
+                    )
+                    refreshed = self._connection.execute(
+                        "SELECT * FROM conversation_sessions WHERE id = ?",
+                        (row["id"],),
+                    ).fetchone()
+                    assert refreshed is not None
+                    return self._conversation_session_view(refreshed)
+
+            if not self._connection.execute(
+                "SELECT 1 FROM rooms WHERE id = ?", (room_id,)
+            ).fetchone():
+                raise KeyError(room_id)
+            new_id = secrets.token_hex(16)
+            self._connection.execute(
+                """INSERT INTO conversation_sessions
+                   (id, room_id, device_id, user_id, provider_conversation_id,
+                    status, created_at, updated_at, expires_at)
+                   VALUES (?, ?, ?, ?, NULL, 'active', ?, ?, ?)""",
+                (
+                    new_id,
+                    room_id,
+                    device_id,
+                    user_id,
+                    now.isoformat(),
+                    now.isoformat(),
+                    expires_at.isoformat(),
+                ),
+            )
+            row = self._connection.execute(
+                "SELECT * FROM conversation_sessions WHERE id = ?", (new_id,)
+            ).fetchone()
+        assert row is not None
+        return self._conversation_session_view(row)
+
+    def get_conversation_session(
+        self,
+        session_id: str,
+        include_turns: bool = False,
+    ) -> dict[str, Any] | None:
+        with self._lock, self._connection:
+            self._expire_conversations_locked(datetime.now(UTC))
+            row = self._connection.execute(
+                "SELECT * FROM conversation_sessions WHERE id = ?", (session_id,)
+            ).fetchone()
+            if row is None:
+                return None
+            result = self._conversation_session_view(row)
+            if include_turns:
+                result["turns"] = self._conversation_turns_locked(session_id, None)
+            return result
+
+    def list_conversation_sessions(
+        self,
+        room_id: str | None = None,
+        status: str | None = None,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        if status is not None and status not in {"active", "ended", "expired"}:
+            raise ValueError("invalid conversation status")
+        clauses: list[str] = []
+        values: list[Any] = []
+        if room_id is not None:
+            clauses.append("room_id = ?")
+            values.append(room_id)
+        if status is not None:
+            clauses.append("status = ?")
+            values.append(status)
+        where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
+        values.append(limit)
+        with self._lock, self._connection:
+            self._expire_conversations_locked(datetime.now(UTC))
+            rows = self._connection.execute(
+                f"""SELECT conversation_sessions.*,
+                           (SELECT COUNT(*) FROM conversation_turns
+                            WHERE session_id = conversation_sessions.id)
+                              AS turn_count
+                    FROM conversation_sessions{where}
+                    ORDER BY updated_at DESC LIMIT ?""",
+                values,
+            ).fetchall()
+        return [
+            {
+                **self._conversation_session_view(row),
+                "turn_count": int(row["turn_count"]),
+            }
+            for row in rows
+        ]
+
+    def conversation_turns(
+        self,
+        session_id: str,
+        limit: int | None = None,
+    ) -> list[dict[str, Any]]:
+        with self._lock:
+            return self._conversation_turns_locked(session_id, limit)
+
+    def append_conversation_turn(
+        self,
+        session_id: str,
+        role: str,
+        content: str,
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        if role not in {"user", "assistant", "tool"}:
+            raise ValueError("invalid conversation role")
+        normalized = content.strip()
+        if not normalized:
+            raise ValueError("conversation content must not be empty")
+        now = datetime.now(UTC)
+        expires_at = now + timedelta(seconds=self._conversation_ttl_seconds)
+        with self._lock, self._connection:
+            session = self._connection.execute(
+                """SELECT 1 FROM conversation_sessions
+                   WHERE id = ? AND status = 'active'""",
+                (session_id,),
+            ).fetchone()
+            if session is None:
+                raise KeyError(session_id)
+            cursor = self._connection.execute(
+                """INSERT INTO conversation_turns
+                   (session_id, role, content, metadata_json, created_at)
+                   VALUES (?, ?, ?, ?, ?)""",
+                (
+                    session_id,
+                    role,
+                    normalized,
+                    json.dumps(metadata or {}, separators=(",", ":")),
+                    now.isoformat(),
+                ),
+            )
+            self._connection.execute(
+                """UPDATE conversation_sessions
+                   SET updated_at = ?, expires_at = ? WHERE id = ?""",
+                (now.isoformat(), expires_at.isoformat(), session_id),
+            )
+            self._connection.execute(
+                """DELETE FROM conversation_turns
+                   WHERE session_id = ? AND id NOT IN (
+                     SELECT id FROM conversation_turns WHERE session_id = ?
+                     ORDER BY id DESC LIMIT ?
+                   )""",
+                (session_id, session_id, self._conversation_max_turns),
+            )
+            row = self._connection.execute(
+                "SELECT * FROM conversation_turns WHERE id = ?",
+                (int(cursor.lastrowid),),
+            ).fetchone()
+        assert row is not None
+        return self._conversation_turn_view(row)
+
+    def update_conversation_provider_id(
+        self,
+        session_id: str,
+        provider_conversation_id: str | None,
+    ) -> None:
+        with self._lock, self._connection:
+            cursor = self._connection.execute(
+                """UPDATE conversation_sessions
+                   SET provider_conversation_id = ?, updated_at = ?
+                   WHERE id = ? AND status = 'active'""",
+                (provider_conversation_id, _now(), session_id),
+            )
+            if cursor.rowcount != 1:
+                raise KeyError(session_id)
+
+    def end_conversation_session(self, session_id: str) -> bool:
+        with self._lock, self._connection:
+            cursor = self._connection.execute(
+                """UPDATE conversation_sessions
+                   SET status = 'ended', updated_at = ?
+                   WHERE id = ? AND status = 'active'""",
+                (_now(), session_id),
+            )
+        return cursor.rowcount == 1
+
+    def _expire_conversations_locked(self, now: datetime) -> None:
+        self._connection.execute(
+            """UPDATE conversation_sessions
+               SET status = 'expired', updated_at = ?
+               WHERE status = 'active' AND expires_at <= ?""",
+            (now.isoformat(), now.isoformat()),
+        )
+
+    def _conversation_turns_locked(
+        self,
+        session_id: str,
+        limit: int | None,
+    ) -> list[dict[str, Any]]:
+        if limit is None:
+            rows = self._connection.execute(
+                """SELECT * FROM conversation_turns
+                   WHERE session_id = ? ORDER BY id""",
+                (session_id,),
+            ).fetchall()
+        else:
+            rows = self._connection.execute(
+                """SELECT * FROM (
+                     SELECT * FROM conversation_turns
+                     WHERE session_id = ? ORDER BY id DESC LIMIT ?
+                   ) ORDER BY id""",
+                (session_id, limit),
+            ).fetchall()
+        return [self._conversation_turn_view(row) for row in rows]
+
+    @staticmethod
+    def _conversation_session_view(row: sqlite3.Row) -> dict[str, Any]:
+        return {
+            "id": row["id"],
+            "room_id": row["room_id"],
+            "device_id": row["device_id"],
+            "user_id": row["user_id"],
+            "provider_conversation_id": row["provider_conversation_id"],
+            "status": row["status"],
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+            "expires_at": row["expires_at"],
+        }
+
+    @staticmethod
+    def _conversation_turn_view(row: sqlite3.Row) -> dict[str, Any]:
+        return {
+            "id": row["id"],
+            "session_id": row["session_id"],
+            "role": row["role"],
+            "content": row["content"],
+            "metadata": json.loads(row["metadata_json"]),
+            "created_at": row["created_at"],
+        }
 
     def sync_registry(self, settings: Settings) -> None:
         with self._lock, self._connection:

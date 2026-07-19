@@ -21,7 +21,7 @@ from pilot_core.config import (
 from pilot_core.integrations import Integrations
 from pilot_core.storage import Store
 from pilot_core.tts import LocalTTS, SynthesizedAudio
-from pilot_core.voice import HomeAssistantVoicePipeline, VoicePipelineResult
+from pilot_core.voice import HomeAssistantVoicePipeline
 
 
 WAV = b"RIFF\x04\x00\x00\x00WAVEpilot"
@@ -208,12 +208,6 @@ class DisplayNodeApiTests(unittest.TestCase):
         )
 
     def test_voice_stream_returns_private_tts_asset(self) -> None:
-        voice_result = VoicePipelineResult(
-            transcript="What is the weather?",
-            response_text="It is sunny and 22 degrees.",
-            conversation_id="conversation-1",
-            raw_response={},
-        )
         synthesized = SynthesizedAudio(
             content=WAV,
             content_type="audio/wav",
@@ -229,13 +223,30 @@ class DisplayNodeApiTests(unittest.TestCase):
             async for chunk in audio:
                 received.extend(chunk)
             self.assertEqual(len(received), 16000)
-            return voice_result
+            return "What is the weather?"
 
         with (
             patch.object(
                 HomeAssistantVoicePipeline,
-                "run",
+                "transcribe",
                 new=consume_voice,
+            ),
+            patch.object(
+                Integrations,
+                "home_assistant_conversation",
+                new=AsyncMock(
+                    return_value={
+                        "conversation_id": "ha-conversation-1",
+                        "response": {
+                            "response_type": "query_answer",
+                            "speech": {
+                                "plain": {
+                                    "speech": "It is sunny and 22 degrees.",
+                                }
+                            },
+                        },
+                    }
+                ),
             ),
             patch.object(
                 LocalTTS,

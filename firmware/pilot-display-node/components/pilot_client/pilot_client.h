@@ -120,4 +120,6 @@ private:
     const char *device_token_;
     const char *firmware_target_;
     const char *firmware_version_;
+    char conversation_id_[96] = {};
+    int64_t conversation_updated_us_ = 0;
 };

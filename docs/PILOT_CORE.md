@@ -1,6 +1,6 @@
 # Pilot Core
 
-Pilot Core 0.12 is the authenticated control-plane foundation for Pilot OS. It
+Pilot Core 0.13 is the authenticated control-plane foundation for Pilot OS. It
 persists the canonical room/player registry, registered room devices, source
 state, event history, and durable device command queue in SQLite.
 
@@ -49,6 +49,10 @@ Administrator endpoints:
 - `POST /v1/media` for play, pause, stop, volume, URI playback, and transfer
 - `POST /v1/media/search`
 - `POST /v1/assistant`
+- `GET /v1/assistant/status`
+- `GET /v1/conversations`
+- `GET /v1/conversations/{conversation_id}`
+- `DELETE /v1/conversations/{conversation_id}`
 - `GET /v1/tts`
 - `POST /v1/rooms/{room_id}/speak`
 - `POST /v1/rooms/{room_id}/audio-assets`
@@ -75,7 +79,7 @@ and that device's bearer token. Voice and OTA additionally require the matching
 device capability. Home Assistant credentials, raw provider weather payloads,
 and filesystem paths are never returned to the node.
 
-Version 0.12 reads only the configured indoor and outdoor Home Assistant
+Version 0.13 reads only the configured indoor and outdoor Home Assistant
 temperature sensors for the requested rolling window. It computes current,
 minimum, and maximum values and projects each history to exactly 24
 display-safe points. Raw recorder history and unrelated attributes never reach
@@ -87,6 +91,9 @@ and idempotency behavior are documented in
 
 Local speech synthesis and secure room playback are documented in
 [LOCAL_TTS.md](LOCAL_TTS.md) and [AUDIO_DELIVERY.md](AUDIO_DELIVERY.md).
+Room-scoped conversation persistence, deterministic routing, local model
+fallback, and the typed tool boundary are documented in
+[CONTEXTUAL_ASSISTANT.md](CONTEXTUAL_ASSISTANT.md).
 
 Room target resolution and room-level state, media, and control contracts are
 documented in [ROOM_ORCHESTRATION.md](ROOM_ORCHESTRATION.md).
@@ -104,6 +111,7 @@ seconds and shows:
 - connected room endpoints and their latest health;
 - deterministic source/focus state per room;
 - Home Assistant, Music Assistant, and local TTS readiness;
+- contextual-assistant configuration and recent session metadata;
 - the supervised audio-activation gate;
 - recent device commands and events;
 - Pilot Core release, version, uptime, and registry revision.

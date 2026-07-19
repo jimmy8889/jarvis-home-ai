@@ -90,7 +90,7 @@ Music streams: TCP 8097
 Sendspin server: TCP 8927
 Pilot Core: 10.0.1.64:8770
 Pilot Core host: debian-docker / Debian 12
-Pilot Core image: jarvis-home-ai/pilot-core:core-0.12.0-20260719.1
+Pilot Core image: jarvis-home-ai/pilot-core:core-0.13.0-20260719.1
 ```
 
 The Home Assistant add-on is the preferred initial Music Assistant deployment.
@@ -105,7 +105,7 @@ LAN health/readiness, authenticated API, invalid-token, disabled legacy
 bootstrap, container-restart persistence, backup-integrity, and log checks.
 Dedicated Home Assistant and Music Assistant credentials are installed through
 the root-owned file-backed secret store, and both read-only diagnostics are
-healthy. Pilot Core 0.12 enables the local Home Assistant Assist pipeline,
+healthy. Pilot Core 0.13 enables the local Home Assistant Assist pipeline,
 Piper TTS, the Geebung weather entity, and authenticated embedded-node voice,
 weather, rolling temperature-history, and firmware APIs. Piper has been
 validated to return 16 kHz, mono,
@@ -113,6 +113,14 @@ validated to return 16 kHz, mono,
 operations dashboard is available at `/dashboard`;
 its room, device, integration, safety, command, event, and deployment data
 remain protected by the existing administrator bearer token.
+
+Pilot Core now owns short-lived, room- and device-scoped conversation sessions.
+Voice audio uses Home Assistant for STT only, then Pilot tries the built-in
+Home Assistant agent as a fast deterministic path. Unmatched contextual
+requests can fall back to a local OpenAI-compatible model with bounded
+room/media context and typed Pilot tools; Home Assistant and Music Assistant
+remain the action boundaries. The production model endpoint is intentionally
+disabled until the RTX service and selected model pass acceptance.
 
 The Media Room is registered in read-only mode. Music Assistant identifies the
 Denon AVC-X8500H as HEOS player `1174905188` at `10.0.1.150`; Home Assistant
@@ -166,7 +174,7 @@ acceptance test.
 ```text
 Hardware: Waveshare ESP32-C6-Touch-AMOLED-2.16
 Deployed firmware: Pilot Display Node 0.2.7
-Published firmware: Pilot Display Node 0.2.7
+Published firmware: Pilot Display Node 0.2.8
 Display: 480 x 480 AMOLED
 Time: Australia/Brisbane via NTP with PCF85063 RTC fallback
 Network: Hazell IoT VLAN over 2.4 GHz Wi-Fi
@@ -217,6 +225,11 @@ every fourth sample a second time, producing an effective 4 kHz stream labelled
 as 16 kHz. Version 0.2.7 removes that second decimation. Its immutable image is
 published and the node installed it over OTA, rebooted, refreshed its
 authenticated snapshot, and reported `current_version=0.2.7`.
+
+Version 0.2.8 retains Pilot Core's opaque conversation ID in RAM for up to 15
+minutes and sends it with follow-up voice requests. It never writes dialogue
+state to flash. The release is published for OTA; physical installation remains
+to be confirmed by the node.
 
 ## 5. Hardware plan
 
@@ -564,7 +577,8 @@ deployed integration, hardware boundary, or milestone status changes.
 ### Phase 5 — Memory and advanced workflows
 
 - [ ] Semantic meeting memory
-- [ ] Conversation memory
+- [x] Short-lived room/device conversation sessions and retained turns
+- [ ] Explicit long-term conversation-memory retention
 - [ ] Energy-management tools
 - [ ] User and action permissions
 
@@ -590,21 +604,27 @@ deployed integration, hardware boundary, or milestone status changes.
 - [x] Deploy the authenticated Pilot Core operations dashboard
 - [x] Register Media Room, Denon HEOS, and Shield in read-only mode
 - [x] Add normalized live player state to Pilot Core and its dashboard
+- [x] Add Pilot-owned conversation continuity and administrator session APIs
+- [x] Add deterministic Home Assistant routing with local-model fallback
+- [x] Add bounded typed tools for home state/control, weather, and music
 
 ## 14. Immediate next steps
 
-1. Confirm Pilot Display Node 0.2.7 natural-speech transcription and its
-   onboard Piper response.
-2. Visually confirm its Forecast, Outside, and Bedroom pages.
-3. Validate wake word through spoken response on the Office K3.
-4. Validate a local lossless Music Assistant track.
-5. Complete the supervised K3 acceptance receipt and explicitly arm room
+1. Confirm Pilot Display Node 0.2.8 installs over OTA and that a follow-up
+   request reuses the same Pilot conversation session.
+2. Make the RTX 3080 inference endpoint reachable from Pilot Core, select a
+   tool-capable local model, and enable the 0.13 reasoning provider.
+3. Run contextual acceptance prompts for pronouns, follow-ups, room-relative
+   language, live weather, and typed home/music tools.
+4. Validate wake word through spoken response on the Office K3.
+5. Validate a local lossless Music Assistant track.
+6. Complete the supervised K3 acceptance receipt and explicitly arm room
    playback.
-6. Validate assistant ducking and gain restoration at a safe listening volume.
-7. Validate the native Intel Bluetooth controller; add a dedicated adapter only
+7. Validate assistant ducking and gain restoration at a safe listening volume.
+8. Validate the native Intel Bluetooth controller; add a dedicated adapter only
    if its receiver behavior is inadequate.
-8. Train and deploy the **Hey Pilot** wake model.
-9. Complete the in-person Denon power, source, playback, and safe-volume
+9. Train and deploy the **Hey Pilot** wake model.
+10. Complete the in-person Denon power, source, playback, and safe-volume
    acceptance before enabling Media Room control.
 
 ## 15. Decision log
@@ -700,3 +720,7 @@ deployed integration, hardware boundary, or milestone status changes.
   natural-speech failure to erroneous four-to-one decimation after ESP-IDF's
   TDM slot filter, and deployed Pilot Display Node 0.2.7 over OTA with
   contiguous 16 kHz mono capture restored.
+- **2.3** — Added Pilot Core 0.13 room/device conversation persistence,
+  Home Assistant provider continuity, deterministic-first routing, a bounded
+  local-model tool loop, administrator session visibility, and Pilot Display
+  Node 0.2.8 in-memory follow-up continuity.

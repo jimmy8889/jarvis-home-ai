@@ -450,6 +450,50 @@ const renderSafety = (payload) => {
   text("#pending-command-count", payload.summary.pending_command_count);
 };
 
+const renderAssistant = (payload) => {
+  const assistant = payload.assistant || {};
+  const llm = assistant.llm || {};
+  const statusElement = document.querySelector("#assistant-status");
+  const configured = llm.configured === true;
+  statusElement.className = `status-pill status-${configured ? "good" : "warning"}`;
+  clear(statusElement);
+  statusElement.append(node("span", "status-dot"));
+  statusElement.append(
+    document.createTextNode(configured ? "Contextual" : "Deterministic only"),
+  );
+  text("#assistant-session-owner", titleCase(assistant.session_owner || "unknown"));
+  text(
+    "#assistant-fast-path",
+    titleCase(assistant.deterministic_provider || "unavailable"),
+  );
+  text("#assistant-model", llm.model || "Not configured");
+  text(
+    "#assistant-copy",
+    configured
+      ? `${llm.model} handles unmatched and contextual requests through ${llm.max_tool_rounds} bounded tool rounds.`
+      : "Home Assistant commands remain available. Contextual reasoning will activate when the local model endpoint is configured.",
+  );
+
+  const conversations = assistant.recent_conversations || [];
+  const list = document.querySelector("#conversation-list");
+  clear(list);
+  text("#conversation-total", assistant.active_session_count || 0);
+  if (!conversations.length) {
+    list.append(node("p", "timeline-empty", "No conversations have been recorded."));
+    return;
+  }
+  conversations.forEach((conversation) => {
+    list.append(
+      timelineRow(
+        conversation.status === "active" ? "good" : "",
+        `${titleCase(conversation.room_id)} · ${titleCase(conversation.status)}`,
+        `${conversation.turn_count} retained turns · ${conversation.device_id || "API client"}`,
+        conversation.updated_at,
+      ),
+    );
+  });
+};
+
 const timelineRow = (kind, title, detail, timestamp) => {
   const row = node("div", "timeline-row");
   row.append(node("span", `timeline-mark ${kind}`));
@@ -525,6 +569,7 @@ const render = (payload) => {
   renderRooms(payload);
   renderIntegrations(payload);
   renderSafety(payload);
+  renderAssistant(payload);
   renderObservability(payload);
   renderCommands(payload);
   renderEvents(payload);

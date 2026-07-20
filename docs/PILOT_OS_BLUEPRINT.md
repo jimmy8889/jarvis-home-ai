@@ -1,6 +1,6 @@
 # Pilot OS Blueprint
 
-Version 2.3
+Version 2.4
 
 Last updated: 2026-07-20
 
@@ -143,10 +143,11 @@ remain the action boundaries.
 
 The Media Room is registered with staged control. Music Assistant identifies the
 Denon AVC-X8500H as HEOS player `1174905188` at `10.0.1.150`; Home Assistant
-exposes the same receiver's HEOS state as `media_player.media_room`. Pilot Core
-uses the receiver's allowlisted port-8080 command endpoint for power and named
-input selection because Home Assistant's separate Denon AVR discovery failed
-against the receiver's redirected legacy API. The NVIDIA Shield is registered
+exposes the same receiver's HEOS state as `media_player.media_room`. The
+separate native Denon AVR entity `media_player.media_room_3` provides accepted
+power, volume, and input controls and is Pilot Core's production control
+endpoint. The allowlisted port-8080 transport remains available only as a
+rollback. The NVIDIA Shield is registered
 through Music Assistant player
 `upb0713734fca0742d2bf2125b59cbf3b1` at `10.0.1.101`. Pilot Core normalizes
 their live provider state. The accepted Denon HEOS music route permits bounded
@@ -850,3 +851,6 @@ deployed integration, hardware boundary, or milestone status changes.
   HEOS remain authoritative for playback/state while a configuration-only,
   allowlisted port-8080 adapter handles receiver power and named input
   selection after native Home Assistant AVR discovery failed.
+- **3.1** — Accepted the native Home Assistant Denon AVR entity
+  `media_player.media_room_3` and made it the production power/input control
+  endpoint. The direct port-8080 adapter remains an unused rollback path.

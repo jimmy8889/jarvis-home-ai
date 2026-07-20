@@ -37,23 +37,22 @@ The separate assistant-response and Shield routes remain read-only. This keeps
 music transport and bounded Denon control available without yet authorizing
 automatic announcements or third-party video-app control.
 
-Home Assistant's separate Denon AVR integration was tested against
-`10.0.1.150`, but discovery failed even though the receiver's HTTP, Telnet,
-HEOS CLI, and port 8080 endpoints were reachable. The receiver's legacy API
-responds on port 8080 while its port-80 control path redirects to an HTTPS path
-that rejects the legacy status request. Pilot Core therefore uses a separate,
-configuration-only `control_endpoint` for the receiver:
+The separate Home Assistant Denon AVR integration is now installed and exposes
+the receiver as `media_player.media_room_3`. Its native power, volume, and input
+controls have been physically accepted. Pilot Core uses that entity as the
+receiver's separate control endpoint:
 
 ```toml
 endpoint = "media_player.media_room"
-control_endpoint = "http://10.0.1.150:8080"
+control_endpoint = "media_player.media_room_3"
 ```
 
-The first endpoint remains read-only state from Home Assistant/HEOS. The second
-accepts only `power_on`, `power_off`, and an explicit allowlist of named input
-sources. Callers cannot submit raw Denon commands, arbitrary paths, arbitrary
-URLs, or unlisted inputs. Music Assistant remains authoritative for queues,
-playback, transfer, and volume.
+The first entity remains the HEOS state/metadata view. The second is used only
+for bounded receiver power and input selection. Music Assistant remains
+authoritative for queues, playback, transfer, and music volume.
+
+Pilot Core 0.18 retains its configuration-only, allowlisted Denon port-8080
+adapter as a rollback option. It is no longer selected in production.
 
 Both `/v1/media` and `/v1/rooms/media-room/media` enforce the per-player gate
 before an integration request is made.
@@ -89,10 +88,9 @@ An N150-to-HDMI endpoint remains deferred. Native HEOS will be evaluated first.
 
 Pilot Core supports `play`, `pause`, `stop`, `set_volume`, `play_media`, and
 `transfer` through Music Assistant. It also supports bounded `power_on`,
-`power_off`, and `select_source` commands through either a configured Home
-Assistant `media_player` entity or the receiver's configuration-only Denon
-control endpoint. Arbitrary Home Assistant services, entities, Denon commands,
-paths, and sources cannot be supplied by the caller.
+`power_off`, and `select_source` commands through the configured native Home
+Assistant `media_player` control entity. Arbitrary Home Assistant services,
+entities, Denon commands, paths, and sources cannot be supplied by the caller.
 
 ## Acceptance harness
 

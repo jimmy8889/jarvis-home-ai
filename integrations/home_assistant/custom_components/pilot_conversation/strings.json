@@ -1,0 +1,24 @@
+{
+  "title": "Pilot Core Conversation",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect Home Assistant to Pilot Core",
+        "description": "Use a dedicated Pilot device credential with the voice capability.",
+        "data": {
+          "name": "Name",
+          "core_url": "Pilot Core URL",
+          "device_id": "Pilot device ID",
+          "device_token": "Pilot device token",
+          "room_id": "Room ID"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Could not connect to Pilot Core."
+    },
+    "abort": {
+      "already_configured": "This Pilot device is already configured."
+    }
+  }
+}

@@ -243,7 +243,7 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.headers["cache-control"], "no-store")
         payload = response.json()
-        self.assertEqual(payload["deployment"]["version"], "0.18.0")
+        self.assertEqual(payload["deployment"]["version"], "0.19.0")
         self.assertEqual(payload["summary"]["room_count"], 2)
         self.assertEqual(payload["summary"]["device_count"], 0)
         self.assertEqual(payload["summary"]["armed_room_count"], 0)
@@ -392,6 +392,22 @@ class ApiTests(unittest.TestCase):
             headers={"Authorization": f"Bearer {grant['bootstrap_token']}"},
         )
         self.assertEqual(replay.status_code, 401)
+
+    def test_admin_can_update_device_capabilities_without_reenrollment(self) -> None:
+        token = self.register_device()
+
+        response = self.client.patch(
+            "/v1/devices/office-n150/capabilities",
+            headers={"Authorization": "Bearer admin-test"},
+            json={"capabilities": ["audio", "media-control", "voice", "voice"]},
+        )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(
+            response.json()["device"]["capabilities"],
+            ["audio", "media-control", "voice"],
+        )
+        self.assertTrue(self.store.authenticate_device("office-n150", token))
 
     def test_legacy_bootstrap_endpoint_can_be_disabled(self) -> None:
         config = settings(self.audio_directory.name)

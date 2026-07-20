@@ -715,6 +715,21 @@ class Store:
                 )
             return valid
 
+    def update_device_capabilities(
+        self, device_id: str, capabilities: list[str]
+    ) -> dict[str, Any]:
+        normalized = sorted(set(capabilities))
+        with self._lock, self._connection:
+            cursor = self._connection.execute(
+                "UPDATE devices SET capabilities_json = ? WHERE id = ?",
+                (json.dumps(normalized), device_id),
+            )
+            if cursor.rowcount != 1:
+                raise KeyError(device_id)
+        return next(
+            device for device in self.list_devices() if device["id"] == device_id
+        )
+
     def list_devices(self, room_id: str | None = None) -> list[dict[str, Any]]:
         with self._lock:
             if room_id is None:

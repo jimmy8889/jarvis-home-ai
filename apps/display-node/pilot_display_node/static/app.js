@@ -8,12 +8,14 @@ const elements = Object.fromEntries(
     "energy-soc", "soc-fill", "energy-flow", "flow-solar", "flow-grid",
     "flow-battery", "particles-solar", "particles-grid", "particles-battery",
     "node-solar", "node-grid", "node-home", "node-battery",
-    "music-state", "now-playing-list",
+    "music-state", "now-playing-list", "music-query", "music-search-button",
+    "music-output", "music-message", "music-results",
   ].map((id) => [id.replaceAll("-", "_"), document.querySelector(`#${id}`)]),
 );
 
 const pageNames = ["home", "energy", "music", "system"];
 const number = new Intl.NumberFormat("en-AU", { maximumFractionDigits: 1 });
+let mediaModel = null;
 
 function updateClock() {
   const now = new Date();
@@ -152,6 +154,170 @@ function renderNowPlaying(nowPlaying = {}) {
   }
 }
 
+function musicPlayerEntries(value) {
+  const players = value?.media?.players || {};
+  return Object.values(players).filter((item) => (
+    item?.player?.kind === "music" &&
+    item.player.control_enabled === true &&
+    item.player.enabled === true
+  ));
+}
+
+function renderMusicControls(value) {
+  mediaModel = value;
+  const previous = elements.music_output.value;
+  const rooms = Array.isArray(value?.rooms) ? value.rooms : [];
+  elements.music_output.replaceChildren();
+  for (const room of rooms) {
+    const player = room.players?.find(
+      (item) => item.id === room.default_music_player_id && item.control_enabled,
+    );
+    if (!player) continue;
+    const option = document.createElement("option");
+    option.value = player.id;
+    option.textContent = room.name;
+    elements.music_output.append(option);
+  }
+  if ([...elements.music_output.options].some((option) => option.value === previous)) {
+    elements.music_output.value = previous;
+  }
+
+  const entries = musicPlayerEntries(value);
+  elements.now_playing_list.replaceChildren();
+  if (!entries.length) {
+    elements.now_playing_list.append(
+      textNode("article", "empty compact", "No controllable music players are available."),
+    );
+    return;
+  }
+  for (const entry of entries) {
+    const player = entry.player;
+    const effective = entry.effective || {};
+    const media = effective.media || {};
+    const card = textNode("article", "track-card control-card", "");
+    const copy = textNode("div", "track-copy", "");
+    copy.append(
+      textNode("strong", "", media.title || player.name),
+      textNode("span", "", media.artist || `${player.name} · ${effective.playback_state || "unknown"}`),
+    );
+    const controls = textNode("div", "track-controls", "");
+    for (const [action, label] of [["play", "▶"], ["pause", "Ⅱ"], ["stop", "■"]]) {
+      const button = textNode("button", "", label);
+      button.type = "button";
+      button.ariaLabel = `${action} ${player.name}`;
+      button.addEventListener("click", () => sendMedia(action, { player_id: player.id }));
+      controls.append(button);
+    }
+    const volume = document.createElement("input");
+    volume.type = "range";
+    volume.min = "0";
+    volume.max = "100";
+    volume.value = typeof effective.volume_percent === "number"
+      ? String(effective.volume_percent)
+      : "30";
+    volume.ariaLabel = `${player.name} volume`;
+    volume.addEventListener("change", () => sendMedia("set_volume", {
+      player_id: player.id,
+      volume: Number(volume.value),
+    }));
+    card.append(copy, controls, volume);
+    elements.now_playing_list.append(card);
+  }
+}
+
+async function postJSON(path, payload) {
+  const response = await fetch(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  const value = await response.json();
+  if (!response.ok) throw new Error(value.detail || `HTTP ${response.status}`);
+  return value;
+}
+
+async function updateMedia() {
+  try {
+    const response = await fetch("/api/media", { cache: "no-store" });
+    const value = await response.json();
+    if (!response.ok) throw new Error(value.detail || `HTTP ${response.status}`);
+    renderMusicControls(value);
+    elements.music_message.textContent = "";
+  } catch (error) {
+    elements.music_message.textContent = String(error);
+  }
+}
+
+async function sendMedia(action, extra = {}) {
+  const playerId = extra.player_id || elements.music_output.value;
+  if (!playerId) return;
+  elements.music_message.textContent = `${action.replaceAll("_", " ")}…`;
+  try {
+    await postJSON("/api/media", { action, player_id: playerId, ...extra });
+    elements.music_message.textContent = "Done";
+    await Promise.all([updateStatus(), updateMedia()]);
+  } catch (error) {
+    elements.music_message.textContent = String(error);
+  }
+}
+
+function flattenSearchResults(value) {
+  const results = [];
+  const visit = (candidate) => {
+    if (Array.isArray(candidate)) {
+      candidate.forEach(visit);
+      return;
+    }
+    if (!candidate || typeof candidate !== "object") return;
+    const uri = candidate.uri || candidate.media_uri;
+    const title = candidate.name || candidate.title;
+    if (typeof uri === "string" && typeof title === "string") {
+      results.push({
+        uri,
+        title,
+        subtitle: candidate.artist || candidate.album || candidate.media_type || "",
+      });
+      return;
+    }
+    Object.values(candidate).forEach(visit);
+  };
+  visit(value);
+  return results.slice(0, 12);
+}
+
+async function searchMusic() {
+  const query = elements.music_query.value.trim();
+  if (!query) return;
+  elements.music_message.textContent = "Searching…";
+  try {
+    const value = await postJSON("/api/media/search", { query, limit: 12 });
+    const results = flattenSearchResults(value);
+    elements.music_results.replaceChildren();
+    for (const result of results) {
+      const button = textNode("button", "search-result", "");
+      button.type = "button";
+      button.append(
+        textNode("strong", "", result.title),
+        textNode("small", "", result.subtitle || "Music Assistant"),
+      );
+      button.addEventListener("click", () => sendMedia("play_media", {
+        media_uri: result.uri,
+      }));
+      elements.music_results.append(button);
+    }
+    elements.music_message.textContent = results.length
+      ? `${results.length} results`
+      : "No results";
+  } catch (error) {
+    elements.music_message.textContent = String(error);
+  }
+}
+
+elements.music_search_button.addEventListener("click", searchMusic);
+elements.music_query.addEventListener("keydown", (event) => {
+  if (event.key === "Enter") searchMusic();
+});
+
 function showPage(name) {
   if (!pageNames.includes(name)) return;
   document.querySelectorAll(".page").forEach((page) => {
@@ -232,5 +398,7 @@ async function updateStatus() {
 updateClock();
 showPage(window.location.hash.slice(1) || "home");
 updateStatus();
+updateMedia();
 setInterval(updateClock, 1000);
 setInterval(updateStatus, 10000);
+setInterval(updateMedia, 10000);

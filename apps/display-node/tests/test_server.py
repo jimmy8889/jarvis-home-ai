@@ -5,7 +5,11 @@ from pathlib import Path
 import unittest
 from unittest.mock import MagicMock, patch
 
-from pilot_display_node.server import _core_status, _core_surface
+from pilot_display_node.server import (
+    _core_device_request,
+    _core_status,
+    _core_surface,
+)
 
 
 class CoreStatusTests(unittest.TestCase):
@@ -50,6 +54,39 @@ class CoreStatusTests(unittest.TestCase):
             _core_surface("http://pilot-core:8770", "", ""),
             {"status": "not_configured"},
         )
+
+    @patch("pilot_display_node.server.urlopen")
+    @patch("pilot_display_node.server._bounded_text", return_value="device-secret")
+    def test_device_media_proxy_keeps_credential_server_side(
+        self,
+        _read_token: MagicMock,
+        urlopen: MagicMock,
+    ) -> None:
+        response = MagicMock()
+        response.__enter__.return_value = response
+        response.status = 200
+        response.read.return_value = b'{"player":{"id":"office-music"}}'
+        urlopen.return_value = response
+
+        status, result = _core_device_request(
+            "http://pilot-core:8770",
+            "pilot-display-pi",
+            "/etc/pilot-display/device-token",
+            "media",
+            method="POST",
+            payload={"action": "pause", "player_id": "office-music"},
+        )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(result["player"]["id"], "office-music")
+        request = urlopen.call_args.args[0]
+        self.assertEqual(request.method, "POST")
+        self.assertEqual(
+            request.full_url,
+            "http://pilot-core:8770/v1/devices/pilot-display-pi/media",
+        )
+        self.assertEqual(request.headers["Authorization"], "Bearer device-secret")
+        self.assertNotIn("device-secret", json.dumps(result))
 
     @patch("pilot_display_node.server.urlopen")
     @patch("pilot_display_node.server._bounded_text", return_value="device-secret")

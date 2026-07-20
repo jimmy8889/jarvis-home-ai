@@ -86,7 +86,8 @@ reproducible builds, and factory-image rollback, is documented in
 [firmware/pilot-display-node/README.md](firmware/pilot-display-node/README.md).
 
 The Raspberry Pi 4 large-format touch display appliance, minimal Wayland kiosk,
-storage controls, deployment, acceptance, and rollback are documented in
+storage controls, interactive Music Assistant surface, deployment, acceptance,
+and rollback are documented in
 [docs/RASPBERRY_PI_DISPLAY_NODE.md](docs/RASPBERRY_PI_DISPLAY_NODE.md).
 
 The native-HDMI N150 Media Console, fullscreen music/video shell, supervised
@@ -96,6 +97,12 @@ in [docs/N150_MEDIA_CONSOLE.md](docs/N150_MEDIA_CONSOLE.md).
 Pilot Core's room-scoped dialogue, deterministic Home Assistant fast path,
 optional local model fallback, and typed tool boundary are documented in
 [docs/CONTEXTUAL_ASSISTANT.md](docs/CONTEXTUAL_ASSISTANT.md).
+The Home Assistant conversation-agent installation and voice-pipeline rollback
+path are documented in
+[docs/HOME_ASSISTANT_CONVERSATION_BRIDGE.md](docs/HOME_ASSISTANT_CONVERSATION_BRIDGE.md).
+
+The native iPhone room, media, and assistant client is documented in
+[docs/PILOT_IOS.md](docs/PILOT_IOS.md).
 
 Read-only Denon HEOS and NVIDIA Shield discovery, Media Room registration, and
 the fail-closed player control gate are documented in
@@ -161,6 +168,7 @@ It defines:
 ```text
 apps/room-agent/       Local health/status API
 apps/pilot-core/       Central room and player registry API
+apps/pilot-ios/        Native iPhone media and assistant client
 apps/shield-tv/        Kotlin/Compose for TV operations client
 config/                Versioned example room configuration
 deploy/ansible/        Reproducible Debian 13 deployment
@@ -170,6 +178,7 @@ packages/              Shared schemas and future SDK packages
 systemd/               Service definitions
 infra/                 Central Pilot Core container deployment
 firmware/              ESP32 room-node firmware and hardware support
+integrations/          Home Assistant and other platform adapters
 ```
 
 ## Safety boundaries

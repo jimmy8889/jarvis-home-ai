@@ -1,6 +1,6 @@
 # Contextual Assistant
 
-Pilot Core 0.13 owns the assistant conversation lifecycle. Home Assistant still
+Pilot Core owns the assistant conversation lifecycle. Home Assistant still
 provides speech recognition and deterministic home control, but it no longer
 owns the only copy of the conversation.
 
@@ -92,17 +92,20 @@ selected the inside-temperature tool with schema-correct arguments.
 model answered a short factual question in about one second rather than
 spending many seconds generating hidden reasoning tokens.
 
-The Office Home Assistant satellite uses a separate `Pilot Contextual`
-pipeline. It preserves Faster Whisper and Piper, prefers Home Assistant's local
-intents, and falls back to the existing `conversation.ollama_rtx3080` agent for
-general questions. `Full local assistant` remains available in the device's
-pipeline selector as the immediate deterministic-only rollback.
+The `Pilot Core Conversation` custom integration makes Pilot Core a selectable
+Home Assistant conversation agent. The Office pipeline retains Faster Whisper
+for STT and Piper for TTS, while recognized text passes through a dedicated,
+room-bound Pilot device credential. Pilot then tries Home Assistant's
+deterministic agent first and uses the local RTX/Ollama tool loop only where
+needed.
 
-Pilot-owned sessions and typed tools apply to requests that enter through Pilot
-Core, including embedded display nodes and API clients. The Home Assistant
-satellite's Ollama fallback gives the Office broader answers immediately, but
-does not yet expose Pilot's Music Assistant tools or retained Pilot session
-history. A future Home Assistant conversation bridge will converge those paths.
+This converges the Office satellite, embedded displays, Raspberry Pi surfaces,
+and iOS clients on the same retained Pilot sessions and bounded tool policy.
+`Full local assistant` remains available in the device's pipeline selector as
+the immediate rollback.
+
+Installation and pipeline selection are documented in
+`HOME_ASSISTANT_CONVERSATION_BRIDGE.md`.
 
 ## Administration
 

@@ -1,0 +1,11 @@
+{
+  "domain": "pilot_conversation",
+  "name": "Pilot Core Conversation",
+  "codeowners": ["@jimmy8889"],
+  "config_flow": true,
+  "documentation": "https://github.com/jimmy8889/jarvis-home-ai",
+  "integration_type": "service",
+  "iot_class": "local_push",
+  "requirements": [],
+  "version": "0.1.0"
+}

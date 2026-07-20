@@ -75,10 +75,9 @@ class DisplayNodeApiTests(unittest.TestCase):
                     id="bedroom-music",
                     room_id="bedroom",
                     name="Bedroom Music",
-                    protocol="future",
+                    protocol="sendspin",
                     kind="music",
-                    enabled=False,
-                    control_enabled=False,
+                    external_id="bedroom-player",
                 ),
             ),
         )
@@ -87,7 +86,7 @@ class DisplayNodeApiTests(unittest.TestCase):
             "pilot-bedroom-display",
             "bedroom",
             "Bedroom Display",
-            ["audio", "display", "ota", "voice"],
+            ["audio", "display", "media-control", "ota", "voice"],
         )
         self.client = TestClient(create_app(self.settings, self.store))
         self.headers = {
@@ -210,6 +209,92 @@ class DisplayNodeApiTests(unittest.TestCase):
         self.assertEqual(
             self.client.get("/v1/devices/pilot-bedroom-display/snapshot").status_code,
             422,
+        )
+
+    def test_text_assistant_is_device_authenticated_and_room_scoped(self) -> None:
+        with patch.object(
+            Integrations,
+            "home_assistant_conversation",
+            new=AsyncMock(
+                return_value={
+                    "conversation_id": "ha-conversation-1",
+                    "response": {
+                        "response_type": "query_answer",
+                        "speech": {
+                            "plain": {
+                                "speech": "The bedroom is 22 degrees.",
+                            }
+                        },
+                    },
+                }
+            ),
+        ):
+            response = self.client.post(
+                "/v1/devices/pilot-bedroom-display/assistant",
+                headers=self.headers,
+                json={
+                    "text": "What is the bedroom temperature?",
+                    "language": "en-AU",
+                },
+            )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        payload = response.json()
+        self.assertEqual(payload["room_id"], "bedroom")
+        self.assertEqual(payload["device_id"], "pilot-bedroom-display")
+        self.assertEqual(payload["response_text"], "The bedroom is 22 degrees.")
+        self.assertTrue(payload["conversation_id"])
+
+        moved = self.client.post(
+            "/v1/devices/pilot-bedroom-display/assistant",
+            headers=self.headers,
+            json={
+                "text": "What is happening in the office?",
+                "room_id": "office",
+            },
+        )
+        self.assertEqual(moved.status_code, 403)
+
+    def test_media_control_uses_the_configured_room_player(self) -> None:
+        with patch.object(
+            Integrations,
+            "music_assistant",
+            new=AsyncMock(return_value={"ok": True}),
+        ) as music_assistant:
+            response = self.client.post(
+                "/v1/devices/pilot-bedroom-display/media",
+                headers=self.headers,
+                json={"action": "pause"},
+            )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["player"]["id"], "bedroom-music")
+        music_assistant.assert_awaited_once_with(
+            "players/cmd/pause",
+            {"player_id": "bedroom-player"},
+        )
+
+    def test_media_search_uses_device_credentials(self) -> None:
+        with patch.object(
+            Integrations,
+            "music_assistant",
+            new=AsyncMock(return_value={"tracks": []}),
+        ) as music_assistant:
+            response = self.client.post(
+                "/v1/devices/pilot-bedroom-display/media/search",
+                headers=self.headers,
+                json={"query": "Massive Attack", "limit": 8},
+            )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json(), {"tracks": []})
+        music_assistant.assert_awaited_once_with(
+            "music/search",
+            {
+                "search_query": "Massive Attack",
+                "limit": 8,
+                "library_only": False,
+            },
         )
 
     def test_surface_is_authenticated_and_bounded(self) -> None:

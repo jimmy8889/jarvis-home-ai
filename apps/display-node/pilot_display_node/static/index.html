@@ -132,10 +132,22 @@
           <div class="page-title">
             <div>
               <span class="eyebrow">Music Assistant</span>
-              <h1>Now playing</h1>
+              <h1>Music control</h1>
             </div>
             <span id="music-state" class="data-state">Waiting</span>
           </div>
+          <div class="music-toolbar">
+            <label class="music-search">
+              <span>Search TIDAL and library</span>
+              <input id="music-query" type="search" placeholder="Artist, album or track" autocomplete="off">
+            </label>
+            <button id="music-search-button" type="button">Search</button>
+            <label class="music-room">
+              <span>Output</span>
+              <select id="music-output" aria-label="Music output"></select>
+            </label>
+          </div>
+          <div id="music-message" class="music-message" role="status"></div>
           <div id="now-playing-list" class="now-playing-list">
             <article class="empty">
               <span class="music-note">♪</span>
@@ -143,6 +155,7 @@
               <small>Active music across the Pilot network will appear here.</small>
             </article>
           </div>
+          <div id="music-results" class="music-results" aria-label="Music search results"></div>
         </section>
 
         <section class="page" data-page="system" aria-label="System">

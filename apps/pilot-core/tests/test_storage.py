@@ -61,6 +61,18 @@ class StorageTests(unittest.TestCase):
         self.assertFalse(self.store.authenticate_device("office-n150", "wrong"))
         self.assertNotIn("token", self.store.list_devices()[0])
 
+    def test_device_capabilities_can_change_without_rotating_token(self) -> None:
+        updated = self.store.update_device_capabilities(
+            "office-n150", ["audio", "media-control", "voice", "audio"]
+        )
+
+        self.assertEqual(
+            updated["capabilities"], ["audio", "media-control", "voice"]
+        )
+        self.assertTrue(self.store.authenticate_device("office-n150", self.token))
+        with self.assertRaises(KeyError):
+            self.store.update_device_capabilities("missing", ["display"])
+
     def test_bootstrap_grant_is_bound_and_single_use(self) -> None:
         grant = self.store.create_bootstrap_grant(
             "new-office", "office", "New Office", ["voice", "audio"], 600

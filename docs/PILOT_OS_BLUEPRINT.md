@@ -1,6 +1,6 @@
 # Pilot OS Blueprint
 
-Version 2.4
+Version 3.2
 
 Last updated: 2026-07-20
 
@@ -854,3 +854,7 @@ deployed integration, hardware boundary, or milestone status changes.
 - **3.1** — Accepted the native Home Assistant Denon AVR entity
   `media_player.media_room_3` and made it the production power/input control
   endpoint. The direct port-8080 adapter remains an unused rollback path.
+- **3.2** — Added Pilot Core 0.19 device-authenticated assistant and media
+  APIs, a Home Assistant conversation-agent bridge, interactive Raspberry Pi
+  Music Assistant controls, and the first native Pilot iOS application for
+  room state, playback, search, and contextual conversation.

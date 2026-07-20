@@ -51,6 +51,8 @@ The touch surface provides:
   Battery-to-Home discharge and reversed charging/export paths explicit
 - now-playing title, artist, player, state, and volume for every active Music
   Assistant endpoint
+- touch controls for room selection, play, pause, stop, and volume
+- Music Assistant search with direct playback to the selected room
 - Pilot Core connection and registry state
 - Room and player counts
 - Node address, CPU temperature, and free storage
@@ -58,9 +60,11 @@ The touch surface provides:
 - tap and horizontal-swipe navigation
 - a hidden mouse pointer in both the page styling and kiosk configuration
 
-The Pi is enrolled provisionally in the Office room with only the `display`
-capability. This provides read access to the bounded surface and cannot send
-Home Assistant or media-control commands.
+The Pi is enrolled in the Office room with `display` and `media-control`
+capabilities. Its browser calls only the loopback display service. That service
+holds the room-scoped device credential and proxies bounded media requests to
+Pilot Core; neither the browser nor the Pi receives Home Assistant, Music
+Assistant, or Pilot administrator credentials.
 
 ## Storage controls
 

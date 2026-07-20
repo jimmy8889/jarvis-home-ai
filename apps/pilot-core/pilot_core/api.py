@@ -63,6 +63,10 @@ class BootstrapGrantRequest(DeviceRegistration):
     expires_in_seconds: int = Field(default=600, ge=60, le=3600)
 
 
+class DeviceCapabilitiesUpdate(BaseModel):
+    capabilities: list[str] = Field(max_length=100)
+
+
 class EventInput(BaseModel):
     room_id: str
     type: str = Field(min_length=1, max_length=100)
@@ -89,6 +93,13 @@ class AssistantRequest(BaseModel):
     device_id: str | None = None
     expires_in_seconds: int = Field(default=30, ge=1, le=300)
     retention_seconds: int | None = Field(default=None, ge=60, le=86_400)
+
+
+class DeviceAssistantRequest(BaseModel):
+    text: str = Field(min_length=1, max_length=4000)
+    language: str = Field(default="en", min_length=2, max_length=35)
+    conversation_id: str | None = None
+    room_id: str | None = Field(default=None, min_length=1, max_length=128)
 
 
 class MediaSearch(BaseModel):
@@ -1424,6 +1435,24 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
             device["connected"] = device["id"] in connected
         return {"devices": result}
 
+    @app.patch(
+        "/v1/devices/{device_id}/capabilities",
+        dependencies=[Depends(require_admin)],
+    )
+    async def update_device_capabilities(
+        device_id: str,
+        request: DeviceCapabilitiesUpdate,
+        response: Response,
+    ) -> dict[str, Any]:
+        response.headers["Cache-Control"] = "no-store"
+        try:
+            device = database.update_device_capabilities(
+                device_id, request.capabilities
+            )
+        except KeyError:
+            raise HTTPException(status_code=404, detail="device not found") from None
+        return {"device": device}
+
     @app.post(
         "/v1/bootstrap-grants",
         dependencies=[Depends(require_admin)],
@@ -1557,6 +1586,143 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
             "energy": energy,
             "now_playing": now_playing,
         }
+
+    @app.post("/v1/devices/{device_id}/assistant")
+    async def device_text_assistant(
+        device_id: str,
+        request: DeviceAssistantRequest,
+        response: Response,
+        x_pilot_device_id: str = Header(),
+        authorization: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        device = authenticated_device(device_id, x_pilot_device_id, authorization)
+        if "voice" not in device["capabilities"]:
+            raise HTTPException(
+                status_code=403, detail="device does not have voice capability"
+            )
+        room_id = device["room_id"]
+        if request.room_id and request.room_id != room_id:
+            if "portable-client" not in device["capabilities"]:
+                raise HTTPException(
+                    status_code=403,
+                    detail="fixed-room device cannot change conversation room",
+                )
+            if request.room_id not in registry.rooms:
+                raise HTTPException(status_code=404, detail="room not found")
+            room_id = request.room_id
+        try:
+            result = await conversation_engine.respond(
+                request.text,
+                room_id,
+                language=request.language,
+                session_id=request.conversation_id,
+                device_id=device_id,
+            )
+        except AssistantUnavailable as error:
+            raise HTTPException(status_code=503, detail=str(error)) from None
+        response.headers["Cache-Control"] = "no-store"
+        return {
+            "device_id": device_id,
+            "room_id": room_id,
+            **result.as_dict(),
+        }
+
+    @app.get("/v1/devices/{device_id}/media")
+    async def device_media_state(
+        device_id: str,
+        response: Response,
+        x_pilot_device_id: str = Header(),
+        authorization: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        device = authenticated_device(device_id, x_pilot_device_id, authorization)
+        if "media-control" not in device["capabilities"]:
+            raise HTTPException(
+                status_code=403, detail="device does not have media-control capability"
+            )
+        response.headers["Cache-Control"] = "no-store"
+        return {
+            "device_id": device_id,
+            "room_id": device["room_id"],
+            "rooms": registry.list_rooms(),
+            "media": await media_states.snapshot(),
+        }
+
+    @app.post("/v1/devices/{device_id}/media")
+    async def device_media_control(
+        device_id: str,
+        request: RoomMediaCommand,
+        response: Response,
+        x_pilot_device_id: str = Header(),
+        authorization: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        device = authenticated_device(device_id, x_pilot_device_id, authorization)
+        if "media-control" not in device["capabilities"]:
+            raise HTTPException(
+                status_code=403, detail="device does not have media-control capability"
+            )
+        room_id = device["room_id"]
+        if request.player_id:
+            selected = registry.players.get(request.player_id)
+            if selected is None:
+                raise HTTPException(status_code=404, detail="player not found")
+            room_id = selected.room_id
+        try:
+            player = orchestrator.music_player(room_id, request.player_id)
+            target_player = (
+                orchestrator.music_player(
+                    request.target_room_id, request.target_player_id
+                )
+                if request.action == "transfer" and request.target_room_id
+                else None
+            )
+        except ResolutionError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from None
+        result = await run_media_command(
+            player.id,
+            request.action,
+            request.volume,
+            request.media_uri,
+            target_player.id if target_player else None,
+            request.source,
+        )
+        response.headers["Cache-Control"] = "no-store"
+        return {
+            "device_id": device_id,
+            "room_id": room_id,
+            "player": player.as_dict(),
+            "target_room_id": request.target_room_id,
+            "target_player": target_player.as_dict() if target_player else None,
+            "result": result,
+        }
+
+    @app.post("/v1/devices/{device_id}/media/search")
+    async def device_media_search(
+        device_id: str,
+        request: MediaSearch,
+        response: Response,
+        x_pilot_device_id: str = Header(),
+        authorization: str | None = Header(default=None),
+    ) -> Any:
+        device = authenticated_device(device_id, x_pilot_device_id, authorization)
+        if "media-control" not in device["capabilities"]:
+            raise HTTPException(
+                status_code=403, detail="device does not have media-control capability"
+            )
+        args: dict[str, Any] = {
+            "search_query": request.query,
+            "limit": request.limit,
+            "library_only": request.library_only,
+        }
+        if request.media_types:
+            args["media_types"] = request.media_types
+        try:
+            result = await integrations.music_assistant("music/search", args)
+        except IntegrationUnavailable as error:
+            raise HTTPException(status_code=503, detail=str(error)) from None
+        except IntegrationRequestFailed as error:
+            raise HTTPException(status_code=502, detail=str(error)) from None
+        response.headers["Cache-Control"] = "no-store"
+        return result
 
     @app.post("/v1/devices/{device_id}/voice")
     async def display_node_voice(

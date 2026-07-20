@@ -1,0 +1,10 @@
+"""Constants for the Pilot Core Conversation integration."""
+
+DOMAIN = "pilot_conversation"
+CONF_CORE_URL = "core_url"
+CONF_DEVICE_ID = "device_id"
+CONF_DEVICE_TOKEN = "device_token"
+CONF_ROOM_ID = "room_id"
+DEFAULT_CORE_URL = "http://10.0.1.64:8770"
+DEFAULT_DEVICE_ID = "pilot-ha-office"
+DEFAULT_ROOM_ID = "office"

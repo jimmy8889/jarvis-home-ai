@@ -2,6 +2,21 @@
 
 ## 2026-07-20
 
+- Added Pilot Core 0.19's device-authenticated text-assistant, media-state,
+  Music Assistant search, and media-control APIs. Fixed room devices remain
+  room-bound while explicitly enrolled portable clients may select a room.
+- Added an administrator-only capability update that preserves an existing
+  device credential, allowing deployed nodes to gain narrowly scoped features
+  without an unnecessary token rotation.
+- Added the `Pilot Core Conversation` Home Assistant custom integration so an
+  Assist pipeline can retain local STT/TTS while routing recognized text,
+  contextual reasoning, and bounded tools through Pilot Core.
+- Added Pilot Linux Display 0.4 with touch-first Music Assistant room
+  selection, search, playback, transport, and volume controls. The browser
+  remains loopback-only and never receives a central service credential.
+- Added the first native Pilot iOS SwiftUI application with Keychain-backed
+  device authentication, room and now-playing state, Music Assistant search
+  and playback, transport/volume controls, and contextual Pilot chat.
 - Added and deployed Pilot Core 0.16 contextual reasoning through the local
   Ollama server at `10.0.1.20:11434/v1`, using the installed tool-capable
   `qwen3.5:9b` model. Home Assistant deterministic intents remain first; only

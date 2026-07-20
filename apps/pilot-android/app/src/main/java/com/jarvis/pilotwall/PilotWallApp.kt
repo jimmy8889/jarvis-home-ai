@@ -40,6 +40,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AssistChip
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -53,6 +54,7 @@ import androidx.compose.material3.NavigationRailItem
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -108,6 +110,24 @@ fun PilotWallApp(state: PilotUiState, model: PilotViewModel, night: Boolean) {
     }
     BurnInGuard(enabled = night) {
         PilotShell(state, model)
+    }
+    state.pendingHomeAction?.let { action ->
+        AlertDialog(
+            onDismissRequest = model::cancelHomeAction,
+            title = { Text("Confirm home action") },
+            text = {
+                Text(
+                    action.description
+                        ?: "Pilot will perform this high-risk action once. It expires automatically.",
+                )
+            },
+            confirmButton = {
+                Button(onClick = model::confirmHomeAction) { Text("Confirm") }
+            },
+            dismissButton = {
+                TextButton(onClick = model::cancelHomeAction) { Text("Cancel") }
+            },
+        )
     }
 }
 
@@ -289,6 +309,9 @@ private fun HomeScreen(state: PilotUiState, model: PilotViewModel) {
             }
         }
         item {
+            HomeControlsCard(state, model)
+        }
+        item {
             Text("Active now", style = MaterialTheme.typography.headlineMedium)
             Spacer(Modifier.height(10.dp))
             if (playing.isEmpty()) {
@@ -299,6 +322,143 @@ private fun HomeScreen(state: PilotUiState, model: PilotViewModel) {
                     Spacer(Modifier.height(10.dp))
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun HomeControlsCard(state: PilotUiState, model: PilotViewModel) {
+    Card(
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        shape = RoundedCornerShape(26.dp),
+    ) {
+        Column(
+            Modifier.fillMaxWidth().padding(22.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        state.home?.roomName ?: state.selectedRoom?.name ?: "Room controls",
+                        style = MaterialTheme.typography.headlineMedium,
+                    )
+                    Text(
+                        "Secure controls through Pilot Core",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                if (state.homeLoading) CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp)
+            }
+            state.homeError?.let {
+                Text(it, color = PilotAmber)
+                OutlinedButton(onClick = { model.refreshHome() }) { Text("Retry") }
+            }
+            val grouped = state.home?.entities.orEmpty().groupBy { it.domain }
+            if (!state.homeLoading && state.homeError == null && grouped.isEmpty()) {
+                Text(
+                    "No mapped controls. Assign Home Assistant devices to this room.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            grouped.toSortedMap().forEach { (domain, entities) ->
+                Text(
+                    domain.replace('_', ' ').uppercase(),
+                    color = PilotCyan,
+                    style = MaterialTheme.typography.labelLarge,
+                )
+                entities.sortedBy { it.name }.forEach { entity ->
+                    HomeEntityControl(
+                        entity = entity,
+                        busy = state.activeHomeEntityId == entity.entityId,
+                        action = model::homeAction,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun HomeEntityControl(
+    entity: HomeEntity,
+    busy: Boolean,
+    action: (HomeEntity, String, Double?) -> Unit,
+) {
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .background(
+                MaterialTheme.colorScheme.onSurface.copy(alpha = .045f),
+                RoundedCornerShape(16.dp),
+            )
+            .padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(entity.name, fontWeight = FontWeight.SemiBold)
+                Text(
+                    if (entity.stale) "Stale" else entity.state.replace('_', ' '),
+                    color = if (entity.stale || entity.unavailable) {
+                        PilotAmber
+                    } else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            if (busy) {
+                CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp)
+            } else if ("turn_on" in entity.actions) {
+                Switch(
+                    checked = entity.isOn,
+                    onCheckedChange = {
+                        action(entity, if (it) "turn_on" else "turn_off", null)
+                    },
+                    enabled = !entity.stale && !entity.unavailable,
+                )
+            } else {
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    if ("activate" in entity.actions) {
+                        AssistChip(
+                            onClick = { action(entity, "activate", null) },
+                            label = { Text("Activate") },
+                        )
+                    }
+                    if ("open" in entity.actions) {
+                        AssistChip(
+                            onClick = { action(entity, "open", null) },
+                            label = { Text("Open") },
+                        )
+                        AssistChip(
+                            onClick = { action(entity, "close", null) },
+                            label = { Text("Close") },
+                        )
+                    }
+                    if ("lock" in entity.actions) {
+                        val next = if (entity.state == "locked") "unlock" else "lock"
+                        AssistChip(
+                            onClick = { action(entity, next, null) },
+                            label = { Text(next.replaceFirstChar(Char::uppercase)) },
+                        )
+                    }
+                    if ("arm_home" in entity.actions) {
+                        val next = if (entity.state == "disarmed") "arm_home" else "disarm"
+                        AssistChip(
+                            onClick = { action(entity, next, null) },
+                            label = { Text(next.replace('_', ' ').replaceFirstChar(Char::uppercase)) },
+                        )
+                    }
+                }
+            }
+        }
+        entity.brightnessPercent?.takeIf { "set_brightness" in entity.actions }?.let { brightness ->
+            var preview by remember(entity.entityId, brightness) { mutableStateOf(brightness) }
+            Slider(
+                value = preview,
+                onValueChange = { preview = it },
+                onValueChangeFinished = { action(entity, "set_brightness", preview.toDouble()) },
+                valueRange = 0f..100f,
+                steps = 19,
+                enabled = !busy && !entity.stale && !entity.unavailable,
+            )
         }
     }
 }

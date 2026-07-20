@@ -21,6 +21,11 @@ final class PilotModel {
     var isSendingMessage = false
     var activeMediaAction: String?
     var energy = EnergySnapshot.awaitingBackend
+    var home: HomeProjection?
+    var pendingHomeAction: HomeAction?
+    var isLoadingHome = false
+    var activeHomeEntityID: String?
+    var homeError: String?
 
     init(loadStoredSettings: Bool = true) {
         if loadStoredSettings {
@@ -89,6 +94,8 @@ final class PilotModel {
     func selectRoom(_ roomID: String) {
         selectedRoomID = roomID
         UserDefaults.standard.set(roomID, forKey: "pilot.roomID")
+        home = nil
+        Task { await refreshHome() }
     }
 
     func api() throws -> PilotAPI {
@@ -128,10 +135,68 @@ final class PilotModel {
             }
             lastSuccessfulRefresh = .now
             connectionState = .connected
+            await refreshHome(silent: true)
             return true
         } catch {
             connectionState = .offline(Self.friendlyMessage(for: error))
             return false
+        }
+    }
+
+    func refreshHome(silent: Bool = false) async {
+        guard isConfigured else { return }
+        if !silent { isLoadingHome = true }
+        defer { isLoadingHome = false }
+        do {
+            home = try await api().home(roomID: selectedRoomID)
+            homeError = nil
+        } catch {
+            homeError = Self.friendlyMessage(for: error)
+        }
+    }
+
+    func control(
+        _ entity: HomeEntity,
+        action: String,
+        value: Double? = nil
+    ) async {
+        activeHomeEntityID = entity.id
+        defer { activeHomeEntityID = nil }
+        do {
+            let parameters: [String: JSONValue] = value.map {
+                ["value": .number($0)]
+            } ?? [:]
+            let response = try await api().homeAction(
+                HomeActionRequest(
+                    roomID: selectedRoomID,
+                    entityID: entity.entityID,
+                    action: action,
+                    parameters: parameters
+                )
+            )
+            if response.action.confirmationRequired && response.action.status == "pending" {
+                pendingHomeAction = response.action
+            } else {
+                pendingHomeAction = nil
+                await refreshHome(silent: true)
+            }
+            homeError = nil
+        } catch {
+            homeError = Self.friendlyMessage(for: error)
+        }
+    }
+
+    func confirmPendingHomeAction() async {
+        guard let pendingHomeAction else { return }
+        activeHomeEntityID = pendingHomeAction.entityID
+        defer { activeHomeEntityID = nil }
+        do {
+            _ = try await api().confirmHomeAction(pendingHomeAction.id)
+            self.pendingHomeAction = nil
+            await refreshHome(silent: true)
+            homeError = nil
+        } catch {
+            homeError = Self.friendlyMessage(for: error)
         }
     }
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 import tomllib
+from typing import Any
 
 
 @dataclass(frozen=True)
@@ -77,8 +78,9 @@ class Room:
     default_device_id: str = ""
     agent_url: str = ""
     assist_satellite_entity_id: str = ""
+    home_area_ids: tuple[str, ...] = ()
 
-    def as_dict(self) -> dict[str, str]:
+    def as_dict(self) -> dict[str, Any]:
         return {
             "id": self.id,
             "name": self.name,
@@ -87,6 +89,7 @@ class Room:
             "default_device_id": self.default_device_id,
             "agent_url": self.agent_url,
             "assist_satellite_entity_id": self.assist_satellite_entity_id,
+            "home_area_ids": list(self.home_area_ids or (self.id,)),
         }
 
 
@@ -134,6 +137,12 @@ def _require_nonempty(value: object, field: str) -> str:
 
 def _parse_room(value: dict[str, object]) -> Room:
     room_id = _require_nonempty(value.get("id"), "room.id")
+    area_values = value.get("home_area_ids", [room_id])
+    if not isinstance(area_values, list) or not all(
+        isinstance(item, str) and item.strip() for item in area_values
+    ):
+        raise ValueError(f"room[{room_id}].home_area_ids must be an array of strings")
+    home_area_ids = tuple(dict.fromkeys(item.strip() for item in area_values))
     return Room(
         id=room_id,
         name=_require_nonempty(value.get("name"), f"room[{room_id}].name"),
@@ -150,6 +159,7 @@ def _parse_room(value: dict[str, object]) -> Room:
         assist_satellite_entity_id=str(
             value.get("assist_satellite_entity_id", "")
         ).strip(),
+        home_area_ids=home_area_ids,
     )
 
 

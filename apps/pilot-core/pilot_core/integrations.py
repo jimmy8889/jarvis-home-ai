@@ -326,6 +326,71 @@ class Integrations:
                 f"Home Assistant media command failed: {error}"
             ) from error
 
+    async def home_assistant_typed_action(
+        self,
+        domain: str,
+        service: str,
+        entity_id: str,
+        service_data: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Execute one entity-scoped service from Pilot's fixed allowlist."""
+
+        allowed = {
+            "light": {"turn_on", "turn_off", "toggle"},
+            "switch": {"turn_on", "turn_off", "toggle"},
+            "input_boolean": {"turn_on", "turn_off", "toggle"},
+            "fan": {"turn_on", "turn_off", "toggle", "set_percentage"},
+            "climate": {"turn_on", "turn_off", "set_temperature", "set_hvac_mode"},
+            "cover": {"open_cover", "close_cover", "stop_cover", "set_cover_position"},
+            "scene": {"turn_on"},
+            "lock": {"lock", "unlock"},
+            "alarm_control_panel": {
+                "alarm_arm_home",
+                "alarm_arm_away",
+                "alarm_disarm",
+            },
+        }
+        if service not in allowed.get(domain, set()):
+            raise IntegrationRequestFailed("Home Assistant typed action is not allowed")
+        if not _ENTITY_ID.fullmatch(entity_id) or not entity_id.startswith(f"{domain}."):
+            raise IntegrationRequestFailed("Home Assistant action entity is invalid")
+        permitted_keys = {
+            "brightness_pct",
+            "color_temp_kelvin",
+            "percentage",
+            "temperature",
+            "hvac_mode",
+            "position",
+        }
+        if set(service_data) - permitted_keys:
+            raise IntegrationRequestFailed("Home Assistant action data is invalid")
+        if not self.settings.home_assistant_url:
+            raise IntegrationUnavailable("Home Assistant URL is not configured")
+        token = read_secret(self.settings.home_assistant_token_env)
+        if not token:
+            raise IntegrationUnavailable("Home Assistant token is not configured")
+        payload = {"entity_id": entity_id, **service_data}
+        try:
+            async with httpx.AsyncClient(
+                timeout=15, transport=self.transport, follow_redirects=False
+            ) as client:
+                response = await client.post(
+                    f"{self.settings.home_assistant_url}/api/services/{domain}/{service}",
+                    headers={"Authorization": f"Bearer {token}"},
+                    json=payload,
+                )
+                response.raise_for_status()
+                result = response.json()
+                if isinstance(result, list):
+                    return {"changed_state_count": min(len(result), 10_000)}
+                if isinstance(result, dict):
+                    return {"accepted": True}
+                raise ValueError("service response is not an object or array")
+        except (httpx.HTTPError, ValueError) as error:
+            raise IntegrationRequestFailed(
+                f"Home Assistant typed action failed: {error}"
+            ) from error
+
     async def denon_avr_command(
         self,
         control_endpoint: str,

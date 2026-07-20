@@ -56,6 +56,38 @@ class PilotCoreClient(
         )
     }
 
+    suspend fun home(roomId: String): HomeProjection {
+        val encoded = java.net.URLEncoder.encode(roomId, Charsets.UTF_8.name())
+        return PilotJson.home(request("v1/devices/${config.deviceId}/home?room_id=$encoded"))
+    }
+
+    suspend fun homeAction(
+        roomId: String,
+        entityId: String,
+        action: String,
+        value: Double? = null,
+    ): HomeAction {
+        val parameters = JSONObject()
+        value?.let { parameters.put("value", it) }
+        val body = JSONObject()
+            .put("room_id", roomId)
+            .put("entity_id", entityId)
+            .put("action", action)
+            .put("parameters", parameters)
+        return PilotJson.homeAction(
+            request("v1/devices/${config.deviceId}/home/actions", "POST", body),
+        )
+    }
+
+    suspend fun confirmHomeAction(actionId: String): HomeAction =
+        PilotJson.homeAction(
+            request(
+                "v1/devices/${config.deviceId}/home/actions/$actionId/confirm",
+                "POST",
+                JSONObject(),
+            ),
+        )
+
     suspend fun testConnection(): String {
         val result = request("v1/devices/${config.deviceId}/media")
         return result.optString("device_id", config.deviceId)

@@ -57,6 +57,35 @@ final class PilotTests: XCTestCase {
         XCTAssertNotNil(EnergySnapshot.awaitingBackend.detail)
     }
 
+    func testHomeProjectionDecodesBoundedControls() throws {
+        let data = Data(
+            """
+            {
+              "device_id": "pilot-ios-james",
+              "selected_room_id": "office",
+              "room": {
+                "id": "office", "name": "Office",
+                "home_area_ids": ["office", "james_office"]
+              },
+              "entity_count": 1,
+              "entities": [{
+                "entity_id": "light.office_lamp",
+                "domain": "light", "name": "Office lamp", "state": "on",
+                "attributes": {"brightness": 128},
+                "area_id": "james_office", "availability": "available",
+                "unavailable": false, "stale": false,
+                "observed_at": "2026-07-21T00:00:00Z",
+                "actions": ["turn_on", "turn_off", "set_brightness"]
+              }]
+            }
+            """.utf8
+        )
+        let projection = try JSONDecoder().decode(HomeProjection.self, from: data)
+        XCTAssertEqual(projection.room.name, "Office")
+        XCTAssertTrue(projection.entities[0].isOn)
+        XCTAssertEqual(try XCTUnwrap(projection.entities[0].brightnessPercent), 50.2, accuracy: 0.2)
+    }
+
     @MainActor
     func testPreviewModelHasAdaptiveProductContent() {
         let model = PilotModel.preview()

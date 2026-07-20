@@ -202,6 +202,7 @@ private struct HomeView: View {
 
                     EnergyOverviewCard(snapshot: model.energy)
                     HomeQuickActions()
+                    HomeControlsPanel()
                 }
                 .frame(maxWidth: 1_100)
                 .padding(horizontalSizeClass == .regular ? 28 : 18)
@@ -215,6 +216,20 @@ private struct HomeView: View {
             ToolbarItem(placement: .topBarTrailing) {
                 ConnectionPill(compact: true)
             }
+        }
+        .alert(
+            model.pendingHomeAction?.description ?? "Confirm home action",
+            isPresented: Binding(
+                get: { model.pendingHomeAction != nil },
+                set: { if !$0 { model.pendingHomeAction = nil } }
+            )
+        ) {
+            Button("Cancel", role: .cancel) { model.pendingHomeAction = nil }
+            Button("Confirm", role: .destructive) {
+                Task { await model.confirmPendingHomeAction() }
+            }
+        } message: {
+            Text("Pilot will perform this high-risk action once. The request expires automatically.")
         }
     }
 }
@@ -480,6 +495,163 @@ private struct HomeQuickActions: View {
                 }
             }
         }
+    }
+}
+
+private struct HomeControlsPanel: View {
+    @Environment(PilotModel.self) private var model
+
+    private var grouped: [(String, [HomeEntity])] {
+        Dictionary(grouping: model.home?.entities ?? [], by: \.domain)
+            .map { ($0.key, $0.value.sorted { $0.name < $1.name }) }
+            .sorted { $0.0 < $1.0 }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            SectionTitle(
+                eyebrow: "ROOM CONTROL",
+                title: model.home?.room.name ?? model.selectedRoom?.name ?? "Selected room",
+                trailing: model.home.map { "\($0.entityCount) devices" }
+            )
+            if model.isLoadingHome && model.home == nil {
+                ProgressView("Loading secure room controls…")
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else if let error = model.homeError {
+                Label(error, systemImage: "exclamationmark.triangle.fill")
+                    .font(.subheadline)
+                    .foregroundStyle(PilotTheme.amber)
+            } else if grouped.isEmpty {
+                ContentUnavailableView(
+                    "No mapped controls",
+                    systemImage: "house.lodge",
+                    description: Text("Assign Home Assistant devices to this room to make them available here.")
+                )
+            } else {
+                ForEach(grouped, id: \.0) { domain, entities in
+                    VStack(alignment: .leading, spacing: 10) {
+                        Label(domain.replacingOccurrences(of: "_", with: " ").capitalized,
+                              systemImage: symbol(for: domain))
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(.secondary)
+                        ForEach(entities) { entity in
+                            HomeEntityRow(entity: entity)
+                        }
+                    }
+                }
+            }
+        }
+        .pilotCard()
+        .task(id: model.selectedRoomID) {
+            await model.refreshHome()
+        }
+    }
+
+    private func symbol(for domain: String) -> String {
+        switch domain {
+        case "light": "lightbulb.fill"
+        case "switch", "input_boolean": "switch.2"
+        case "climate": "thermometer.medium"
+        case "fan": "fan.fill"
+        case "cover": "window.shade.open"
+        case "scene": "sparkles"
+        case "lock": "lock.fill"
+        case "alarm_control_panel": "shield.fill"
+        default: "square.grid.2x2.fill"
+        }
+    }
+}
+
+private struct HomeEntityRow: View {
+    @Environment(PilotModel.self) private var model
+    let entity: HomeEntity
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(entity.name)
+                        .font(.headline)
+                    Text(entity.stale ? "Stale" : entity.state.replacingOccurrences(of: "_", with: " ").capitalized)
+                        .font(.caption)
+                        .foregroundStyle(entity.stale || entity.unavailable ? PilotTheme.amber : .secondary)
+                }
+                Spacer()
+                if model.activeHomeEntityID == entity.id {
+                    ProgressView()
+                } else if entity.actions.contains("turn_on") {
+                    Toggle(
+                        "Power",
+                        isOn: Binding(
+                            get: { entity.isOn },
+                            set: { value in
+                                Task { await model.control(entity, action: value ? "turn_on" : "turn_off") }
+                            }
+                        )
+                    )
+                    .labelsHidden()
+                    .disabled(entity.stale || entity.unavailable)
+                } else {
+                    actionButtons
+                }
+            }
+            if entity.actions.contains("set_brightness"),
+               let brightness = entity.brightnessPercent {
+                HStack {
+                    Image(systemName: "sun.min")
+                    Slider(
+                        value: Binding(
+                            get: { brightness },
+                            set: { value in
+                                Task { await model.control(entity, action: "set_brightness", value: value) }
+                            }
+                        ),
+                        in: 0...100,
+                        step: 5
+                    )
+                    Image(systemName: "sun.max.fill")
+                }
+                .foregroundStyle(.secondary)
+                .disabled(model.activeHomeEntityID == entity.id)
+            }
+        }
+        .padding(14)
+        .background(Color.white.opacity(0.045), in: RoundedRectangle(cornerRadius: 16))
+    }
+
+    @ViewBuilder
+    private var actionButtons: some View {
+        HStack(spacing: 8) {
+            if entity.actions.contains("activate") {
+                Button("Activate") { Task { await model.control(entity, action: "activate") } }
+            }
+            if entity.actions.contains("open") {
+                Button("Open") { Task { await model.control(entity, action: "open") } }
+                Button("Close") { Task { await model.control(entity, action: "close") } }
+            }
+            if entity.actions.contains("lock") {
+                Button(entity.state == "locked" ? "Unlock" : "Lock") {
+                    Task {
+                        await model.control(
+                            entity,
+                            action: entity.state == "locked" ? "unlock" : "lock"
+                        )
+                    }
+                }
+            }
+            if entity.actions.contains("arm_home") {
+                Button(entity.state == "disarmed" ? "Arm home" : "Disarm") {
+                    Task {
+                        await model.control(
+                            entity,
+                            action: entity.state == "disarmed" ? "arm_home" : "disarm"
+                        )
+                    }
+                }
+            }
+        }
+        .buttonStyle(.bordered)
+        .disabled(entity.stale || entity.unavailable)
     }
 }
 

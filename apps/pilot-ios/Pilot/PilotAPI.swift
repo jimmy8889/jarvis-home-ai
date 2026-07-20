@@ -44,6 +44,43 @@ struct PilotAPI: Sendable {
         return try JSONDecoder().decode(DeviceMediaEnvelope.self, from: data)
     }
 
+    func home(roomID: String) async throws -> HomeProjection {
+        var components = URLComponents(
+            url: coreURL.appending(path: "v1/devices/\(deviceID)/home"),
+            resolvingAgainstBaseURL: false
+        )
+        components?.queryItems = [URLQueryItem(name: "room_id", value: roomID)]
+        guard let url = components?.url else { throw PilotAPIError.invalidURL }
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.timeoutInterval = 30
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue(deviceID, forHTTPHeaderField: "X-Pilot-Device-ID")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        let (data, response) = try await URLSession.shared.data(for: request)
+        try Self.validate(response, data: data)
+        return try JSONDecoder().decode(HomeProjection.self, from: data)
+    }
+
+    func homeAction(_ command: HomeActionRequest) async throws -> HomeActionEnvelope {
+        let body = try JSONEncoder().encode(command)
+        let data = try await request(
+            path: "v1/devices/\(deviceID)/home/actions",
+            method: "POST",
+            body: body
+        )
+        return try JSONDecoder().decode(HomeActionEnvelope.self, from: data)
+    }
+
+    func confirmHomeAction(_ actionID: String) async throws -> HomeActionEnvelope {
+        let data = try await request(
+            path: "v1/devices/\(deviceID)/home/actions/\(actionID)/confirm",
+            method: "POST",
+            body: Data()
+        )
+        return try JSONDecoder().decode(HomeActionEnvelope.self, from: data)
+    }
+
     func send(_ command: MediaCommand) async throws {
         let body = try JSONEncoder().encode(command)
         _ = try await request(
@@ -141,6 +178,23 @@ struct PilotAPI: Sendable {
         }
         visit(object)
         return Array(output.prefix(40))
+    }
+
+    private static func validate(_ response: URLResponse, data: Data) throws {
+        guard let http = response as? HTTPURLResponse else {
+            throw PilotAPIError.invalidResponse
+        }
+        guard (200..<300).contains(http.statusCode) else {
+            let detail = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["detail"]
+            if http.statusCode == 401 || http.statusCode == 403 {
+                throw PilotAPIError.authentication(
+                    detail as? String ?? "This Pilot device credential was rejected."
+                )
+            }
+            throw PilotAPIError.server(
+                detail as? String ?? "Pilot Core returned HTTP \(http.statusCode)."
+            )
+        }
     }
 }
 

@@ -97,10 +97,17 @@ The digital twin requires device-authenticated interfaces for:
 - per-user favourites, camera positions, overlay settings, and tablet layouts;
 - audit history and model-version compatibility.
 
-The first release should support lights, room scenes, climate, occupancy,
-temperature, doors/windows, and media state. Locks, garage doors, alarms, and
-other security-sensitive actions remain read-only until confirmations,
-permissions, and audit history are accepted.
+Pilot Core 0.21 supplies the semantic 2D foundation and typed controls. The
+shared manifest is available at
+`GET /v1/devices/{device_id}/home/model`; room projections and commands use
+the sibling `/home` and `/home/actions` routes. Locks, garage doors and alarms
+use an expiring, one-time confirmation request bound to the initiating device.
+Every requested, approved, rejected and completed action is recorded in the
+append-only audit stream.
+
+The manifest deliberately reports `presentation=semantic-2d`,
+`geometry=null`, and `glb_geometry=false` until an accurate house model is
+provided and calibrated. Clients must never substitute invented geometry.
 
 ## Client implementations
 
@@ -120,12 +127,16 @@ dimming, and large controls. It is not a WebView of Home Assistant.
 ## Ordered delivery
 
 1. Inventory floors, rooms, controllable entities, scenes, and security
-   classifications.
-2. Produce the first optimized GLB model and stable manifest.
-3. Add Pilot Core model, state, action, event, permission, and audit APIs.
-4. Add a simple 2D room-list fallback using the same state/action contracts.
-5. Build the iOS 3D viewer, room selection, live lighting, and basic controls.
-6. Build the Android client from the same contracts and accept wall-tablet
+   classifications. **In progress:** the live catalogue has identified all
+   Home Assistant entities; unassigned entities remain intentionally excluded.
+2. Add Pilot Core model, state, typed-action, permission, confirmation and
+   audit APIs. **Complete in 0.21.**
+3. Add the semantic 2D room interface to iOS and Android using those APIs.
+   **Complete in the 0.21 client source.**
+4. Produce the first accurate optimized GLB model and calibrate stable node,
+   room, camera and interaction-anchor mappings.
+5. Build the iOS 3D viewer, model cache, live lighting and overlays.
+6. Build the Android 3D viewer from the same contracts and accept wall-tablet
    lifecycle behavior.
 7. Add climate, blinds, media, occupancy, environmental, and energy overlays.
 8. Add confirmation-gated security controls and user-specific layouts.

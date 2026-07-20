@@ -293,6 +293,38 @@ class Store:
                 );
                 CREATE INDEX IF NOT EXISTS home_devices_area
                     ON home_devices(area_id);
+                CREATE TABLE IF NOT EXISTS home_action_requests (
+                    id TEXT PRIMARY KEY,
+                    principal_type TEXT NOT NULL,
+                    principal_id TEXT NOT NULL,
+                    room_id TEXT NOT NULL,
+                    entity_id TEXT NOT NULL,
+                    action TEXT NOT NULL,
+                    parameters_json TEXT NOT NULL,
+                    risk TEXT NOT NULL,
+                    confirmation_required INTEGER NOT NULL,
+                    status TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    expires_at TEXT NOT NULL,
+                    confirmed_at TEXT,
+                    executed_at TEXT,
+                    result_json TEXT
+                );
+                CREATE INDEX IF NOT EXISTS home_action_requests_principal
+                    ON home_action_requests(principal_id, created_at DESC);
+                CREATE INDEX IF NOT EXISTS home_action_requests_status
+                    ON home_action_requests(status, expires_at);
+                CREATE TABLE IF NOT EXISTS home_action_audit (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    request_id TEXT NOT NULL REFERENCES home_action_requests(id),
+                    event_type TEXT NOT NULL,
+                    actor_type TEXT NOT NULL,
+                    actor_id TEXT NOT NULL,
+                    payload_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS home_action_audit_request
+                    ON home_action_audit(request_id, id);
                 """
             )
             room_columns = {
@@ -1910,6 +1942,257 @@ class Store:
         command = self.get_command(command_id)
         assert command is not None
         return command
+
+    def create_home_action(
+        self,
+        request_id: str,
+        principal_type: str,
+        principal_id: str,
+        room_id: str,
+        entity_id: str,
+        action: str,
+        parameters: dict[str, Any],
+        risk: str,
+        confirmation_required: bool,
+        ttl_seconds: int,
+    ) -> dict[str, Any]:
+        now = datetime.now(UTC)
+        expires_at = now + timedelta(seconds=ttl_seconds)
+        status = "pending_confirmation" if confirmation_required else "approved"
+        with self._lock, self._connection:
+            self._connection.execute(
+                """INSERT INTO home_action_requests
+                   (id, principal_type, principal_id, room_id, entity_id, action,
+                    parameters_json, risk, confirmation_required, status,
+                    created_at, expires_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    request_id,
+                    principal_type,
+                    principal_id,
+                    room_id,
+                    entity_id,
+                    action,
+                    json.dumps(parameters, separators=(",", ":"), sort_keys=True),
+                    risk,
+                    int(confirmation_required),
+                    status,
+                    now.isoformat(),
+                    expires_at.isoformat(),
+                ),
+            )
+            self._append_home_action_audit_locked(
+                request_id,
+                "requested",
+                principal_type,
+                principal_id,
+                {
+                    "entity_id": entity_id,
+                    "action": action,
+                    "risk": risk,
+                    "confirmation_required": confirmation_required,
+                },
+            )
+            if confirmation_required:
+                self._append_home_action_audit_locked(
+                    request_id,
+                    "confirmation_required",
+                    "system",
+                    "pilot-core",
+                    {"expires_at": expires_at.isoformat()},
+                )
+        result = self.get_home_action(request_id)
+        assert result is not None
+        return result
+
+    def get_home_action(self, request_id: str) -> dict[str, Any] | None:
+        with self._lock, self._connection:
+            self._expire_home_actions_locked()
+            row = self._connection.execute(
+                "SELECT * FROM home_action_requests WHERE id = ?",
+                (request_id,),
+            ).fetchone()
+        return self._home_action_view(row) if row else None
+
+    def claim_home_action(
+        self,
+        request_id: str,
+        principal_id: str,
+        *,
+        confirm: bool,
+    ) -> dict[str, Any]:
+        now = _now()
+        expected = "pending_confirmation" if confirm else "approved"
+        with self._lock, self._connection:
+            self._expire_home_actions_locked()
+            row = self._connection.execute(
+                "SELECT * FROM home_action_requests WHERE id = ?",
+                (request_id,),
+            ).fetchone()
+            if row is None or row["principal_id"] != principal_id:
+                raise KeyError(request_id)
+            if row["status"] != expected:
+                raise ValueError(f"home action is {row['status']}")
+            cursor = self._connection.execute(
+                """UPDATE home_action_requests
+                   SET status = 'executing', confirmed_at = CASE
+                         WHEN ? THEN ? ELSE confirmed_at END
+                   WHERE id = ? AND principal_id = ? AND status = ?""",
+                (int(confirm), now, request_id, principal_id, expected),
+            )
+            if cursor.rowcount != 1:
+                raise ValueError("home action could not be claimed")
+            self._append_home_action_audit_locked(
+                request_id,
+                "confirmed" if confirm else "approved",
+                "device",
+                principal_id,
+                {},
+            )
+        result = self.get_home_action(request_id)
+        assert result is not None
+        return result
+
+    def complete_home_action(
+        self,
+        request_id: str,
+        status: str,
+        result: dict[str, Any],
+    ) -> dict[str, Any]:
+        if status not in {"succeeded", "failed", "unverified"}:
+            raise ValueError("invalid home action completion status")
+        now = _now()
+        with self._lock, self._connection:
+            cursor = self._connection.execute(
+                """UPDATE home_action_requests
+                   SET status = ?, result_json = ?, executed_at = ?
+                   WHERE id = ? AND status = 'executing'""",
+                (
+                    status,
+                    json.dumps(result, separators=(",", ":"), sort_keys=True),
+                    now,
+                    request_id,
+                ),
+            )
+            if cursor.rowcount != 1:
+                raise ValueError("home action is not executing")
+            self._append_home_action_audit_locked(
+                request_id,
+                status,
+                "system",
+                "pilot-core",
+                result,
+            )
+        completed = self.get_home_action(request_id)
+        assert completed is not None
+        return completed
+
+    def list_home_actions(
+        self,
+        principal_id: str | None = None,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        selected_limit = min(max(limit, 1), 500)
+        with self._lock, self._connection:
+            self._expire_home_actions_locked()
+            if principal_id:
+                rows = self._connection.execute(
+                    """SELECT * FROM home_action_requests
+                       WHERE principal_id = ?
+                       ORDER BY created_at DESC LIMIT ?""",
+                    (principal_id, selected_limit),
+                ).fetchall()
+            else:
+                rows = self._connection.execute(
+                    """SELECT * FROM home_action_requests
+                       ORDER BY created_at DESC LIMIT ?""",
+                    (selected_limit,),
+                ).fetchall()
+        return [self._home_action_view(row) for row in rows]
+
+    def home_action_audit(self, request_id: str) -> list[dict[str, Any]]:
+        with self._lock:
+            rows = self._connection.execute(
+                """SELECT * FROM home_action_audit
+                   WHERE request_id = ? ORDER BY id""",
+                (request_id,),
+            ).fetchall()
+        return [
+            {
+                "id": int(row["id"]),
+                "request_id": row["request_id"],
+                "event_type": row["event_type"],
+                "actor_type": row["actor_type"],
+                "actor_id": row["actor_id"],
+                "payload": json.loads(row["payload_json"]),
+                "created_at": row["created_at"],
+            }
+            for row in rows
+        ]
+
+    def _expire_home_actions_locked(self) -> None:
+        now = _now()
+        rows = self._connection.execute(
+            """SELECT id FROM home_action_requests
+               WHERE status IN ('pending_confirmation', 'approved')
+                 AND expires_at <= ?""",
+            (now,),
+        ).fetchall()
+        for row in rows:
+            self._connection.execute(
+                """UPDATE home_action_requests SET status = 'expired'
+                   WHERE id = ? AND status IN ('pending_confirmation', 'approved')""",
+                (row["id"],),
+            )
+            self._append_home_action_audit_locked(
+                row["id"],
+                "expired",
+                "system",
+                "pilot-core",
+                {},
+            )
+
+    def _append_home_action_audit_locked(
+        self,
+        request_id: str,
+        event_type: str,
+        actor_type: str,
+        actor_id: str,
+        payload: dict[str, Any],
+    ) -> None:
+        self._connection.execute(
+            """INSERT INTO home_action_audit
+               (request_id, event_type, actor_type, actor_id, payload_json, created_at)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (
+                request_id,
+                event_type,
+                actor_type,
+                actor_id,
+                json.dumps(payload, separators=(",", ":"), sort_keys=True),
+                _now(),
+            ),
+        )
+
+    @staticmethod
+    def _home_action_view(row: sqlite3.Row) -> dict[str, Any]:
+        return {
+            "id": row["id"],
+            "principal_type": row["principal_type"],
+            "principal_id": row["principal_id"],
+            "room_id": row["room_id"],
+            "entity_id": row["entity_id"],
+            "action": row["action"],
+            "parameters": json.loads(row["parameters_json"]),
+            "risk": row["risk"],
+            "confirmation_required": bool(row["confirmation_required"]),
+            "status": row["status"],
+            "created_at": row["created_at"],
+            "expires_at": row["expires_at"],
+            "confirmed_at": row["confirmed_at"],
+            "executed_at": row["executed_at"],
+            "result": json.loads(row["result_json"]) if row["result_json"] else None,
+        }
 
     def get_command(self, command_id: int) -> dict[str, Any] | None:
         with self._lock, self._connection:

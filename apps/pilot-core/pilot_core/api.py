@@ -35,6 +35,12 @@ from .conversation import (
     OpenAICompatibleLLM,
 )
 from .firmware import FirmwareReleaseError, FirmwareReleases, is_newer_version
+from .home_actions import (
+    HomeActionConflict,
+    HomeActionError,
+    HomeActionForbidden,
+    HomeActions,
+)
 from .home_intelligence import HomeIntelligence, HomeResolutionError
 from .integrations import IntegrationRequestFailed, IntegrationUnavailable, Integrations
 from .media_state import MediaStateReader
@@ -101,6 +107,49 @@ class DeviceAssistantRequest(BaseModel):
     language: str = Field(default="en", min_length=2, max_length=35)
     conversation_id: str | None = None
     room_id: str | None = Field(default=None, min_length=1, max_length=128)
+
+
+class DeviceHomeActionRequest(BaseModel):
+    room_id: str | None = Field(default=None, min_length=1, max_length=128)
+    entity_id: str = Field(
+        min_length=3,
+        max_length=255,
+        pattern=r"^[a-z0-9_]+\.[a-z0-9_]+$",
+    )
+    action: Literal[
+        "activate",
+        "arm_away",
+        "arm_home",
+        "close",
+        "disarm",
+        "lock",
+        "open",
+        "set_brightness",
+        "set_hvac_mode",
+        "set_percentage",
+        "set_position",
+        "set_temperature",
+        "stop",
+        "toggle",
+        "turn_off",
+        "turn_on",
+        "unlock",
+    ]
+    parameters: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def bound_parameters(self) -> "DeviceHomeActionRequest":
+        if len(self.parameters) > 4:
+            raise ValueError("too many action parameters")
+        if any(
+            not isinstance(key, str)
+            or len(key) > 64
+            or isinstance(value, (dict, list))
+            or len(str(value)) > 128
+            for key, value in self.parameters.items()
+        ):
+            raise ValueError("action parameters must be bounded scalar values")
+        return self
 
 
 class MediaSearch(BaseModel):
@@ -355,6 +404,12 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
         database,
         integrations,
         settings.integrations,
+        settings.rooms,
+    )
+    home_actions = HomeActions(
+        database,
+        home_intelligence,
+        integrations,
         settings.rooms,
     )
     audio_assets = AudioAssets(
@@ -1167,6 +1222,33 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
         response.headers["Cache-Control"] = "no-store"
         return home_intelligence.energy_snapshot()
 
+    @app.get("/v1/home/actions", dependencies=[Depends(require_admin)])
+    async def home_action_history(
+        response: Response,
+        principal_id: str | None = Query(default=None, max_length=128),
+        limit: int = Query(default=100, ge=1, le=500),
+    ) -> dict[str, Any]:
+        response.headers["Cache-Control"] = "no-store"
+        actions = database.list_home_actions(principal_id=principal_id, limit=limit)
+        return {"actions": actions, "count": len(actions)}
+
+    @app.get(
+        "/v1/home/actions/{action_id}/audit",
+        dependencies=[Depends(require_admin)],
+    )
+    async def home_action_audit(
+        action_id: str,
+        response: Response,
+    ) -> dict[str, Any]:
+        response.headers["Cache-Control"] = "no-store"
+        action = database.get_home_action(action_id)
+        if action is None:
+            raise HTTPException(status_code=404, detail="home action not found")
+        return {
+            "action": action,
+            "audit": database.home_action_audit(action_id),
+        }
+
     async def build_operations_snapshot() -> dict[str, Any]:
         connected = await device_hub.connected_ids()
         rooms_state = {
@@ -1771,6 +1853,135 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
             "room_id": room_id,
             **result.as_dict(),
         }
+
+    @app.get("/v1/devices/{device_id}/home")
+    async def device_home_projection(
+        device_id: str,
+        response: Response,
+        room_id: str | None = Query(default=None, min_length=1, max_length=128),
+        x_pilot_device_id: str = Header(),
+        authorization: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        device = authenticated_device(device_id, x_pilot_device_id, authorization)
+        if not {"home-read", "home-control"}.intersection(device["capabilities"]):
+            raise HTTPException(
+                status_code=403, detail="device does not have home-read capability"
+            )
+        try:
+            selected_room = home_actions.authorize_room(device, room_id)
+            projection = home_actions.room_projection(selected_room)
+        except KeyError:
+            raise HTTPException(status_code=404, detail="room not found") from None
+        except HomeActionForbidden as error:
+            raise HTTPException(status_code=403, detail=str(error)) from None
+        response.headers["Cache-Control"] = "no-store"
+        return {
+            "device_id": device_id,
+            "selected_room_id": selected_room,
+            **projection,
+        }
+
+    @app.get("/v1/devices/{device_id}/home/model")
+    async def device_home_model(
+        device_id: str,
+        response: Response,
+        x_pilot_device_id: str = Header(),
+        authorization: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        device = authenticated_device(device_id, x_pilot_device_id, authorization)
+        if not {"home-read", "home-control"}.intersection(device["capabilities"]):
+            raise HTTPException(
+                status_code=403, detail="device does not have home-read capability"
+            )
+        response.headers["Cache-Control"] = "private, max-age=300"
+        return {
+            "device_id": device_id,
+            "assigned_room_id": device["room_id"],
+            **home_actions.model_manifest(),
+        }
+
+    @app.post("/v1/devices/{device_id}/home/actions")
+    async def device_home_action(
+        device_id: str,
+        request: DeviceHomeActionRequest,
+        response: Response,
+        x_pilot_device_id: str = Header(),
+        authorization: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        device = authenticated_device(device_id, x_pilot_device_id, authorization)
+        if "home-control" not in device["capabilities"]:
+            raise HTTPException(
+                status_code=403, detail="device does not have home-control capability"
+            )
+        try:
+            room_id = home_actions.authorize_room(device, request.room_id)
+            prepared = home_actions.prepare(
+                device,
+                room_id,
+                request.entity_id,
+                request.action,
+                request.parameters,
+            )
+            if prepared["confirmation_required"]:
+                response.status_code = 202
+                result = prepared
+            else:
+                result = await home_actions.execute(
+                    prepared["id"],
+                    device,
+                    confirm=False,
+                )
+        except KeyError:
+            raise HTTPException(
+                status_code=404, detail="room, entity, or action not found"
+            ) from None
+        except HomeActionForbidden as error:
+            raise HTTPException(status_code=403, detail=str(error)) from None
+        except HomeActionConflict as error:
+            raise HTTPException(status_code=409, detail=str(error)) from None
+        except HomeActionError as error:
+            raise HTTPException(status_code=502, detail=str(error)) from None
+        response.headers["Cache-Control"] = "no-store"
+        return {"device_id": device_id, "action": result}
+
+    @app.post("/v1/devices/{device_id}/home/actions/{action_id}/confirm")
+    async def confirm_device_home_action(
+        device_id: str,
+        action_id: str,
+        response: Response,
+        x_pilot_device_id: str = Header(),
+        authorization: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        device = authenticated_device(device_id, x_pilot_device_id, authorization)
+        if "home-control" not in device["capabilities"]:
+            raise HTTPException(
+                status_code=403, detail="device does not have home-control capability"
+            )
+        try:
+            result = await home_actions.execute(action_id, device, confirm=True)
+        except KeyError:
+            raise HTTPException(status_code=404, detail="home action not found") from None
+        except HomeActionConflict as error:
+            raise HTTPException(status_code=409, detail=str(error)) from None
+        except HomeActionError as error:
+            raise HTTPException(status_code=502, detail=str(error)) from None
+        response.headers["Cache-Control"] = "no-store"
+        return {"device_id": device_id, "action": result}
+
+    @app.get("/v1/devices/{device_id}/home/actions/{action_id}")
+    async def device_home_action_status(
+        device_id: str,
+        action_id: str,
+        response: Response,
+        x_pilot_device_id: str = Header(),
+        authorization: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        device = authenticated_device(device_id, x_pilot_device_id, authorization)
+        action = database.get_home_action(action_id)
+        if action is None or action["principal_id"] != device["id"]:
+            raise HTTPException(status_code=404, detail="home action not found")
+        response.headers["Cache-Control"] = "no-store"
+        return {"device_id": device_id, "action": action}
 
     @app.get("/v1/devices/{device_id}/media")
     async def device_media_state(

@@ -237,3 +237,130 @@ struct MediaCommand: Encodable {
         case targetPlayerID = "target_player_id"
     }
 }
+
+enum JSONValue: Codable, Hashable, Sendable {
+    case string(String)
+    case number(Double)
+    case boolean(Bool)
+    case object([String: JSONValue])
+    case array([JSONValue])
+    case null
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        if container.decodeNil() { self = .null }
+        else if let value = try? container.decode(Bool.self) { self = .boolean(value) }
+        else if let value = try? container.decode(Double.self) { self = .number(value) }
+        else if let value = try? container.decode(String.self) { self = .string(value) }
+        else if let value = try? container.decode([String: JSONValue].self) { self = .object(value) }
+        else { self = .array(try container.decode([JSONValue].self)) }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        switch self {
+        case let .string(value): try container.encode(value)
+        case let .number(value): try container.encode(value)
+        case let .boolean(value): try container.encode(value)
+        case let .object(value): try container.encode(value)
+        case let .array(value): try container.encode(value)
+        case .null: try container.encodeNil()
+        }
+    }
+
+    var number: Double? {
+        if case let .number(value) = self { value } else { nil }
+    }
+}
+
+struct HomeRoom: Codable, Hashable, Sendable {
+    let id: String
+    let name: String
+    let homeAreaIDs: [String]
+
+    enum CodingKeys: String, CodingKey {
+        case id, name
+        case homeAreaIDs = "home_area_ids"
+    }
+}
+
+struct HomeEntity: Codable, Identifiable, Hashable, Sendable {
+    var id: String { entityID }
+    let entityID: String
+    let domain: String
+    let name: String
+    let state: String
+    let attributes: [String: JSONValue]
+    let areaID: String?
+    let availability: String
+    let unavailable: Bool
+    let stale: Bool
+    let observedAt: String?
+    let actions: [String]
+
+    enum CodingKeys: String, CodingKey {
+        case domain, name, state, attributes, availability, unavailable, stale, actions
+        case entityID = "entity_id"
+        case areaID = "area_id"
+        case observedAt = "observed_at"
+    }
+
+    var isOn: Bool {
+        ["on", "open", "opening", "unlocked", "active", "heat", "cool"]
+            .contains(state.lowercased())
+    }
+
+    var brightnessPercent: Double? {
+        attributes["brightness"]?.number.map { min(max($0 / 255 * 100, 0), 100) }
+    }
+}
+
+struct HomeProjection: Codable, Sendable {
+    let deviceID: String
+    let selectedRoomID: String
+    let room: HomeRoom
+    let entityCount: Int
+    let entities: [HomeEntity]
+
+    enum CodingKeys: String, CodingKey {
+        case room, entities
+        case deviceID = "device_id"
+        case selectedRoomID = "selected_room_id"
+        case entityCount = "entity_count"
+    }
+}
+
+struct HomeActionRequest: Encodable, Sendable {
+    let roomID: String
+    let entityID: String
+    let action: String
+    let parameters: [String: JSONValue]
+
+    enum CodingKeys: String, CodingKey {
+        case action, parameters
+        case roomID = "room_id"
+        case entityID = "entity_id"
+    }
+}
+
+struct HomeActionEnvelope: Codable, Sendable {
+    let action: HomeAction
+}
+
+struct HomeAction: Codable, Identifiable, Sendable {
+    let id: String
+    let status: String
+    let roomID: String
+    let entityID: String
+    let action: String
+    let risk: String
+    let confirmationRequired: Bool
+    let description: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, status, action, risk, description
+        case roomID = "room_id"
+        case entityID = "entity_id"
+        case confirmationRequired = "confirmation_required"
+    }
+}

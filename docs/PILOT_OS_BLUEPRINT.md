@@ -917,5 +917,12 @@ deployed integration, hardware boundary, or milestone status changes.
   catalogue, coverage and semantic discovery APIs, bounded read tools, and
   administrator dashboard; polished the adaptive iPhone/iPad client; added the
   encrypted, energy-aware native Android wall-tablet client; and introduced
-  platform-specific CI gates. Production deployment remains a separate,
-  supervised release step.
+  platform-specific CI gates. Pilot Core 0.20 was subsequently deployed with
+  a cold rollback archive and completed its first 2,291-entity production
+  catalogue sync.
+- **3.6** — Added Pilot Core 0.21's governed Home Assistant control plane:
+  explicit room/area boundaries, typed and allowlisted service calls,
+  stale/unavailable denial, state reconciliation, expiring one-time
+  confirmation for locks/alarms/garage doors, append-only action audit, and a
+  stable semantic digital-twin manifest. Added matching native controls to the
+  iOS and Android clients without exposing Home Assistant credentials.

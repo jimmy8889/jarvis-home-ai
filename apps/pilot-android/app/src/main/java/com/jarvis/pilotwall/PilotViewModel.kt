@@ -30,6 +30,11 @@ data class PilotUiState(
     ),
     val conversationId: String? = null,
     val assistantBusy: Boolean = false,
+    val home: HomeProjection? = null,
+    val homeLoading: Boolean = false,
+    val homeError: String? = null,
+    val activeHomeEntityId: String? = null,
+    val pendingHomeAction: HomeAction? = null,
 ) {
     val rooms: List<PilotRoom> get() = snapshot?.media?.rooms.orEmpty()
     val selectedRoom: PilotRoom?
@@ -68,15 +73,17 @@ class PilotViewModel(application: Application) : AndroidViewModel(application) {
             }
             runCatching { PilotCoreClient(config, token).snapshot() }
                 .onSuccess { snapshot ->
+                    val selectedRoomId = _state.value.selectedRoomId
+                        ?: snapshot.media.rooms.firstOrNull()?.id
                     _state.update {
                         it.copy(
                             snapshot = snapshot,
                             connection = ConnectionState.Online,
-                            selectedRoomId = it.selectedRoomId
-                                ?: snapshot.media.rooms.firstOrNull()?.id,
+                            selectedRoomId = selectedRoomId,
                             error = null,
                         )
                     }
+                    selectedRoomId?.let { refreshHome(it, silent = true) }
                 }
                 .onFailure { error ->
                     _state.update {
@@ -146,7 +153,75 @@ class PilotViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun selectRoom(roomId: String) {
-        _state.update { it.copy(selectedRoomId = roomId) }
+        _state.update {
+            it.copy(selectedRoomId = roomId, home = null, homeError = null)
+        }
+        refreshHome(roomId)
+    }
+
+    fun refreshHome(roomId: String? = _state.value.selectedRoom?.id, silent: Boolean = false) {
+        val token = preferences.token() ?: return
+        val selected = roomId ?: return
+        viewModelScope.launch {
+            if (!silent) _state.update { it.copy(homeLoading = true, homeError = null) }
+            runCatching {
+                PilotCoreClient(_state.value.config, token).home(selected)
+            }.onSuccess { projection ->
+                if (_state.value.selectedRoom?.id == selected) {
+                    _state.update {
+                        it.copy(home = projection, homeLoading = false, homeError = null)
+                    }
+                }
+            }.onFailure { error ->
+                _state.update {
+                    it.copy(homeLoading = false, homeError = friendlyError(error))
+                }
+            }
+        }
+    }
+
+    fun homeAction(entity: HomeEntity, action: String, value: Double? = null) {
+        val token = preferences.token() ?: return
+        val roomId = _state.value.selectedRoom?.id ?: return
+        viewModelScope.launch {
+            _state.update {
+                it.copy(activeHomeEntityId = entity.entityId, homeError = null)
+            }
+            runCatching {
+                PilotCoreClient(_state.value.config, token)
+                    .homeAction(roomId, entity.entityId, action, value)
+            }.onSuccess { result ->
+                if (result.confirmationRequired && result.status == "pending") {
+                    _state.update { it.copy(pendingHomeAction = result) }
+                } else {
+                    refreshHome(roomId, silent = true)
+                }
+            }.onFailure { error ->
+                _state.update { it.copy(homeError = friendlyError(error)) }
+            }
+            _state.update { it.copy(activeHomeEntityId = null) }
+        }
+    }
+
+    fun confirmHomeAction() {
+        val token = preferences.token() ?: return
+        val pending = _state.value.pendingHomeAction ?: return
+        viewModelScope.launch {
+            _state.update { it.copy(activeHomeEntityId = pending.entityId) }
+            runCatching {
+                PilotCoreClient(_state.value.config, token).confirmHomeAction(pending.id)
+            }.onSuccess {
+                _state.update { state -> state.copy(pendingHomeAction = null) }
+                refreshHome(silent = true)
+            }.onFailure { error ->
+                _state.update { it.copy(homeError = friendlyError(error)) }
+            }
+            _state.update { it.copy(activeHomeEntityId = null) }
+        }
+    }
+
+    fun cancelHomeAction() {
+        _state.update { it.copy(pendingHomeAction = null) }
     }
 
     fun media(command: MediaCommand) {

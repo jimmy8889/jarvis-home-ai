@@ -57,6 +57,7 @@ llm_context_turns = 12
 [[rooms]]
 id = "bedroom"
 name = "Bedroom"
+home_area_ids = ["bedroom"]
 response_player_id = "bedroom-display-speaker"
 default_music_player_id = "bedroom-music"
 default_device_id = "pilot-bedroom-display"
@@ -83,6 +84,7 @@ control_enabled = false
 [[rooms]]
 id = "office"
 name = "Office"
+home_area_ids = ["office", "james_office"]
 response_player_id = "office-assistant"
 default_music_player_id = "office-music"
 default_device_id = "pilot-office"
@@ -117,6 +119,7 @@ endpoint = "homeai.local:5000"
 [[rooms]]
 id = "media-room"
 name = "Media Room"
+home_area_ids = ["media_room"]
 response_player_id = "media-room-assistant"
 default_music_player_id = "media-room-heos"
 default_device_id = ""

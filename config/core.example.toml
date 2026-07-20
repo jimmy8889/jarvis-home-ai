@@ -93,6 +93,7 @@ control_enabled = false
 [[rooms]]
 id = "office"
 name = "Office"
+home_area_ids = ["office"]
 response_player_id = "office-assistant"
 default_music_player_id = "office-music"
 default_device_id = "pilot-office"
@@ -129,6 +130,7 @@ endpoint = "homeai.local:5000"
 [[rooms]]
 id = "media-room"
 name = "Media Room"
+home_area_ids = ["media_room"]
 response_player_id = "media-room-assistant"
 default_music_player_id = "media-room-heos"
 default_device_id = ""

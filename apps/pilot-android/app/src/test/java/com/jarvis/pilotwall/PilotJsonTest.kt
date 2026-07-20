@@ -100,4 +100,49 @@ class PilotJsonTest {
         assertEquals("Artist", results.single { it.uri == "track://1" }.subtitle)
         assertFalse(results.any { it.uri.isBlank() })
     }
+
+    @Test
+    fun parsesBoundedHomeProjectionAndConfirmation() {
+        val projection = PilotJson.home(
+            JSONObject(
+                """
+                {
+                  "selected_room_id": "office",
+                  "room": {"id": "office", "name": "Office"},
+                  "entities": [{
+                    "entity_id": "light.office_lamp",
+                    "domain": "light",
+                    "name": "Office lamp",
+                    "state": "on",
+                    "area_id": "james_office",
+                    "unavailable": false,
+                    "stale": false,
+                    "attributes": {"brightness": 128},
+                    "actions": ["turn_on", "turn_off", "set_brightness"]
+                  }]
+                }
+                """.trimIndent(),
+            ),
+        )
+        val lamp = projection.entities.single()
+        assertEquals("Office", projection.roomName)
+        assertTrue(lamp.isOn)
+        assertEquals(50f, lamp.brightnessPercent!!, 1f)
+        assertTrue("set_brightness" in lamp.actions)
+
+        val confirmation = PilotJson.homeAction(
+            JSONObject(
+                """
+                {"action": {
+                  "id": "action-1", "status": "pending",
+                  "entity_id": "lock.front_door", "action": "unlock",
+                  "risk": "high", "confirmation_required": true,
+                  "description": "Unlock Front Door"
+                }}
+                """.trimIndent(),
+            ),
+        )
+        assertTrue(confirmation.confirmationRequired)
+        assertEquals("Unlock Front Door", confirmation.description)
+    }
 }

@@ -131,7 +131,77 @@ data class MediaCommand(
     val volume: Int? = null,
 )
 
+data class HomeEntity(
+    val entityId: String,
+    val domain: String,
+    val name: String,
+    val state: String,
+    val areaId: String?,
+    val unavailable: Boolean,
+    val stale: Boolean,
+    val actions: List<String>,
+    val brightnessPercent: Float?,
+) {
+    val isOn: Boolean
+        get() = state.lowercase() in setOf(
+            "on", "open", "opening", "unlocked", "active", "heat", "cool",
+        )
+}
+
+data class HomeProjection(
+    val roomId: String,
+    val roomName: String,
+    val entities: List<HomeEntity>,
+)
+
+data class HomeAction(
+    val id: String,
+    val status: String,
+    val entityId: String,
+    val action: String,
+    val risk: String,
+    val confirmationRequired: Boolean,
+    val description: String?,
+)
+
 internal object PilotJson {
+    fun home(root: JSONObject): HomeProjection {
+        val room = root.optJSONObject("room") ?: JSONObject()
+        return HomeProjection(
+            roomId = room.optString("id", root.optString("selected_room_id")),
+            roomName = room.optString("name", "Room"),
+            entities = root.optJSONArray("entities").objects().map { entity ->
+                val attributes = entity.optJSONObject("attributes") ?: JSONObject()
+                HomeEntity(
+                    entityId = entity.optString("entity_id"),
+                    domain = entity.optString("domain"),
+                    name = entity.optString("name", entity.optString("entity_id")),
+                    state = entity.optString("state"),
+                    areaId = entity.optNullableString("area_id"),
+                    unavailable = entity.optBoolean("unavailable"),
+                    stale = entity.optBoolean("stale"),
+                    actions = entity.optJSONArray("actions").strings(),
+                    brightnessPercent = attributes.optDouble("brightness")
+                        .takeIf { attributes.has("brightness") && it.isFinite() }
+                        ?.div(255.0)?.times(100)?.toFloat()?.coerceIn(0f, 100f),
+                )
+            },
+        )
+    }
+
+    fun homeAction(root: JSONObject): HomeAction {
+        val action = root.optJSONObject("action") ?: root
+        return HomeAction(
+            id = action.optString("id"),
+            status = action.optString("status"),
+            entityId = action.optString("entity_id"),
+            action = action.optString("action"),
+            risk = action.optString("risk", "low"),
+            confirmationRequired = action.optBoolean("confirmation_required"),
+            description = action.optNullableString("description"),
+        )
+    }
+
     fun media(root: JSONObject): MediaSnapshot {
         val rooms = root.optJSONArray("rooms").objects().map(::room)
         val media = root.optJSONObject("media") ?: JSONObject()
@@ -269,6 +339,11 @@ internal object PilotJson {
 
 private fun JSONArray?.objects(): List<JSONObject> =
     if (this == null) emptyList() else (0 until length()).mapNotNull { optJSONObject(it) }
+
+private fun JSONArray?.strings(): List<String> =
+    if (this == null) emptyList() else (0 until length()).mapNotNull {
+        optString(it).takeIf(String::isNotBlank)
+    }
 
 private fun JSONObject?.objectsWithKeys(): List<Pair<String, JSONObject>> =
     if (this == null) emptyList() else keys().asSequence().mapNotNull { key ->

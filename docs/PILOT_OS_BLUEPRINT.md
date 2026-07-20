@@ -1,6 +1,6 @@
 # Pilot OS Blueprint
 
-Version 3.2
+Version 3.3
 
 Last updated: 2026-07-20
 
@@ -90,7 +90,7 @@ Music streams: TCP 8097
 Sendspin server: TCP 8927
 Pilot Core: 10.0.1.64:8770
 Pilot Core host: debian-docker / Debian 12
-Pilot Core image: jarvis-home-ai/pilot-core:core-0.18.0-20260720.1
+Pilot Core image: jarvis-home-ai/pilot-core:core-0.19.1-20260720.1
 ```
 
 The Home Assistant add-on is the preferred initial Music Assistant deployment.
@@ -130,9 +130,11 @@ Clear temperature, weather, forecast, and now-playing questions additionally
 force their read-only tool so current home state cannot be improvised.
 
 Home Assistant now has a separate `Pilot Contextual` Assist pipeline with
-Faster Whisper, Piper Amy, preferred local intents, and its RTX Ollama
-conversation agent. The Office satellite is assigned to it; `Full local
-assistant` remains available as a deterministic-only rollback.
+Faster Whisper, Piper Amy, preferred local intents, and the device-authenticated
+`Pilot Core Conversation` agent. The Office satellite is assigned to it;
+`Full local assistant` remains available as a deterministic-only rollback.
+The live integration passed a two-turn Home Assistant Assist test that retained
+context across the linked room-scoped Pilot session.
 
 Pilot Core now owns short-lived, room- and device-scoped conversation sessions.
 Voice audio uses Home Assistant for STT only, then Pilot tries the built-in
@@ -270,7 +272,7 @@ Hardware: Raspberry Pi 4 Model B, 2 GB / 16 GB microSD
 Display: 10-inch 1024 x 600 HDMI with ILITEK USB touch
 OS: 64-bit Debian 13 Trixie
 Runtime: Cage Wayland compositor + Chromium kiosk
-Surface: Pilot Linux Display 0.3.1
+Surface: Pilot Linux Display 0.4
 ```
 
 This node is deployed as a minimal appliance rather than a full desktop. A
@@ -279,8 +281,10 @@ registry counts, bounded local health, whole-network now-playing state, and the
 SAJ energy system. A device-only credential stays in the local service; the
 browser receives no credential and the Pi receives no Home Assistant, Music
 Assistant, or administrator token. Touch-native Home, Energy, Music, and System
-pages support large tap targets and horizontal swipes. The Energy page uses a
-live flow diagram whose path direction represents grid import/export and
+pages support large tap targets and horizontal swipes. Display 0.4 adds
+room output selection, Music Assistant search and playback, transport controls,
+and volume through Pilot Core's device-scoped media API. The Energy page uses
+a live flow diagram whose path direction represents grid import/export and
 battery charge/discharge, while animation speed and intensity scale with
 watts. Chromium caches, system journals, release count, and APT archives are
 bounded for the 16 GB card; automatic security updates do not reboot the node.
@@ -290,8 +294,9 @@ The display's incomplete EDID is overridden through a reversible KMS
 Physical acceptance verified native mode, ILITEK input on `seat0`, Pilot Core
 connectivity, zero kiosk restarts, 7.8 GB free storage, no throttling, and
 two-way application rollback. Pilot Core 0.14 adds a bounded, authenticated
-display surface. The Pi is provisionally room-bound to Office with only the
-non-mutating `display` capability.
+display surface. The Pi remains room-bound to Office and now has the narrow
+`display` and `media-control` capabilities; its browser still receives no
+credential and cannot bypass Pilot Core.
 
 ## 5. Hardware plan
 
@@ -858,3 +863,8 @@ deployed integration, hardware boundary, or milestone status changes.
   APIs, a Home Assistant conversation-agent bridge, interactive Raspberry Pi
   Music Assistant controls, and the first native Pilot iOS application for
   room state, playback, search, and contextual conversation.
+- **3.3** — Deployed the Home Assistant conversation bridge into the
+  `Pilot Contextual` pipeline, accepted linked two-turn context through Assist,
+  recorded the live Core 0.19 and Pi Display 0.4 topology, and extended the
+  Pilot iOS target to iOS 17. Pilot Core 0.19.1 also closes explicit-player and
+  transfer room-boundary bypasses while retaining portable iOS control.

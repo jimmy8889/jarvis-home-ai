@@ -40,6 +40,11 @@ portable-client
 registered room. The token belongs in the iOS Keychain and must not be committed
 to source control.
 
+The production `pilot-ios-james` identity is enrolled with exactly these three
+capabilities. Its token is held in the central root-only secret store until the
+app is installed on a physical device, at which point it must be transferred
+directly into the app's Keychain-backed settings.
+
 ## Current boundary
 
 Pilot Core remains authoritative for rooms, players, conversation policy, and

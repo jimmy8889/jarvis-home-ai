@@ -11,6 +11,9 @@ The initial application provides:
 - room-selectable Pilot conversations with retained session continuity;
 - a Keychain-backed device credential.
 
+The deployment target is iOS 17 so the same client can run on the currently
+available iPad as well as newer iPhone and iPad devices.
+
 Generate the Xcode project reproducibly:
 
 ```bash

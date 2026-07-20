@@ -107,20 +107,20 @@ class PilotConversationConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         schema = vol.Schema(
             {
-                vol.Required(CONF_NAME, default="Pilot Core"): TextSelector(),
-                vol.Required(
+                vol.Optional(CONF_NAME, default="Pilot Core"): TextSelector(),
+                vol.Optional(
                     CONF_CORE_URL, default=DEFAULT_CORE_URL
                 ): TextSelector(TextSelectorConfig(type=TextSelectorType.URL)),
-                vol.Required(
+                vol.Optional(
                     CONF_DEVICE_ID, default=DEFAULT_DEVICE_ID
                 ): TextSelector(),
-                vol.Required(CONF_DEVICE_TOKEN): TextSelector(
+                vol.Optional(CONF_DEVICE_TOKEN): TextSelector(
                     TextSelectorConfig(
                         type=TextSelectorType.PASSWORD,
                         autocomplete="current-password",
                     )
                 ),
-                vol.Required(
+                vol.Optional(
                     CONF_ROOM_ID, default=DEFAULT_ROOM_ID
                 ): TextSelector(),
             }

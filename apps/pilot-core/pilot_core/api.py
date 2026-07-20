@@ -1665,7 +1665,25 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
             selected = registry.players.get(request.player_id)
             if selected is None:
                 raise HTTPException(status_code=404, detail="player not found")
+            if (
+                selected.room_id != device["room_id"]
+                and "portable-client" not in device["capabilities"]
+            ):
+                raise HTTPException(
+                    status_code=403,
+                    detail="fixed-room device cannot control another room",
+                )
             room_id = selected.room_id
+        if (
+            request.action == "transfer"
+            and request.target_room_id
+            and request.target_room_id != device["room_id"]
+            and "portable-client" not in device["capabilities"]
+        ):
+            raise HTTPException(
+                status_code=403,
+                detail="fixed-room device cannot transfer media to another room",
+            )
         try:
             player = orchestrator.music_player(room_id, request.player_id)
             target_player = (

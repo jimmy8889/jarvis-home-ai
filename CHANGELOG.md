@@ -5,18 +5,29 @@
 - Added Pilot Core 0.19's device-authenticated text-assistant, media-state,
   Music Assistant search, and media-control APIs. Fixed room devices remain
   room-bound while explicitly enrolled portable clients may select a room.
+- Hardened Pilot Core 0.19.1 so fixed-room media clients cannot bypass their
+  room boundary by naming another room's player or transfer target; enrolled
+  `portable-client` devices retain intentional multi-room control.
 - Added an administrator-only capability update that preserves an existing
   device credential, allowing deployed nodes to gain narrowly scoped features
   without an unnecessary token rotation.
 - Added the `Pilot Core Conversation` Home Assistant custom integration so an
   Assist pipeline can retain local STT/TTS while routing recognized text,
   contextual reasoning, and bounded tools through Pilot Core.
+- Deployed `Pilot Core Conversation` 0.1.4 to Home Assistant, assigned it to
+  `Pilot Contextual`, retained Faster Whisper and Piper Amy, and accepted a
+  two-turn contextual conversation through the Home Assistant Assist UI.
 - Added Pilot Linux Display 0.4 with touch-first Music Assistant room
   selection, search, playback, transport, and volume controls. The browser
   remains loopback-only and never receives a central service credential.
 - Added the first native Pilot iOS SwiftUI application with Keychain-backed
   device authentication, room and now-playing state, Music Assistant search
   and playback, transport/volume controls, and contextual Pilot chat.
+- Lowered the Pilot iOS deployment target to iOS 17 so the client also supports
+  the currently available iPad while retaining the same SwiftUI architecture.
+- Enrolled the production `pilot-ios-james` identity with only `voice`,
+  `media-control`, and `portable-client`; the credential remains in the
+  central root-only secret store pending physical-device installation.
 - Added and deployed Pilot Core 0.16 contextual reasoning through the local
   Ollama server at `10.0.1.20:11434/v1`, using the installed tool-capable
   `qwen3.5:9b` model. Home Assistant deterministic intents remain first; only

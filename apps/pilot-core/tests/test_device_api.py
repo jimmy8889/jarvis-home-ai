@@ -61,6 +61,13 @@ class DisplayNodeApiTests(unittest.TestCase):
                     default_music_player_id="bedroom-music",
                     default_device_id="pilot-bedroom-display",
                 ),
+                Room(
+                    id="office",
+                    name="Office",
+                    response_player_id="office-music",
+                    default_music_player_id="office-music",
+                    default_device_id="pilot-office",
+                ),
             ),
             players=(
                 Player(
@@ -78,6 +85,14 @@ class DisplayNodeApiTests(unittest.TestCase):
                     protocol="sendspin",
                     kind="music",
                     external_id="bedroom-player",
+                ),
+                Player(
+                    id="office-music",
+                    room_id="office",
+                    name="Office Music",
+                    protocol="sendspin",
+                    kind="music",
+                    external_id="office-player",
                 ),
             ),
         )
@@ -272,6 +287,48 @@ class DisplayNodeApiTests(unittest.TestCase):
         music_assistant.assert_awaited_once_with(
             "players/cmd/pause",
             {"player_id": "bedroom-player"},
+        )
+
+    def test_fixed_room_media_control_cannot_name_another_room_player(self) -> None:
+        response = self.client.post(
+            "/v1/devices/pilot-bedroom-display/media",
+            headers=self.headers,
+            json={"action": "pause", "player_id": "office-music"},
+        )
+
+        self.assertEqual(response.status_code, 403, response.text)
+        self.assertEqual(
+            response.json()["detail"],
+            "fixed-room device cannot control another room",
+        )
+
+    def test_portable_client_can_control_another_room_player(self) -> None:
+        token = self.store.register_device(
+            "pilot-ios-test",
+            "bedroom",
+            "Pilot iOS Test",
+            ["media-control", "portable-client", "voice"],
+        )
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "X-Pilot-Device-ID": "pilot-ios-test",
+        }
+        with patch.object(
+            Integrations,
+            "music_assistant",
+            new=AsyncMock(return_value={"ok": True}),
+        ) as music_assistant:
+            response = self.client.post(
+                "/v1/devices/pilot-ios-test/media",
+                headers=headers,
+                json={"action": "pause", "player_id": "office-music"},
+            )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["room_id"], "office")
+        music_assistant.assert_awaited_once_with(
+            "players/cmd/pause",
+            {"player_id": "office-player"},
         )
 
     def test_media_search_uses_device_credentials(self) -> None:

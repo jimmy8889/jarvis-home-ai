@@ -55,6 +55,20 @@ Retain the previous pipeline until a real microphone request, deterministic
 Home Assistant action, general Ollama answer, follow-up question, and spoken
 reply have all passed.
 
+## Accepted deployment
+
+The `Pilot Contextual` pipeline is now assigned to `Pilot Core Conversation`.
+Its existing Faster Whisper STT and Piper Amy TTS providers were retained.
+Home Assistant accepted a two-turn text test through the integration:
+
+1. `What is two plus two?`
+2. `Multiply that by three.`
+
+Pilot Core returned four and then twelve, proving that the Home Assistant
+conversation ID remains linked to the room-scoped Pilot session. The prior
+`Full local assistant` pipeline remains available as the one-selection
+rollback.
+
 ## Rollback
 
 Select the previous Home Assistant conversation agent in the voice pipeline.

@@ -115,11 +115,15 @@ administrator token or communicate directly with the N150.
 ## Delivery order
 
 1. Build the media-console agent, capability, health model, and authenticated
-   command contract.
+   command contract. **Complete in Room Agent 0.6 / Core 0.22.**
 2. Build the fullscreen shell with idle, music, assistant-overlay, offline, and
    recovery states.
 3. Add Sendspin now-playing and queue presentation.
 4. Add supervised mpv playback for a known-good local test library.
+   **Software complete:** configured-root containment, extension allowlist,
+   fixed mpv arguments, private JSON IPC, bounded seeking/track selection,
+   process supervision and status are implemented. Hardware acceptance on a
+   native-HDMI N150 remains pending.
 5. Add Jellyfin browse, direct play, resume, subtitles, and audio tracks.
 6. Add the iOS room remote using the same Pilot Core session APIs.
 7. Add HDMI/CEC/Denon source and power coordination.

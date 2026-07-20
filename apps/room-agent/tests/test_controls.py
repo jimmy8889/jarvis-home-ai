@@ -130,6 +130,29 @@ class RoomControllerTests(unittest.TestCase):
         self.assertEqual(result.detail["affected"], ["music"])
         self.assertEqual(result.detail["unavailable"], ["airplay"])
 
+    def test_video_actions_are_forwarded_only_to_supervised_player(self) -> None:
+        class Video:
+            calls: list[tuple[str, dict]] = []
+
+            def execute(self, action: str, payload: dict) -> dict:
+                self.calls.append((action, payload))
+                return {"state": "loading"}
+
+            def cancel(self) -> dict:
+                return {"video_playback_stopped": True}
+
+        video = Video()
+        controller = RoomController(
+            self.state,
+            runner=lambda command: subprocess.CompletedProcess(command, 0, "", ""),
+            video_player=video,
+        )
+        result = controller.execute(
+            {"action": "video_play", "media_id": "Films/Example.mkv"}
+        )
+        self.assertEqual(result.detail["state"], "loading")
+        self.assertEqual(video.calls[0][0], "video_play")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -331,6 +331,51 @@ class DisplayNodeApiTests(unittest.TestCase):
             {"player_id": "office-player"},
         )
 
+    def test_portable_client_queues_typed_video_to_capable_room_endpoint(self) -> None:
+        self.store.register_device(
+            "pilot-office-console",
+            "office",
+            "Office Media Console",
+            ["video"],
+        )
+        token = self.store.register_device(
+            "pilot-ios-video",
+            "bedroom",
+            "Pilot iOS Video",
+            ["media-control", "portable-client"],
+        )
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "X-Pilot-Device-ID": "pilot-ios-video",
+        }
+        response = self.client.post(
+            "/v1/devices/pilot-ios-video/video",
+            headers=headers,
+            json={
+                "room_id": "office",
+                "action": "play",
+                "media_id": "Films/Example.mkv",
+            },
+        )
+        self.assertEqual(response.status_code, 201, response.text)
+        self.assertEqual(response.json()["target"]["id"], "pilot-office-console")
+        command = response.json()["command"]
+        self.assertEqual(
+            command["payload"],
+            {"action": "video_play", "media_id": "Films/Example.mkv"},
+        )
+
+    def test_fixed_room_client_cannot_queue_video_to_another_room(self) -> None:
+        response = self.client.post(
+            "/v1/devices/pilot-bedroom-display/video",
+            headers=self.headers,
+            json={
+                "room_id": "office",
+                "action": "stop",
+            },
+        )
+        self.assertEqual(response.status_code, 403, response.text)
+
     def test_media_search_uses_device_credentials(self) -> None:
         with patch.object(
             Integrations,

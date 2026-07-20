@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pilot-room-agent"
-version = "0.5.0"
-description = "Local health and device-status agent for a Pilot room endpoint"
+version = "0.6.0"
+description = "Local audio, voice, video, health and control agent for a Pilot room endpoint"
 requires-python = ">=3.11"
 dependencies = [
   "websockets>=15,<17",

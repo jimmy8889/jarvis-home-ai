@@ -14,6 +14,7 @@ from .command_client import CommandClient
 from .controls import ControlError, ControlState, RoomController
 from .reporter import EventReporter
 from .status import collect_status
+from .video_playback import MpvPlayback
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -22,6 +23,7 @@ class Handler(BaseHTTPRequestHandler):
     controller = RoomController(control_state)
     command_client: CommandClient | None = None
     audio_playback: AudioPlayback | None = None
+    video_playback: MpvPlayback | None = None
 
     def _respond(self, status: HTTPStatus, payload: dict) -> None:
         body = json.dumps(payload, separators=(",", ":")).encode()
@@ -42,6 +44,11 @@ class Handler(BaseHTTPRequestHandler):
                 self.audio_playback.status()
                 if self.audio_playback
                 else {"active": False, "enabled": False}
+            )
+            payload["video_playback"] = (
+                self.video_playback.status()
+                if self.video_playback
+                else {"enabled": False, "available": False}
             )
             payload["core_commands"] = (
                 self.command_client.status()
@@ -88,6 +95,7 @@ def main() -> None:
     Handler.settings = settings
     Handler.control_state = control_state
     audio_playback: AudioPlayback | None = None
+    video_playback: MpvPlayback | None = None
     if settings.core_commands_enabled:
         audio_playback = AudioPlayback(
             control_state,
@@ -95,7 +103,14 @@ def main() -> None:
             ActivationGate(settings),
         )
     Handler.audio_playback = audio_playback
-    Handler.controller = RoomController(control_state, audio_player=audio_playback)
+    if settings.video_enabled:
+        video_playback = MpvPlayback(settings)
+    Handler.video_playback = video_playback
+    Handler.controller = RoomController(
+        control_state,
+        audio_player=audio_playback,
+        video_player=video_playback,
+    )
     Handler.command_client = None
     reporter: EventReporter | None = None
     focus_loop: AudioFocusLoop | None = None
@@ -123,6 +138,8 @@ def main() -> None:
             command_client.stop()
         if audio_playback:
             audio_playback.close()
+        if video_playback:
+            video_playback.close()
         if reporter:
             reporter.stop()
         if focus_loop:

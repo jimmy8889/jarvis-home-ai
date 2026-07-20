@@ -141,12 +141,14 @@ class RoomController:
         sendspin_bus_resolver: Callable[[], str | None] | None = None,
         airplay_bus_resolver: Callable[[], str | None] | None = None,
         audio_player: Any | None = None,
+        video_player: Any | None = None,
     ) -> None:
         self.state = state
         self.runner = runner or self._run
         self.sendspin_bus_resolver = sendspin_bus_resolver or _sendspin_bus_name
         self.airplay_bus_resolver = airplay_bus_resolver or _airplay_bus_name
         self.audio_player = audio_player
+        self.video_player = video_player
 
     @staticmethod
     def _run(command: list[str]) -> subprocess.CompletedProcess[str]:
@@ -193,14 +195,23 @@ class RoomController:
             if self.audio_player is None:
                 raise ControlError("audio delivery is unavailable")
             detail = self.audio_player.play(payload)
+        elif action.startswith("video_"):
+            if self.video_player is None:
+                raise ControlError("video playback is unavailable")
+            detail = self.video_player.execute(action, payload)
         elif action == "cancel":
             playback = (
                 self.audio_player.cancel()
                 if self.audio_player is not None
                 else {"audio_playback_stopped": False}
             )
+            video = (
+                self.video_player.cancel()
+                if self.video_player is not None
+                else {"video_playback_stopped": False}
+            )
             self.state.clear()
-            detail = {"transient_state_cleared": True, **playback}
+            detail = {"transient_state_cleared": True, **playback, "video": video}
         else:
             raise ControlError(f"unsupported action: {action}")
 

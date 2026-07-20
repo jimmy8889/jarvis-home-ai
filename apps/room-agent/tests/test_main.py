@@ -23,6 +23,7 @@ class ControlApiTests(unittest.TestCase):
         QuietHandler.settings = Settings(room_id="test-room")
         QuietHandler.control_state = state
         QuietHandler.audio_playback = None
+        QuietHandler.video_playback = None
         QuietHandler.command_client = None
         QuietHandler.controller = RoomController(
             state,

@@ -61,6 +61,14 @@ room_endpoint_audio_activation_state_path: /etc/pilot/audio-activation.json
 room_endpoint_audio_focus_enabled: false
 room_endpoint_audio_focus_duck_gain: 0.2
 room_endpoint_audio_focus_interval_seconds: 1
+room_endpoint_video_install: false
+room_endpoint_video_enabled: false
+room_endpoint_video_ipc_path: /var/lib/pilot/mpv.sock
+room_endpoint_video_media_roots: []
+room_endpoint_video_display: ""
+room_endpoint_video_audio_device: auto
+room_endpoint_video_hwdec: auto-safe
+room_endpoint_video_start_timeout_seconds: 5
 room_endpoint_release_id: "{{ ansible_facts['date_time']['iso8601_basic_short'] }}"
 room_endpoint_project_root: "{{ role_path }}/../../../.."
 room_endpoint_packages:
@@ -98,3 +106,5 @@ room_endpoint_squeezelite_packages:
 room_endpoint_sendspin_packages:
   - ffmpeg
   - libportaudio2
+room_endpoint_video_packages:
+  - mpv

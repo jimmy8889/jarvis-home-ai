@@ -45,6 +45,14 @@
     cache_valid_time: 3600
   when: room_endpoint_sendspin_install | bool
 
+- name: Install supervised local-video runtime
+  ansible.builtin.apt:
+    name: "{{ room_endpoint_video_packages }}"
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+  when: room_endpoint_video_install | bool
+
 - name: Create Pilot service user
   ansible.builtin.user:
     name: "{{ room_endpoint_user }}"

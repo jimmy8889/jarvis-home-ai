@@ -43,6 +43,13 @@ class Settings:
     audio_focus_enabled: bool = False
     audio_focus_duck_gain: float = 0.2
     audio_focus_interval_seconds: int = 1
+    video_enabled: bool = False
+    video_ipc_path: str = "/run/user/1000/pilot-mpv.sock"
+    video_media_roots: tuple[str, ...] = ()
+    video_display: str = ""
+    video_audio_device: str = "auto"
+    video_hwdec: str = "auto-safe"
+    video_start_timeout_seconds: float = 5
 
 
 def load_settings(path: str | Path) -> Settings:
@@ -52,4 +59,11 @@ def load_settings(path: str | Path) -> Settings:
     with config_path.open("rb") as handle:
         values = tomllib.load(handle)
     allowed = {field for field in Settings.__dataclass_fields__}
-    return Settings(**{key: value for key, value in values.items() if key in allowed})
+    selected = {key: value for key, value in values.items() if key in allowed}
+    media_roots = selected.get("video_media_roots", [])
+    if not isinstance(media_roots, list) or not all(
+        isinstance(item, str) and item.strip() for item in media_roots
+    ):
+        raise ValueError("video_media_roots must be an array of non-empty paths")
+    selected["video_media_roots"] = tuple(item.strip() for item in media_roots)
+    return Settings(**selected)

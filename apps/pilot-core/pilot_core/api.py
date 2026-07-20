@@ -152,6 +152,43 @@ class DeviceHomeActionRequest(BaseModel):
         return self
 
 
+class DeviceVideoCommand(BaseModel):
+    room_id: str | None = Field(default=None, min_length=1, max_length=128)
+    action: Literal[
+        "play",
+        "pause",
+        "resume",
+        "stop",
+        "seek",
+        "audio_track",
+        "subtitle_track",
+    ]
+    media_id: str | None = Field(default=None, min_length=1, max_length=500)
+    seconds: float | None = Field(default=None, ge=-3600, le=3600)
+    track: int | None = Field(default=None, ge=0, le=128)
+
+    @model_validator(mode="after")
+    def required_video_fields(self) -> "DeviceVideoCommand":
+        if self.action == "play" and not self.media_id:
+            raise ValueError("media_id is required for play")
+        if self.action == "seek" and self.seconds is None:
+            raise ValueError("seconds is required for seek")
+        if self.action in {"audio_track", "subtitle_track"} and self.track is None:
+            raise ValueError("track is required for track selection")
+        return self
+
+    def room_payload(self) -> dict[str, Any]:
+        action = f"video_{self.action}"
+        payload: dict[str, Any] = {"action": action}
+        if self.media_id is not None:
+            payload["media_id"] = self.media_id
+        if self.seconds is not None:
+            payload["seconds"] = self.seconds
+        if self.track is not None:
+            payload["track"] = self.track
+        return payload
+
+
 class MediaSearch(BaseModel):
     query: str = Field(min_length=1, max_length=500)
     media_types: list[str] = Field(default_factory=list)
@@ -1943,6 +1980,43 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
             raise HTTPException(status_code=502, detail=str(error)) from None
         response.headers["Cache-Control"] = "no-store"
         return {"device_id": device_id, "action": result}
+
+    @app.post("/v1/devices/{device_id}/video", status_code=201)
+    async def device_video_command(
+        device_id: str,
+        request: DeviceVideoCommand,
+        x_pilot_device_id: str = Header(),
+        authorization: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        device = authenticated_device(device_id, x_pilot_device_id, authorization)
+        if "media-control" not in device["capabilities"]:
+            raise HTTPException(
+                status_code=403, detail="device does not have media-control capability"
+            )
+        room_id = request.room_id or str(device["room_id"])
+        if room_id != device["room_id"] and "portable-client" not in device["capabilities"]:
+            raise HTTPException(
+                status_code=403, detail="fixed-room device cannot control another room"
+            )
+        try:
+            target = orchestrator.device(
+                room_id,
+                await device_hub.connected_ids(),
+                "video",
+            )
+        except ResolutionError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from None
+        command = await queue_device_command(
+            target.id,
+            request.room_payload(),
+            30,
+        )
+        return {
+            "device_id": device_id,
+            "room_id": room_id,
+            "target": target.as_dict(),
+            "command": command,
+        }
 
     @app.post("/v1/devices/{device_id}/home/actions/{action_id}/confirm")
     async def confirm_device_home_action(

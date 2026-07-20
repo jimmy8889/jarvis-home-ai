@@ -926,3 +926,8 @@ deployed integration, hardware boundary, or milestone status changes.
   confirmation for locks/alarms/garage doors, append-only action audit, and a
   stable semantic digital-twin manifest. Added matching native controls to the
   iOS and Android clients without exposing Home Assistant credentials.
+- **3.7** — Added Core 0.22 and Room Agent 0.6's supervised N150 local-video engine and the
+  portable-client video command contract: configured-root path containment,
+  file-type allowlisting, fixed mpv launch arguments, bounded seek/audio/
+  subtitle controls, durable expiring command delivery, and Ansible packaging.
+  Physical HDMI/HDR10 acceptance remains intentionally separate.

@@ -97,7 +97,7 @@ class PilotJsonTest {
         )
 
         assertEquals(2, results.size)
-        assertEquals("Artist", results.first().subtitle)
+        assertEquals("Artist", results.single { it.uri == "track://1" }.subtitle)
         assertFalse(results.any { it.uri.isBlank() })
     }
 }

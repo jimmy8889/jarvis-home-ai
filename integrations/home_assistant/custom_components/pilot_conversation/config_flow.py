@@ -52,22 +52,29 @@ class PilotConversationConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Create a Pilot Core conversation entry."""
         errors: dict[str, str] = {}
         if user_input is not None:
+            try:
+                user_input[CONF_CORE_URL] = _valid_url(
+                    str(user_input[CONF_CORE_URL])
+                )
+            except vol.Invalid:
+                errors[CONF_CORE_URL] = "invalid_url"
             await self.async_set_unique_id(str(user_input[CONF_DEVICE_ID]))
             self._abort_if_unique_id_configured()
             session = async_get_clientsession(self.hass)
-            try:
-                async with session.get(
-                    f"{user_input[CONF_CORE_URL]}/readyz",
-                    timeout=5,
-                ) as response:
-                    if response.status != 200:
-                        errors["base"] = "cannot_connect"
-                    else:
-                        payload = await response.json()
-                        if payload.get("ready") is not True:
+            if not errors:
+                try:
+                    async with session.get(
+                        f"{user_input[CONF_CORE_URL]}/readyz",
+                        timeout=5,
+                    ) as response:
+                        if response.status != 200:
                             errors["base"] = "cannot_connect"
-            except Exception:  # Home Assistant converts this to a user-facing error.
-                errors["base"] = "cannot_connect"
+                        else:
+                            payload = await response.json()
+                            if payload.get("ready") is not True:
+                                errors["base"] = "cannot_connect"
+                except Exception:  # Home Assistant converts this to a user-facing error.
+                    errors["base"] = "cannot_connect"
             if not errors:
                 return self.async_create_entry(
                     title=str(user_input[CONF_NAME]),
@@ -77,7 +84,7 @@ class PilotConversationConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         schema = vol.Schema(
             {
                 vol.Required(CONF_NAME, default="Pilot Core"): str,
-                vol.Required(CONF_CORE_URL, default=DEFAULT_CORE_URL): _valid_url,
+                vol.Required(CONF_CORE_URL, default=DEFAULT_CORE_URL): str,
                 vol.Required(CONF_DEVICE_ID, default=DEFAULT_DEVICE_ID): str,
                 vol.Required(CONF_DEVICE_TOKEN): str,
                 vol.Required(CONF_ROOM_ID, default=DEFAULT_ROOM_ID): str,

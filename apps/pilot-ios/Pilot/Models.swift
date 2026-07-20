@@ -78,7 +78,7 @@ struct EffectiveMediaState: Codable {
     }
 }
 
-struct CurrentMedia: Codable {
+struct CurrentMedia: Codable, Hashable {
     let title: String?
     let artist: String?
     let album: String?
@@ -101,11 +101,27 @@ struct AssistantReply: Codable {
 }
 
 struct ChatMessage: Identifiable, Hashable {
-    let id = UUID()
+    let id: UUID
     let role: Role
     let text: String
+    let createdAt: Date
+    let isError: Bool
 
-    enum Role {
+    init(
+        id: UUID = UUID(),
+        role: Role,
+        text: String,
+        createdAt: Date = .now,
+        isError: Bool = false
+    ) {
+        self.id = id
+        self.role = role
+        self.text = text
+        self.createdAt = createdAt
+        self.isError = isError
+    }
+
+    enum Role: Hashable {
         case user
         case pilot
     }
@@ -116,6 +132,92 @@ struct MusicSearchResult: Identifiable, Hashable {
     let title: String
     let subtitle: String
     let uri: String
+    let kind: MusicResultKind
+    let artworkURL: URL?
+}
+
+enum MusicResultKind: String, Hashable, CaseIterable {
+    case track
+    case album
+    case artist
+    case playlist
+    case radio
+    case other
+
+    var title: String {
+        switch self {
+        case .track: "Songs"
+        case .album: "Albums"
+        case .artist: "Artists"
+        case .playlist: "Playlists"
+        case .radio: "Radio"
+        case .other: "More"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .track: "music.note"
+        case .album: "square.stack"
+        case .artist: "person.wave.2"
+        case .playlist: "music.note.list"
+        case .radio: "dot.radiowaves.left.and.right"
+        case .other: "waveform"
+        }
+    }
+}
+
+struct EnergySnapshot: Equatable {
+    let status: Status
+    let solarWatts: Double?
+    let gridWatts: Double?
+    let batteryWatts: Double?
+    let batteryStateOfCharge: Double?
+    let homeLoadWatts: Double?
+    let observedAt: Date?
+    let detail: String?
+
+    enum Status: Equatable {
+        case live
+        case stale
+        case unavailable
+    }
+
+    static let awaitingBackend = EnergySnapshot(
+        status: .unavailable,
+        solarWatts: nil,
+        gridWatts: nil,
+        batteryWatts: nil,
+        batteryStateOfCharge: nil,
+        homeLoadWatts: nil,
+        observedAt: nil,
+        detail: "Energy access for portable clients is waiting on a device-scoped Pilot Core contract."
+    )
+
+    var isPopulated: Bool {
+        [solarWatts, gridWatts, batteryWatts, batteryStateOfCharge, homeLoadWatts]
+            .contains { $0 != nil }
+    }
+}
+
+enum PilotConnectionState: Equatable {
+    case notConfigured
+    case connecting
+    case connected
+    case offline(String)
+
+    var label: String {
+        switch self {
+        case .notConfigured: "Not configured"
+        case .connecting: "Connecting"
+        case .connected: "Connected"
+        case let .offline(message): message
+        }
+    }
+
+    var isConnected: Bool {
+        self == .connected
+    }
 }
 
 struct MediaCommand: Encodable {

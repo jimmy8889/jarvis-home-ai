@@ -22,9 +22,19 @@ struct PilotAPI: Sendable {
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         }
         let (data, response) = try await URLSession.shared.data(for: request)
-        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+        guard let http = response as? HTTPURLResponse else {
+            throw PilotAPIError.invalidResponse
+        }
+        guard (200..<300).contains(http.statusCode) else {
             let detail = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["detail"]
-            throw PilotAPIError.server(detail as? String ?? "Pilot Core request failed")
+            if http.statusCode == 401 || http.statusCode == 403 {
+                throw PilotAPIError.authentication(
+                    detail as? String ?? "This Pilot device credential was rejected."
+                )
+            }
+            throw PilotAPIError.server(
+                detail as? String ?? "Pilot Core returned HTTP \(http.statusCode)."
+            )
         }
         return data
     }
@@ -82,25 +92,52 @@ struct PilotAPI: Sendable {
 
     static func flattenSearch(_ object: Any) -> [MusicSearchResult] {
         var output: [MusicSearchResult] = []
-        func visit(_ value: Any) {
+        var seen = Set<String>()
+
+        func inferredKind(_ value: Any?, fallback: MusicResultKind) -> MusicResultKind {
+            guard let raw = value as? String else { return fallback }
+            let normalized = raw.lowercased()
+            if normalized.contains("track") || normalized.contains("song") { return .track }
+            if normalized.contains("album") { return .album }
+            if normalized.contains("artist") { return .artist }
+            if normalized.contains("playlist") { return .playlist }
+            if normalized.contains("radio") { return .radio }
+            return fallback
+        }
+
+        func containerKind(_ key: String) -> MusicResultKind {
+            inferredKind(key, fallback: .other)
+        }
+
+        func visit(_ value: Any, kind: MusicResultKind = .other) {
             if let values = value as? [Any] {
-                values.forEach(visit)
+                values.forEach { visit($0, kind: kind) }
                 return
             }
             guard let row = value as? [String: Any] else { return }
             if let uri = (row["uri"] ?? row["media_uri"]) as? String,
-               let title = (row["name"] ?? row["title"]) as? String {
+               let title = (row["name"] ?? row["title"]) as? String,
+               seen.insert(uri).inserted {
+                let artwork = (
+                    row["image_url"]
+                    ?? row["artwork_url"]
+                    ?? row["thumbnail"]
+                ) as? String
                 output.append(
                     MusicSearchResult(
                         id: uri,
                         title: title,
                         subtitle: (row["artist"] ?? row["album"] ?? row["media_type"]) as? String ?? "",
-                        uri: uri
+                        uri: uri,
+                        kind: inferredKind(row["media_type"] ?? row["type"], fallback: kind),
+                        artworkURL: artwork.flatMap(URL.init(string:))
                     )
                 )
                 return
             }
-            row.values.forEach(visit)
+            row.forEach { key, value in
+                visit(value, kind: containerKind(key))
+            }
         }
         visit(object)
         return Array(output.prefix(40))
@@ -110,12 +147,16 @@ struct PilotAPI: Sendable {
 enum PilotAPIError: LocalizedError {
     case notConfigured
     case invalidURL
+    case invalidResponse
+    case authentication(String)
     case server(String)
 
     var errorDescription: String? {
         switch self {
         case .notConfigured: "Pilot is not configured."
         case .invalidURL: "The Pilot Core URL is invalid."
+        case .invalidResponse: "Pilot Core returned an invalid response."
+        case let .authentication(detail): detail
         case let .server(detail): detail
         }
     }

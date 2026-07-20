@@ -1,12 +1,18 @@
-# Pilot iOS
+# Pilot iOS and iPadOS
 
-Pilot iOS is a native SwiftUI client for Pilot Core. The first release provides:
+Pilot is a native SwiftUI client for Pilot Core. The current application
+provides:
 
-- room and current-player state;
-- Music Assistant search and playback;
-- play, pause, stop, and volume controls;
+- an adaptive iPhone tab layout and iPad split-view layout;
+- secure onboarding and Keychain-backed device authentication;
+- connection validation before a configuration is accepted;
+- room-centric home, media, and assistant surfaces;
+- grouped Music Assistant search, playback, transport, and volume control;
+- compact and expanded now-playing presentation;
 - room-selectable contextual Pilot conversations;
-- Keychain-backed device authentication.
+- foreground auto-refresh and explicit loading, stale, offline, and error
+  states;
+- accessibility labels, Dynamic Type support, haptics, fixtures, and previews.
 
 The next major application surface is the Pilot Home Digital Twin: an
 interactive 3D representation of the house with live room state and bounded
@@ -59,5 +65,11 @@ Music Assistant access. The app is a thin presentation and control surface.
 The initial app permits HTTP only to support the existing private-LAN Core
 deployment; port 8770 must not be exposed outside that network. A trusted HTTPS
 origin is required before remote access is enabled.
-Background voice capture, meeting recording, artwork caching, transfer
-gestures, and push notification delivery remain later milestones.
+
+The current energy presentation is deliberately readiness-oriented until a
+portable-client energy contract is exposed by Pilot Core. The app does not
+invent sensor values or connect directly to Home Assistant.
+
+The next product milestones are the shared versioned house model and
+interactive home controls, followed by background voice capture, meeting
+recording, artwork caching, transfer gestures, and push notification delivery.

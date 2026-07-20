@@ -97,12 +97,20 @@ in [docs/N150_MEDIA_CONSOLE.md](docs/N150_MEDIA_CONSOLE.md).
 Pilot Core's room-scoped dialogue, deterministic Home Assistant fast path,
 optional local model fallback, and typed tool boundary are documented in
 [docs/CONTEXTUAL_ASSISTANT.md](docs/CONTEXTUAL_ASSISTANT.md).
+The persistent Home Assistant entity catalogue, semantic discovery, coverage
+reporting, bounded read tools, and dashboard controls are documented in
+[docs/HOME_INTELLIGENCE.md](docs/HOME_INTELLIGENCE.md).
 The Home Assistant conversation-agent installation and voice-pipeline rollback
 path are documented in
 [docs/HOME_ASSISTANT_CONVERSATION_BRIDGE.md](docs/HOME_ASSISTANT_CONVERSATION_BRIDGE.md).
 
-The native iPhone room, media, and assistant client is documented in
+The adaptive native iPhone and iPad room, media, and assistant client is
+documented in
 [docs/PILOT_IOS.md](docs/PILOT_IOS.md).
+
+The native Android wall-tablet client, including secure enrolment, energy
+visualisation, night operation, and kiosk-readiness boundaries, is documented
+in [docs/PILOT_ANDROID.md](docs/PILOT_ANDROID.md).
 
 The app-first interactive 3D home representation, shared iOS/Android digital
 twin, Home Assistant projection, and wall-tablet roadmap are documented in
@@ -172,7 +180,8 @@ It defines:
 ```text
 apps/room-agent/       Local health/status API
 apps/pilot-core/       Central room and player registry API
-apps/pilot-ios/        Native iPhone media and assistant client
+apps/pilot-ios/        Native iPhone and iPad home, media, and assistant client
+apps/pilot-android/    Native Android wall-tablet Pilot client
 apps/shield-tv/        Kotlin/Compose for TV operations client
 config/                Versioned example room configuration
 deploy/ansible/        Reproducible Debian 13 deployment

@@ -8,6 +8,11 @@ from urllib.parse import urlsplit
 import httpx
 
 from .config import IntegrationSettings
+from .home_intelligence import (
+    HOME_READ_TOOL_NAMES,
+    HomeIntelligence,
+    HomeResolutionError,
+)
 from .integrations import (
     IntegrationRequestFailed,
     IntegrationUnavailable,
@@ -133,6 +138,32 @@ def _required_read_tool(text: str) -> str | None:
         for phrase in ("what is playing", "what's playing", "now playing")
     ):
         return "get_room_status"
+    if any(
+        phrase in normalized
+        for phrase in (
+            "energy flow",
+            "solar power",
+            "grid power",
+            "battery power",
+            "home load",
+            "importing power",
+            "exporting power",
+        )
+    ):
+        return "get_energy_snapshot"
+    if any(
+        phrase in normalized
+        for phrase in (
+            "which lights",
+            "what lights",
+            "which switches",
+            "what switches",
+            "what entities",
+            "what devices",
+            "what controls",
+        )
+    ):
+        return "search_home_entities"
     return None
 
 
@@ -223,12 +254,14 @@ class AssistantTools:
         integrations: Integrations,
         media_states: MediaStateReader,
         store: Store,
+        home_intelligence: HomeIntelligence | None = None,
     ) -> None:
         self.registry = registry
         self.orchestrator = orchestrator
         self.integrations = integrations
         self.media_states = media_states
         self.store = store
+        self.home_intelligence = home_intelligence
 
     @staticmethod
     def definitions() -> list[dict[str, Any]]:
@@ -268,6 +301,50 @@ class AssistantTools:
                 "Read the configured indoor or outdoor temperature sensor.",
                 {"location": {"type": "string", "enum": ["inside", "outside"]}},
                 ("location",),
+            ),
+            tool(
+                "search_home_entities",
+                (
+                    "Search the read-only Home Assistant catalogue by natural name, "
+                    "entity id, room, and domain. This cannot change home state."
+                ),
+                {
+                    "query": {"type": "string", "minLength": 1, "maxLength": 200},
+                    "domain": {"type": "string", "minLength": 1, "maxLength": 64},
+                    "area": {"type": "string", "minLength": 1, "maxLength": 128},
+                },
+                ("query",),
+            ),
+            tool(
+                "read_home_entity",
+                (
+                    "Read one entity from the local catalogue by exact entity id or "
+                    "unambiguous name. Never use it to perform an action."
+                ),
+                {
+                    "entity": {"type": "string", "minLength": 1, "maxLength": 255},
+                    "domain": {"type": "string", "minLength": 1, "maxLength": 64},
+                    "area": {"type": "string", "minLength": 1, "maxLength": 128},
+                },
+                ("entity",),
+            ),
+            tool(
+                "get_home_area_summary",
+                "Read availability and current states for one room or area.",
+                {
+                    "area": {
+                        "type": "string",
+                        "description": "Area id or name; omit for the current room.",
+                    }
+                },
+            ),
+            tool(
+                "get_energy_snapshot",
+                (
+                    "Read normalized solar, grid, battery, battery charge, and home "
+                    "load state from the local catalogue."
+                ),
+                {},
             ),
             tool(
                 "control_home",
@@ -369,6 +446,57 @@ class AssistantTools:
                     f"{location} temperature is not configured"
                 )
             return _bounded(await self.integrations.home_assistant_state(entity_id))
+        if name in {
+            "search_home_entities",
+            "read_home_entity",
+            "get_home_area_summary",
+            "get_energy_snapshot",
+        }:
+            if self.home_intelligence is None:
+                raise IntegrationUnavailable("home catalogue is not configured")
+            if name == "search_home_entities":
+                query = arguments.get("query")
+                if not isinstance(query, str) or not query.strip():
+                    raise ValueError("query is required")
+                domain = arguments.get("domain")
+                area = arguments.get("area")
+                result = self.home_intelligence.search(
+                    query.strip(),
+                    domain=domain.strip() if isinstance(domain, str) else None,
+                    area_id=(
+                        area.strip().casefold().replace("-", "_").replace(" ", "_")
+                        if isinstance(area, str)
+                        else None
+                    ),
+                    limit=12,
+                )
+                return _bounded(result)
+            if name == "read_home_entity":
+                entity = arguments.get("entity")
+                if not isinstance(entity, str) or not entity.strip():
+                    raise ValueError("entity is required")
+                domain = arguments.get("domain")
+                area = arguments.get("area")
+                return _bounded(
+                    self.home_intelligence.resolve(
+                        entity.strip(),
+                        domain=domain.strip() if isinstance(domain, str) else None,
+                        area_id=(
+                            area.strip().casefold().replace("-", "_").replace(" ", "_")
+                            if isinstance(area, str)
+                            else None
+                        ),
+                    )
+                )
+            if name == "get_home_area_summary":
+                area = arguments.get("area")
+                selected = (
+                    area.strip()
+                    if isinstance(area, str) and area.strip()
+                    else room_id
+                )
+                return _bounded(self.home_intelligence.area_summary(selected))
+            return _bounded(self.home_intelligence.energy_snapshot())
         if name == "control_home":
             command = arguments.get("command")
             if not isinstance(command, str) or not command.strip():
@@ -648,6 +776,13 @@ class ConversationEngine:
                 if not isinstance(arguments, dict):
                     raise LLMRequestFailed(f"arguments for {name} are not an object")
                 media_uri = arguments.get("media_uri")
+                home_catalogue_read = any(
+                    item["name"] in HOME_READ_TOOL_NAMES for item in executed
+                )
+                untrusted_data_action = (
+                    home_catalogue_read
+                    and name in {"control_home", "play_music", "control_media"}
+                )
                 searched_uri = (
                     name == "play_music"
                     and isinstance(media_uri, str)
@@ -657,7 +792,15 @@ class ConversationEngine:
                         for item in executed
                     )
                 )
-                if name == "play_music" and not searched_uri:
+                if untrusted_data_action:
+                    output = {
+                        "success": False,
+                        "error": (
+                            "read-only home catalogue output cannot authorize an "
+                            "action in the same reasoning request"
+                        ),
+                    }
+                elif name == "play_music" and not searched_uri:
                     output = {
                         "success": False,
                         "error": (
@@ -677,6 +820,7 @@ class ConversationEngine:
                     except (
                         IntegrationUnavailable,
                         IntegrationRequestFailed,
+                        HomeResolutionError,
                         ValueError,
                     ) as error:
                         output = {"success": False, "error": str(error)}

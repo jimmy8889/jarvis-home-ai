@@ -43,6 +43,9 @@ class IntegrationSettings:
     energy_battery_power_entity_id: str = ""
     energy_battery_soc_entity_id: str = ""
     energy_home_load_entity_id: str = ""
+    home_catalog_sync_interval_seconds: int = 300
+    home_catalog_stale_after_seconds: int = 900
+    home_catalog_max_entities: int = 20_000
     tts_provider: str = ""
     tts_url: str = ""
     tts_token_env: str = "PILOT_TTS_TOKEN"
@@ -332,6 +335,15 @@ def load_settings(path: str | Path) -> Settings:
         energy_home_load_entity_id=str(
             integration_values.get("energy_home_load_entity_id", "")
         ).strip(),
+        home_catalog_sync_interval_seconds=int(
+            integration_values.get("home_catalog_sync_interval_seconds", 300)
+        ),
+        home_catalog_stale_after_seconds=int(
+            integration_values.get("home_catalog_stale_after_seconds", 900)
+        ),
+        home_catalog_max_entities=int(
+            integration_values.get("home_catalog_max_entities", 20_000)
+        ),
         tts_provider=str(integration_values.get("tts_provider", "")).strip(),
         tts_url=str(integration_values.get("tts_url", "")).rstrip("/"),
         tts_token_env=str(integration_values.get("tts_token_env", "PILOT_TTS_TOKEN")),
@@ -355,6 +367,20 @@ def load_settings(path: str | Path) -> Settings:
         llm_max_tool_rounds=int(integration_values.get("llm_max_tool_rounds", 4)),
         llm_context_turns=int(integration_values.get("llm_context_turns", 12)),
     )
+    if not 30 <= integrations.home_catalog_sync_interval_seconds <= 86_400:
+        raise ValueError(
+            "integrations.home_catalog_sync_interval_seconds must be between "
+            "30 and 86400"
+        )
+    if not 60 <= integrations.home_catalog_stale_after_seconds <= 604_800:
+        raise ValueError(
+            "integrations.home_catalog_stale_after_seconds must be between "
+            "60 and 604800"
+        )
+    if not 100 <= integrations.home_catalog_max_entities <= 100_000:
+        raise ValueError(
+            "integrations.home_catalog_max_entities must be between 100 and 100000"
+        )
     if integrations.tts_provider not in {"", "home_assistant", "openai"}:
         raise ValueError("integrations.tts_provider must be home_assistant or openai")
     if integrations.tts_format not in {"wav", "flac", "mp3", "ogg", "aac"}:

@@ -4,25 +4,76 @@ import Observation
 @MainActor
 @Observable
 final class PilotModel {
-    var coreURL = UserDefaults.standard.string(forKey: "pilot.coreURL") ?? "http://10.0.1.64:8770"
-    var deviceID = UserDefaults.standard.string(forKey: "pilot.deviceID") ?? "pilot-ios-james"
-    var token = KeychainStore.read(account: "device-token")
+    var coreURL: String
+    var deviceID: String
+    var token: String
     var rooms: [PilotRoom] = []
     var playerStates: [PilotPlayerState] = []
-    var selectedRoomID = UserDefaults.standard.string(forKey: "pilot.roomID") ?? "office"
+    var selectedRoomID: String
     var searchResults: [MusicSearchResult] = []
+    var lastSearchQuery = ""
     var messages: [ChatMessage] = []
     var conversationID: String?
-    var status = "Not connected"
-    var isBusy = false
+    var connectionState: PilotConnectionState
+    var lastSuccessfulRefresh: Date?
+    var isRefreshing = false
+    var isSearching = false
+    var isSendingMessage = false
+    var activeMediaAction: String?
+    var energy = EnergySnapshot.awaitingBackend
+
+    init(loadStoredSettings: Bool = true) {
+        if loadStoredSettings {
+            coreURL = UserDefaults.standard.string(forKey: "pilot.coreURL")
+                ?? "http://10.0.1.64:8770"
+            deviceID = UserDefaults.standard.string(forKey: "pilot.deviceID")
+                ?? "pilot-ios-james"
+            token = KeychainStore.read(account: "device-token")
+            selectedRoomID = UserDefaults.standard.string(forKey: "pilot.roomID")
+                ?? "office"
+        } else {
+            coreURL = ""
+            deviceID = ""
+            token = ""
+            selectedRoomID = "office"
+        }
+        connectionState = .notConfigured
+    }
 
     var isConfigured: Bool {
-        !coreURL.isEmpty && !deviceID.isEmpty && !token.isEmpty
+        !coreURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !deviceID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !token.isEmpty
+    }
+
+    var status: String {
+        connectionState.label
+    }
+
+    var selectedRoom: PilotRoom? {
+        rooms.first(where: { $0.id == selectedRoomID })
     }
 
     var selectedPlayer: PilotPlayerState? {
-        guard let room = rooms.first(where: { $0.id == selectedRoomID }) else { return nil }
-        return playerStates.first(where: { $0.player.id == room.defaultMusicPlayerID })
+        guard let selectedRoom else { return nil }
+        return playerStates.first(where: {
+            $0.player.id == selectedRoom.defaultMusicPlayerID
+        })
+    }
+
+    var activePlayer: PilotPlayerState? {
+        playerStates.first(where: {
+            ["playing", "buffering"].contains(
+                $0.effective.playbackState?.lowercased() ?? ""
+            )
+        }) ?? selectedPlayer
+    }
+
+    var groupedSearchResults: [(MusicResultKind, [MusicSearchResult])] {
+        MusicResultKind.allCases.compactMap { kind in
+            let values = searchResults.filter { $0.kind == kind }
+            return values.isEmpty ? nil : (kind, values)
+        }
     }
 
     func saveSettings() {
@@ -35,6 +86,11 @@ final class PilotModel {
         try? KeychainStore.save(token, account: "device-token")
     }
 
+    func selectRoom(_ roomID: String) {
+        selectedRoomID = roomID
+        UserDefaults.standard.set(roomID, forKey: "pilot.roomID")
+    }
+
     func api() throws -> PilotAPI {
         guard isConfigured else { throw PilotAPIError.notConfigured }
         guard let url = URL(string: coreURL), ["http", "https"].contains(url.scheme) else {
@@ -43,27 +99,50 @@ final class PilotModel {
         return PilotAPI(coreURL: url, deviceID: deviceID, token: token)
     }
 
-    func refresh() async {
-        guard isConfigured else { return }
+    @discardableResult
+    func connect() async -> Bool {
+        saveSettings()
+        return await refresh()
+    }
+
+    @discardableResult
+    func refresh(silent: Bool = false) async -> Bool {
+        guard isConfigured else {
+            connectionState = .notConfigured
+            return false
+        }
+        if !silent {
+            connectionState = .connecting
+        }
+        isRefreshing = true
+        defer { isRefreshing = false }
         do {
             let value = try await api().media()
             rooms = value.rooms
             playerStates = value.media.players.values.sorted {
-                $0.player.name.localizedCaseInsensitiveCompare($1.player.name) == .orderedAscending
+                $0.player.name.localizedCaseInsensitiveCompare($1.player.name)
+                    == .orderedAscending
             }
             if !rooms.contains(where: { $0.id == selectedRoomID }) {
-                selectedRoomID = value.roomID
+                selectRoom(value.roomID)
             }
-            status = "Connected"
+            lastSuccessfulRefresh = .now
+            connectionState = .connected
+            return true
         } catch {
-            status = error.localizedDescription
+            connectionState = .offline(Self.friendlyMessage(for: error))
+            return false
         }
     }
 
-    func command(_ action: String, volume: Int? = nil, mediaURI: String? = nil) async {
+    func command(
+        _ action: String,
+        volume: Int? = nil,
+        mediaURI: String? = nil
+    ) async {
         guard let player = selectedPlayer else { return }
-        isBusy = true
-        defer { isBusy = false }
+        activeMediaAction = action
+        defer { activeMediaAction = nil }
         do {
             try await api().send(
                 MediaCommand(
@@ -73,20 +152,47 @@ final class PilotModel {
                     volume: volume
                 )
             )
-            await refresh()
+            _ = await refresh(silent: true)
         } catch {
-            status = error.localizedDescription
+            connectionState = .offline(Self.friendlyMessage(for: error))
+        }
+    }
+
+    func transfer(to roomID: String) async {
+        guard let player = selectedPlayer, roomID != selectedRoomID else { return }
+        activeMediaAction = "transfer"
+        defer { activeMediaAction = nil }
+        do {
+            try await api().send(
+                MediaCommand(
+                    action: "transfer",
+                    playerID: player.player.id,
+                    targetRoomID: roomID
+                )
+            )
+            selectRoom(roomID)
+            _ = await refresh(silent: true)
+        } catch {
+            connectionState = .offline(Self.friendlyMessage(for: error))
         }
     }
 
     func search(_ query: String) async {
-        guard !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-        isBusy = true
-        defer { isBusy = false }
+        let normalized = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty else {
+            searchResults = []
+            lastSearchQuery = ""
+            return
+        }
+        lastSearchQuery = normalized
+        isSearching = true
+        defer { isSearching = false }
         do {
-            searchResults = try await api().search(query)
+            searchResults = try await api().search(normalized)
+            connectionState = .connected
         } catch {
-            status = error.localizedDescription
+            searchResults = []
+            connectionState = .offline(Self.friendlyMessage(for: error))
         }
     }
 
@@ -94,8 +200,8 @@ final class PilotModel {
         let prompt = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !prompt.isEmpty else { return }
         messages.append(ChatMessage(role: .user, text: prompt))
-        isBusy = true
-        defer { isBusy = false }
+        isSendingMessage = true
+        defer { isSendingMessage = false }
         do {
             let reply = try await api().ask(
                 prompt,
@@ -104,10 +210,131 @@ final class PilotModel {
             )
             conversationID = reply.conversationID
             messages.append(ChatMessage(role: .pilot, text: reply.responseText))
-            status = "Connected · \(reply.provider)"
+            connectionState = .connected
         } catch {
-            messages.append(ChatMessage(role: .pilot, text: error.localizedDescription))
-            status = error.localizedDescription
+            let message = Self.friendlyMessage(for: error)
+            messages.append(
+                ChatMessage(role: .pilot, text: message, isError: true)
+            )
+            connectionState = .offline(message)
         }
+    }
+
+    func startNewConversation() {
+        conversationID = nil
+        messages = []
+    }
+
+    static func friendlyMessage(for error: Error) -> String {
+        if let urlError = error as? URLError {
+            switch urlError.code {
+            case .notConnectedToInternet, .networkConnectionLost:
+                return "Pilot Core is offline. Check your local network."
+            case .timedOut:
+                return "Pilot Core took too long to respond."
+            case .cannotConnectToHost, .cannotFindHost:
+                return "Pilot Core could not be reached."
+            default:
+                break
+            }
+        }
+        return error.localizedDescription
+    }
+
+    static func preview() -> PilotModel {
+        let model = PilotModel(loadStoredSettings: false)
+        model.coreURL = "http://pilot.local:8770"
+        model.deviceID = "pilot-ios-preview"
+        model.token = "preview"
+        let officePlayer = PilotPlayer(
+            id: "office-n150",
+            roomID: "office",
+            name: "Office Audio",
+            kind: "audio",
+            protocolName: "sendspin",
+            enabled: true,
+            controlEnabled: true
+        )
+        let mediaPlayer = PilotPlayer(
+            id: "media-room-heos",
+            roomID: "media-room",
+            name: "Media Room",
+            kind: "receiver",
+            protocolName: "heos",
+            enabled: true,
+            controlEnabled: true
+        )
+        model.rooms = [
+            PilotRoom(
+                id: "office",
+                name: "Office",
+                responsePlayerID: officePlayer.id,
+                defaultMusicPlayerID: officePlayer.id,
+                players: [officePlayer]
+            ),
+            PilotRoom(
+                id: "media-room",
+                name: "Media Room",
+                responsePlayerID: mediaPlayer.id,
+                defaultMusicPlayerID: mediaPlayer.id,
+                players: [mediaPlayer]
+            ),
+        ]
+        model.playerStates = [
+            PilotPlayerState(
+                player: officePlayer,
+                status: "available",
+                effective: EffectiveMediaState(
+                    available: true,
+                    powered: true,
+                    playbackState: "playing",
+                    volumePercent: 34,
+                    muted: false,
+                    source: "Music Assistant",
+                    media: CurrentMedia(
+                        title: "Teardrop",
+                        artist: "Massive Attack",
+                        album: "Mezzanine"
+                    )
+                )
+            ),
+            PilotPlayerState(
+                player: mediaPlayer,
+                status: "available",
+                effective: EffectiveMediaState(
+                    available: true,
+                    powered: true,
+                    playbackState: "idle",
+                    volumePercent: 26,
+                    muted: false,
+                    source: "HEOS",
+                    media: nil
+                )
+            ),
+        ]
+        model.energy = EnergySnapshot(
+            status: .live,
+            solarWatts: 8_420,
+            gridWatts: -4_910,
+            batteryWatts: 2_080,
+            batteryStateOfCharge: 76,
+            homeLoadWatts: 3_510,
+            observedAt: .now,
+            detail: nil
+        )
+        model.messages = [
+            ChatMessage(
+                role: .pilot,
+                text: "Good evening. The office is playing Teardrop and the house is exporting 4.9 kW."
+            ),
+            ChatMessage(role: .user, text: "What about the battery?"),
+            ChatMessage(
+                role: .pilot,
+                text: "The battery is at 76% and charging at roughly 2.1 kW."
+            ),
+        ]
+        model.connectionState = .connected
+        model.lastSuccessfulRefresh = .now
+        return model
     }
 }

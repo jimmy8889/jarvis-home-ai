@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import unittest
+from collections import deque
 
 import httpx
 
@@ -71,6 +72,134 @@ class IntegrationDiagnosticTests(unittest.IsolatedAsyncioTestCase):
             await integrations.home_assistant_state(
                 "media_player.media_room/../../config"
             )
+
+    async def test_home_assistant_catalogue_fetch_is_read_only_and_bounded(self) -> None:
+        requests: list[httpx.Request] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            requests.append(request)
+            return httpx.Response(
+                200,
+                json=[
+                    {
+                        "entity_id": "light.office",
+                        "state": "on",
+                        "attributes": {"friendly_name": "Office"},
+                    }
+                ],
+            )
+
+        integrations = Integrations(
+            IntegrationSettings(
+                home_assistant_url="http://ha.local:8123",
+                home_catalog_max_entities=100,
+            ),
+            httpx.MockTransport(handler),
+        )
+        result = await integrations.home_assistant_states()
+        self.assertEqual(result[0]["entity_id"], "light.office")
+        self.assertEqual(requests[0].method, "GET")
+        self.assertEqual(requests[0].url.path, "/api/states")
+
+    async def test_home_assistant_catalogue_rejects_oversized_entity_count(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(
+                200,
+                json=[
+                    {"entity_id": f"sensor.metric_{index}", "state": str(index)}
+                    for index in range(101)
+                ],
+            )
+
+        integrations = Integrations(
+            IntegrationSettings(
+                home_assistant_url="http://ha.local:8123",
+                home_catalog_max_entities=100,
+            ),
+            httpx.MockTransport(handler),
+        )
+        with self.assertRaisesRegex(IntegrationRequestFailed, "entity limit"):
+            await integrations.home_assistant_states()
+
+    async def test_home_assistant_registry_snapshot_is_read_only_and_tolerates_unsupported_floor(
+        self,
+    ) -> None:
+        class FakeSocket:
+            def __init__(self) -> None:
+                self.sent: list[dict[str, object]] = []
+                self.received = deque(
+                    [
+                        {"type": "auth_required"},
+                        {"type": "auth_ok"},
+                        {
+                            "id": 1,
+                            "type": "result",
+                            "success": True,
+                            "result": [{"area_id": "office", "name": "Office"}],
+                        },
+                        {
+                            "id": 2,
+                            "type": "result",
+                            "success": True,
+                            "result": [{"id": "device-1", "area_id": "office"}],
+                        },
+                        {
+                            "id": 3,
+                            "type": "result",
+                            "success": True,
+                            "result": [
+                                {
+                                    "entity_id": "light.office",
+                                    "device_id": "device-1",
+                                    "unique_id": "stable-light",
+                                }
+                            ],
+                        },
+                        {
+                            "id": 4,
+                            "type": "result",
+                            "success": False,
+                            "error": {"code": "unknown_command"},
+                        },
+                    ]
+                )
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *_args):
+                return None
+
+            async def recv(self) -> str:
+                return json.dumps(self.received.popleft())
+
+            async def send(self, message: str) -> None:
+                self.sent.append(json.loads(message))
+
+        socket = FakeSocket()
+
+        def factory(*_args, **_kwargs):
+            return socket
+
+        integrations = Integrations(
+            IntegrationSettings(home_assistant_url="http://ha.local:8123"),
+            websocket_factory=factory,
+        )
+        result = await integrations.home_assistant_registry_snapshot()
+        self.assertEqual(result["areas"][0]["area_id"], "office")
+        self.assertEqual(result["entities"][0]["unique_id"], "stable-light")
+        self.assertIsNone(result["floors"])
+        self.assertFalse(result["supported"]["floors"])
+        self.assertEqual(
+            [message["type"] for message in socket.sent[1:]],
+            [
+                "config/area_registry/list",
+                "config/device_registry/list",
+                "config/entity_registry/list",
+                "config/floor_registry/list",
+            ],
+        )
+        self.assertEqual(socket.sent[0]["type"], "auth")
 
     async def test_media_player_source_command_is_entity_scoped(self) -> None:
         def handler(request: httpx.Request) -> httpx.Response:

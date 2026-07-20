@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime, timedelta
+import json
 import re
 import time
 from typing import Any
 from uuid import uuid4
 
 import httpx
+from websockets.asyncio.client import connect as websocket_connect
+from websockets.exceptions import WebSocketException
 
 from .config import IntegrationSettings
 from .secret_values import read_secret
@@ -44,9 +47,11 @@ class Integrations:
         self,
         settings: IntegrationSettings,
         transport: httpx.AsyncBaseTransport | None = None,
+        websocket_factory: Any | None = None,
     ) -> None:
         self.settings = settings
         self.transport = transport
+        self.websocket_factory = websocket_factory or websocket_connect
 
     async def music_assistant(self, command: str, args: dict[str, Any]) -> Any:
         if not self.settings.music_assistant_url:
@@ -132,6 +137,141 @@ class Integrations:
             raise IntegrationRequestFailed(
                 f"Home Assistant state request failed: {error}"
             ) from error
+
+    async def home_assistant_states(self) -> list[dict[str, Any]]:
+        """Fetch one read-only state snapshot for the local entity catalogue."""
+
+        if not self.settings.home_assistant_url:
+            raise IntegrationUnavailable("Home Assistant URL is not configured")
+        token = read_secret(self.settings.home_assistant_token_env)
+        if not token:
+            raise IntegrationUnavailable("Home Assistant token is not configured")
+        try:
+            async with httpx.AsyncClient(
+                timeout=30, transport=self.transport, follow_redirects=False
+            ) as client:
+                response = await client.get(
+                    f"{self.settings.home_assistant_url}/api/states",
+                    headers={"Authorization": f"Bearer {token}"},
+                )
+                response.raise_for_status()
+                if len(response.content) > 64_000_000:
+                    raise ValueError("state snapshot is too large")
+                payload = response.json()
+                if not isinstance(payload, list):
+                    raise ValueError("state snapshot is not an array")
+                if len(payload) > self.settings.home_catalog_max_entities:
+                    raise ValueError("state snapshot exceeds the configured entity limit")
+                if not all(isinstance(item, dict) for item in payload):
+                    raise ValueError("state snapshot contains an invalid entry")
+                return payload
+        except (httpx.HTTPError, ValueError) as error:
+            raise IntegrationRequestFailed(
+                f"Home Assistant state snapshot failed: {error}"
+            ) from error
+
+    async def home_assistant_registry_snapshot(self) -> dict[str, Any]:
+        """Read HA registries over its authenticated, local WebSocket API.
+
+        Registry commands are versioned by Home Assistant. Unsupported commands
+        are reported per section instead of failing the state catalogue.
+        """
+
+        if not self.settings.home_assistant_url:
+            raise IntegrationUnavailable("Home Assistant URL is not configured")
+        token = read_secret(self.settings.home_assistant_token_env)
+        if not token:
+            raise IntegrationUnavailable("Home Assistant token is not configured")
+        base = httpx.URL(self.settings.home_assistant_url)
+        if base.scheme not in {"http", "https"} or not base.host:
+            raise IntegrationRequestFailed("Home Assistant URL is invalid")
+        websocket_url = base.copy_with(
+            scheme="wss" if base.scheme == "https" else "ws",
+            path="/api/websocket",
+            query=None,
+            fragment=None,
+        )
+        commands = (
+            ("areas", "config/area_registry/list"),
+            ("devices", "config/device_registry/list"),
+            ("entities", "config/entity_registry/list"),
+            ("floors", "config/floor_registry/list"),
+        )
+        try:
+            async with self.websocket_factory(
+                str(websocket_url),
+                open_timeout=10,
+                close_timeout=5,
+                max_size=16_000_000,
+            ) as socket:
+                required = await self._websocket_json(socket)
+                if required.get("type") != "auth_required":
+                    raise ValueError("Home Assistant did not request authentication")
+                await socket.send(
+                    json.dumps(
+                        {"type": "auth", "access_token": token},
+                        separators=(",", ":"),
+                    )
+                )
+                authenticated = await self._websocket_json(socket)
+                if authenticated.get("type") != "auth_ok":
+                    raise ValueError("Home Assistant WebSocket authentication failed")
+                result: dict[str, Any] = {
+                    "areas": None,
+                    "devices": None,
+                    "entities": None,
+                    "floors": None,
+                    "supported": {},
+                }
+                for message_id, (name, command) in enumerate(commands, start=1):
+                    await socket.send(
+                        json.dumps(
+                            {"id": message_id, "type": command},
+                            separators=(",", ":"),
+                        )
+                    )
+                    response = await self._websocket_json(socket)
+                    if (
+                        response.get("type") != "result"
+                        or response.get("id") != message_id
+                    ):
+                        raise ValueError("Home Assistant registry response is invalid")
+                    success = response.get("success") is True
+                    result["supported"][name] = success
+                    payload = response.get("result")
+                    if success:
+                        if not isinstance(payload, list):
+                            raise ValueError(
+                                f"Home Assistant {name} registry is not an array"
+                            )
+                        if len(payload) > self.settings.home_catalog_max_entities:
+                            raise ValueError(
+                                f"Home Assistant {name} registry exceeds the limit"
+                            )
+                        if not all(isinstance(item, dict) for item in payload):
+                            raise ValueError(
+                                f"Home Assistant {name} registry is invalid"
+                            )
+                        result[name] = payload
+                return result
+        except (OSError, TimeoutError, ValueError, WebSocketException) as error:
+            raise IntegrationRequestFailed(
+                f"Home Assistant registry snapshot failed: {error}"
+            ) from error
+
+    @staticmethod
+    async def _websocket_json(socket: Any) -> dict[str, Any]:
+        message = await asyncio.wait_for(socket.recv(), timeout=10)
+        if isinstance(message, bytes):
+            if len(message) > 16_000_000:
+                raise ValueError("Home Assistant WebSocket message is too large")
+            message = message.decode("utf-8")
+        if not isinstance(message, str) or len(message) > 16_000_000:
+            raise ValueError("Home Assistant WebSocket message is invalid")
+        payload = json.loads(message)
+        if not isinstance(payload, dict):
+            raise ValueError("Home Assistant WebSocket payload is not an object")
+        return payload
 
     async def home_assistant_media_player_command(
         self,

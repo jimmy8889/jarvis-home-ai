@@ -1,6 +1,6 @@
 # Pilot OS Blueprint
 
-Version 3.4
+Version 3.5
 
 Last updated: 2026-07-20
 
@@ -599,6 +599,10 @@ office endpoint milestone.
 
 ```text
 pilot/
+  apps/pilot-core/
+  apps/pilot-ios/
+  apps/pilot-android/
+  apps/shield-tv/
   apps/room-agent/
   config/
   deploy/ansible/
@@ -608,10 +612,7 @@ pilot/
   systemd/
 
 Future:
-  core/
   macos/
-  ios/
-  shield-tv/
   ai/
   api/
   infra/
@@ -645,7 +646,7 @@ deployed integration, hardware boundary, or milestone status changes.
 - [x] TIDAL provider and playback acceptance test
 - [ ] Local lossless-library acceptance test
 - [x] Source-priority policy and local control/event foundation
-- [ ] Audible assistant ducking and gain-restoration acceptance test
+- [x] Audible assistant ducking and gain-restoration acceptance test
 - [ ] Bluetooth A2DP sink
 
 ### Embedded nodes
@@ -668,7 +669,8 @@ deployed integration, hardware boundary, or milestone status changes.
 - [x] Provider-neutral Denon and Shield state
 - [x] Fail-closed Media Room control gate
 - [x] Enable the accepted Denon HEOS music route
-- [ ] In-person Denon audible playback and source-switch acceptance
+- [x] In-person Denon audible music playback
+- [ ] In-person Denon source-switch and restart-recovery acceptance
 - [x] Shield application foundation
 - [ ] Shield device pairing and physical deployment
 - [x] N150 Media Console architecture and native-HDMI boundary
@@ -685,16 +687,23 @@ deployed integration, hardware boundary, or milestone status changes.
 - [ ] N150/Shield playback-engine selection and handoff
 - [ ] Multi-room sync and announcements
 
-### Phase 4 — Home digital twin clients
+### Phase 4 — Home intelligence and digital twin clients
 
-- [ ] Home Assistant room/entity inventory and security classification
+- [x] Read-only Home Assistant entity, device, area, floor, and alias inventory
+- [x] Bounded catalogue security classification and attribute projection
+- [x] Persistent catalogue freshness, missing, stale, and outage handling
+- [x] Semantic entity search and ambiguity-safe read tools
+- [x] Pilot Core coverage, catalogue, area, device, floor, and energy APIs
+- [x] Administrator catalogue coverage, search, sync, and energy dashboard
 - [ ] Optimized house GLB asset and versioned room/entity manifest
-- [ ] Pilot Core home-model, state, action, event, permission, and audit APIs
-- [ ] Shared 2D room-control fallback
+- [ ] Pilot Core typed home-action, permission, confirmation, and audit APIs
+- [x] Shared client-ready 2D room/home presentation foundation
 - [ ] iOS/iPadOS interactive 3D house surface
 - [ ] Live lighting representation and room/device interaction
-- [ ] Native Android wall-tablet application
-- [ ] Android kiosk startup, dimming, offline, and crash recovery
+- [x] Polished adaptive iOS/iPadOS home, media, and assistant client
+- [x] Native Android wall-tablet application foundation
+- [x] Android immersive display, night mode, cached offline state, and reconnect behavior
+- [ ] Android boot launch, device-owner kiosk, watchdog, and physical-tablet acceptance
 - [ ] Climate, blinds, media, occupancy, environmental, and energy overlays
 - [ ] Confirmation-gated locks, garage, alarm, and security actions
 - [ ] Model mapping and calibration tools
@@ -741,26 +750,30 @@ deployed integration, hardware boundary, or milestone status changes.
 - [x] Add deterministic Home Assistant routing with local-model fallback
 - [x] Deploy the RTX Ollama model and low-latency reasoning configuration
 - [x] Add bounded typed tools for home state/control, weather, and music
+- [x] Add a governed full Home Assistant catalogue and read-only semantic tools
+- [x] Add synchronized floor, area, device, entity, alias, and energy projections
+- [x] Add polished native iOS/iPadOS and Android wall-tablet application surfaces
 - [x] Deploy the first Raspberry Pi large-format Pilot display appliance
 
 ## 14. Immediate next steps
 
-1. Assign the 10-inch Raspberry Pi panel to its physical room and define its
-   room-specific pages and controls.
-2. Confirm a display follow-up request reuses the same Pilot conversation
-   session through speech and local TTS.
-3. Run contextual acceptance prompts for pronouns, follow-ups, room-relative
-   language, live weather, and typed home/music tools.
-4. Confirm wake-word-triggered ducking and restoration by ear on the Office K3.
-5. Validate a local lossless Music Assistant track.
-6. Complete the supervised K3 acceptance receipt and explicitly arm Core speech
-   playback.
-7. Validate the native Intel Bluetooth controller; add a dedicated adapter only
-   if its receiver behavior is inadequate.
-8. Train and deploy the **Hey Pilot** wake model.
-9. Complete the audible Denon playback/source acceptance at a safe volume.
-10. Converge the Office wake-word path onto Pilot Core so it uses the same
-    retained sessions and typed tools as Pilot clients.
+1. Review and deploy Pilot Core 0.20's additive read-only catalogue migration,
+   then verify a complete Home Assistant synchronization and coverage report.
+2. Enrol the Android wall tablet with fixed-room `display`, `media-control`, and
+   `voice` capabilities; install it and complete reboot/network/night-mode tests.
+3. Install the polished iOS client on the physical phone and iPad and validate
+   media, assistant, rotation, Dynamic Type, and offline behavior.
+4. Add scoped device-authenticated home projections to the clients after the
+   read-only catalogue coverage is reviewed.
+5. Build typed Home Assistant actions only after principal, permission,
+   confirmation, reconciliation, and immutable audit policy is accepted.
+6. Obtain or create accurate house geometry, then publish the validated GLB and
+   stable room/object manifest for the 3D twin.
+7. Validate a local lossless Music Assistant track.
+8. Complete Bluetooth A2DP arbitration and source-switch recovery.
+9. Train and deploy the **Hey Pilot** wake model.
+10. Complete Denon source-switch/restart recovery and Android physical-tablet
+    acceptance.
 
 ## 15. Decision log
 
@@ -900,3 +913,9 @@ deployed integration, hardware boundary, or milestone status changes.
   and entity model, device-authenticated Pilot Core state/action/event APIs,
   an interactive iOS/iPadOS home surface, and a resilient native Android
   wall-tablet client without exposing Home Assistant credentials.
+- **3.5** — Added Pilot Core 0.20's persistent Home Assistant intelligence
+  catalogue, coverage and semantic discovery APIs, bounded read tools, and
+  administrator dashboard; polished the adaptive iPhone/iPad client; added the
+  encrypted, energy-aware native Android wall-tablet client; and introduced
+  platform-specific CI gates. Production deployment remains a separate,
+  supervised release step.

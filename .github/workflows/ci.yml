@@ -160,3 +160,44 @@ jobs:
             apps/shield-tv/app/build.gradle.kts
       - name: Test, lint, and assemble Pilot TV
         run: ./gradlew testDebugUnitTest lintDebug assembleDebug
+
+  android-wall:
+    name: Android wall tablet
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: apps/pilot-android
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+          cache-dependency-path: |
+            apps/pilot-android/*.gradle.kts
+            apps/pilot-android/gradle/wrapper/gradle-wrapper.properties
+            apps/pilot-android/app/build.gradle.kts
+      - name: Test, lint, and assemble Pilot Wall
+        run: ./gradlew testDebugUnitTest lintDebug assembleDebug
+
+  ios:
+    name: Pilot iOS
+    runs-on: macos-15
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: apps/pilot-ios
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build Pilot for iPhone and iPad
+        run: >-
+          xcodebuild
+          -project Pilot.xcodeproj
+          -scheme Pilot
+          -sdk iphonesimulator
+          -destination 'generic/platform=iOS Simulator'
+          -derivedDataPath "$RUNNER_TEMP/PilotDerivedData"
+          CODE_SIGNING_ALLOWED=NO
+          build

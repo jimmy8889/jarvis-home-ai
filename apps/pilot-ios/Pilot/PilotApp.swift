@@ -10,6 +10,11 @@ struct PilotApp: App {
                 .environment(model)
                 .task {
                     await model.refresh()
+                    while !Task.isCancelled {
+                        try? await Task.sleep(for: .seconds(20))
+                        guard !Task.isCancelled else { return }
+                        await model.refresh(silent: true)
+                    }
                 }
         }
     }

@@ -8,6 +8,8 @@ __pycache__/
 **/build/
 .idea/
 local.properties
+**/xcuserdata/
+**/*.xcuserstate
 .artifacts/
 deploy/ansible/inventory/hosts.yml
 validation-*.log

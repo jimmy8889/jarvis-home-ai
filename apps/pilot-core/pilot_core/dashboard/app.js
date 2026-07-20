@@ -16,6 +16,9 @@ const elements = {
   refreshButton: document.querySelector("#refresh-button"),
   disconnectButton: document.querySelector("#disconnect-button"),
   toast: document.querySelector("#toast"),
+  homeSyncButton: document.querySelector("#home-sync-button"),
+  catalogueSearchForm: document.querySelector("#catalogue-search-form"),
+  catalogueSearchInput: document.querySelector("#catalogue-search-input"),
 };
 
 const text = (selector, value) => {
@@ -564,6 +567,162 @@ const renderDeployment = (payload) => {
   text("#deployment-registry", payload.registry_revision);
 };
 
+const countOf = (value, ...keys) => {
+  for (const key of keys) {
+    if (Number.isFinite(Number(value?.[key]))) {
+      return Number(value[key]);
+    }
+  }
+  return 0;
+};
+
+const renderHomeCoverage = (coverage) => {
+  const counts = coverage.counts || coverage;
+  const total = countOf(counts, "total", "entity_count");
+  const available =
+    countOf(counts, "available", "available_count") ||
+    countOf(coverage.by_availability, "available");
+  const unavailable =
+    countOf(counts, "unavailable", "unavailable_count") ||
+    countOf(coverage.by_availability, "unavailable");
+  const stale = countOf(counts, "stale", "stale_count");
+  text("#catalogue-total", total.toLocaleString());
+  text("#catalogue-available", available.toLocaleString());
+  text("#catalogue-unavailable", unavailable.toLocaleString());
+  text("#catalogue-stale", stale.toLocaleString());
+  text(
+    "#catalogue-areas",
+    (
+      countOf(counts, "areas", "area_count") ||
+      Object.keys(coverage.by_area || {}).filter((area) => area !== "unassigned").length
+    ).toLocaleString(),
+  );
+
+  const domains = document.querySelector("#catalogue-domains");
+  clear(domains);
+  const rows = Object.entries(coverage.by_domain || {})
+    .map(([name, value]) => [name, typeof value === "number" ? value : countOf(value, "count", "total")])
+    .sort((left, right) => right[1] - left[1])
+    .slice(0, 8);
+  if (!rows.length) {
+    domains.append(node("p", "timeline-empty", "Synchronize to calculate domain coverage."));
+  } else {
+    rows.forEach(([name, count]) => {
+      const row = node("div", "domain-row");
+      row.append(node("span", "", titleCase(name)));
+      row.append(node("strong", "", Number(count).toLocaleString()));
+      domains.append(row);
+    });
+  }
+};
+
+const renderHomeSync = (sync) => {
+  const status = sync?.status || (sync?.last_success_at ? "succeeded" : "not synchronized");
+  const statusElement = document.querySelector("#home-sync-status");
+  const kind = status === "succeeded" || status === "ok"
+    ? "good"
+    : status === "running"
+      ? "warning"
+      : status === "failed"
+        ? "bad"
+        : "neutral";
+  statusElement.className = `status-pill status-${kind}`;
+  clear(statusElement);
+  statusElement.append(node("span", "status-dot"));
+  statusElement.append(document.createTextNode(titleCase(status)));
+};
+
+const energyValue = (entry, suffix = "W") => {
+  const value = typeof entry === "number" ? entry : entry?.value;
+  if (!Number.isFinite(Number(value))) {
+    return "—";
+  }
+  return `${Math.round(Number(value)).toLocaleString()} ${entry?.unit || suffix}`;
+};
+
+const renderEnergy = (energy) => {
+  text("#energy-solar", energyValue(energy.solar || energy.solar_power));
+  text("#energy-home", energyValue(energy.home || energy.home_load));
+  text("#energy-grid", energyValue(energy.grid || energy.grid_power));
+  text("#energy-battery", energyValue(energy.battery || energy.battery_power));
+  text(
+    "#energy-battery-soc",
+    energyValue(energy.battery_soc, "%"),
+  );
+  const observedAt =
+    energy.observed_at ||
+    energy.synced_at ||
+    [
+      energy.solar,
+      energy.home_load,
+      energy.grid,
+      energy.battery,
+      energy.battery_soc,
+    ]
+      .map((measurement) => measurement?.observed_at)
+      .filter(Boolean)
+      .sort()
+      .at(-1);
+  text("#energy-freshness", observedAt ? `Observed ${formatRelative(observedAt)}` : "No live reading");
+  const directions = [
+    energy.grid?.direction && `Grid ${energy.grid.direction}`,
+    energy.battery?.direction && `battery ${energy.battery.direction}`,
+  ].filter(Boolean);
+  text(
+    "#energy-summary",
+    energy.summary ||
+      energy.explanation ||
+      (directions.length
+        ? `${directions.join(" · ")}. Values are normalized from the governed catalogue.`
+        : "Configured energy entities are normalized without exposing raw Home Assistant attributes."),
+  );
+};
+
+const renderHomeSearch = (payload) => {
+  const list = document.querySelector("#catalogue-search-results");
+  clear(list);
+  const matches = payload.matches || payload.entities || [];
+  text(
+    "#catalogue-search-note",
+    matches.length
+      ? `${matches.length} ${payload.ambiguous ? "possible matches — choose explicitly." : "ranked matches."}`
+      : "No matching entities were found.",
+  );
+  matches.slice(0, 12).forEach((entity) => {
+    const row = node("div", "entity-result");
+    const copy = node("div");
+    copy.append(node("strong", "", entity.name || entity.entity_id));
+    copy.append(
+      node(
+        "small",
+        "",
+        [entity.entity_id, entity.area_id && titleCase(entity.area_id)]
+          .filter(Boolean)
+          .join(" · "),
+      ),
+    );
+    row.append(copy);
+    row.append(
+      badge(
+        entity.unavailable ? "Unavailable" : entity.stale ? "Stale" : String(entity.state || "Available"),
+        entity.unavailable ? "bad" : entity.stale ? "warning" : "good",
+      ),
+    );
+    list.append(row);
+  });
+};
+
+const loadHomeIntelligence = async () => {
+  const [coverage, sync, energy] = await Promise.all([
+    api("/v1/home/coverage"),
+    api("/v1/home/sync"),
+    api("/v1/home/energy"),
+  ]);
+  renderHomeCoverage(coverage);
+  renderHomeSync(sync);
+  renderEnergy(energy);
+};
+
 const render = (payload) => {
   renderSummary(payload);
   renderRooms(payload);
@@ -584,13 +743,19 @@ const loadDashboard = async ({ announce = false } = {}) => {
   elements.refreshButton.disabled = true;
   setConnection("neutral", "Refreshing");
   try {
-    const payload = await api("/v1/operations");
+    const [payload, homeResult] = await Promise.all([
+      api("/v1/operations"),
+      loadHomeIntelligence().then(() => null).catch((error) => error),
+    ]);
     render(payload);
     elements.accessPanel.hidden = true;
     elements.dashboard.hidden = false;
     elements.refreshButton.hidden = false;
     elements.disconnectButton.hidden = false;
     setConnection("good", "Live");
+    if (homeResult instanceof Error && homeResult.message !== "unauthorized") {
+      renderHomeSync({ status: "unavailable" });
+    }
     if (announce) {
       showToast("Pilot Core state refreshed.");
     }
@@ -659,6 +824,35 @@ elements.refreshButton.addEventListener("click", () =>
   loadDashboard({ announce: true }),
 );
 elements.disconnectButton.addEventListener("click", () => disconnect());
+elements.homeSyncButton.addEventListener("click", async () => {
+  elements.homeSyncButton.disabled = true;
+  renderHomeSync({ status: "running" });
+  try {
+    const payload = await api("/v1/home/sync", { method: "POST" });
+    renderHomeSync(payload.sync || payload);
+    await loadHomeIntelligence();
+    showToast("Home Assistant catalogue synchronized.");
+  } catch (error) {
+    renderHomeSync({ status: "failed" });
+    showToast(error.message);
+  } finally {
+    elements.homeSyncButton.disabled = false;
+  }
+});
+elements.catalogueSearchForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const query = elements.catalogueSearchInput.value.trim();
+  if (!query) {
+    return;
+  }
+  try {
+    renderHomeSearch(
+      await api(`/v1/home/search?q=${encodeURIComponent(query)}&limit=12`),
+    );
+  } catch (error) {
+    showToast(error.message);
+  }
+});
 
 if (state.token) {
   loadDashboard();

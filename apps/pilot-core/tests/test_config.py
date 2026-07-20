@@ -214,6 +214,31 @@ energy_home_load_entity_id = "sensor.home_load"
         with self.assertRaisesRegex(ValueError, "must be a sensor entity"):
             self._load(invalid)
 
+    def test_validates_home_catalogue_limits(self) -> None:
+        configured = VALID_CONFIG.replace(
+            "[[rooms]]",
+            """[integrations]
+home_catalog_sync_interval_seconds = 120
+home_catalog_stale_after_seconds = 600
+home_catalog_max_entities = 25000
+
+[[rooms]]""",
+            1,
+        )
+        settings = self._load(configured)
+        self.assertEqual(
+            settings.integrations.home_catalog_sync_interval_seconds,
+            120,
+        )
+        self.assertEqual(settings.integrations.home_catalog_max_entities, 25_000)
+
+        invalid = configured.replace(
+            "home_catalog_max_entities = 25000",
+            "home_catalog_max_entities = 50",
+        )
+        with self.assertRaisesRegex(ValueError, "home_catalog_max_entities"):
+            self._load(invalid)
+
 
 if __name__ == "__main__":
     unittest.main()

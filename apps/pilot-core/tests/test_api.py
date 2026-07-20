@@ -219,6 +219,8 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(dashboard.status_code, 200)
         self.assertIn("Pilot Core", dashboard.text)
         self.assertIn("Assistant engine", dashboard.text)
+        self.assertIn("Semantic catalogue", dashboard.text)
+        self.assertIn("Find any entity", dashboard.text)
         self.assertEqual(dashboard.headers["cache-control"], "no-store")
         self.assertIn(
             "frame-ancestors 'none'",
@@ -243,7 +245,7 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.headers["cache-control"], "no-store")
         payload = response.json()
-        self.assertEqual(payload["deployment"]["version"], "0.19.1")
+        self.assertEqual(payload["deployment"]["version"], "0.20.0")
         self.assertEqual(payload["summary"]["room_count"], 2)
         self.assertEqual(payload["summary"]["device_count"], 0)
         self.assertEqual(payload["summary"]["armed_room_count"], 0)

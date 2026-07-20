@@ -227,6 +227,72 @@ class Store:
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS home_catalog_syncs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    started_at TEXT NOT NULL,
+                    completed_at TEXT,
+                    status TEXT NOT NULL,
+                    entity_count INTEGER NOT NULL DEFAULT 0,
+                    upserted_count INTEGER NOT NULL DEFAULT 0,
+                    missing_count INTEGER NOT NULL DEFAULT 0,
+                    metadata_status TEXT NOT NULL DEFAULT 'not_attempted',
+                    metadata_error TEXT,
+                    error TEXT
+                );
+                CREATE INDEX IF NOT EXISTS home_catalog_syncs_started
+                    ON home_catalog_syncs(started_at DESC);
+                CREATE TABLE IF NOT EXISTS home_entities (
+                    entity_id TEXT PRIMARY KEY,
+                    stable_id TEXT NOT NULL,
+                    domain TEXT NOT NULL,
+                    name TEXT NOT NULL,
+                    state TEXT NOT NULL,
+                    attributes_json TEXT NOT NULL,
+                    area_id TEXT,
+                    device_id TEXT,
+                    aliases_json TEXT NOT NULL,
+                    availability TEXT NOT NULL,
+                    observed_at TEXT,
+                    synced_at TEXT NOT NULL,
+                    first_seen_at TEXT NOT NULL,
+                    last_seen_at TEXT NOT NULL,
+                    missing INTEGER NOT NULL DEFAULT 0
+                );
+                CREATE INDEX IF NOT EXISTS home_entities_domain
+                    ON home_entities(domain);
+                CREATE INDEX IF NOT EXISTS home_entities_area
+                    ON home_entities(area_id);
+                CREATE INDEX IF NOT EXISTS home_entities_availability
+                    ON home_entities(availability, missing);
+                CREATE INDEX IF NOT EXISTS home_entities_name
+                    ON home_entities(name COLLATE NOCASE);
+                CREATE TABLE IF NOT EXISTS home_floors (
+                    id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    level INTEGER,
+                    synced_at TEXT NOT NULL,
+                    missing INTEGER NOT NULL DEFAULT 0
+                );
+                CREATE TABLE IF NOT EXISTS home_areas (
+                    id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    floor_id TEXT,
+                    synced_at TEXT NOT NULL,
+                    missing INTEGER NOT NULL DEFAULT 0
+                );
+                CREATE INDEX IF NOT EXISTS home_areas_floor
+                    ON home_areas(floor_id);
+                CREATE TABLE IF NOT EXISTS home_devices (
+                    id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    area_id TEXT,
+                    manufacturer TEXT,
+                    model TEXT,
+                    synced_at TEXT NOT NULL,
+                    missing INTEGER NOT NULL DEFAULT 0
+                );
+                CREATE INDEX IF NOT EXISTS home_devices_area
+                    ON home_devices(area_id);
                 """
             )
             room_columns = {
@@ -251,6 +317,21 @@ class Store:
                 self._connection.execute(
                     """ALTER TABLE players ADD COLUMN control_endpoint
                        TEXT NOT NULL DEFAULT ''"""
+                )
+            sync_columns = {
+                row["name"]
+                for row in self._connection.execute(
+                    "PRAGMA table_info(home_catalog_syncs)"
+                )
+            }
+            if "metadata_status" not in sync_columns:
+                self._connection.execute(
+                    """ALTER TABLE home_catalog_syncs ADD COLUMN metadata_status
+                       TEXT NOT NULL DEFAULT 'not_attempted'"""
+                )
+            if "metadata_error" not in sync_columns:
+                self._connection.execute(
+                    """ALTER TABLE home_catalog_syncs ADD COLUMN metadata_error TEXT"""
                 )
 
     def resolve_conversation_session(
@@ -1230,6 +1311,540 @@ class Store:
         meeting = self.get_meeting(meeting_id)
         assert meeting is not None
         return meeting
+
+    def begin_home_catalog_sync(self) -> int:
+        with self._lock, self._connection:
+            cursor = self._connection.execute(
+                """INSERT INTO home_catalog_syncs (started_at, status)
+                   VALUES (?, 'running')""",
+                (_now(),),
+            )
+        return int(cursor.lastrowid)
+
+    def fail_home_catalog_sync(self, sync_id: int, error: str) -> None:
+        with self._lock, self._connection:
+            self._connection.execute(
+                """UPDATE home_catalog_syncs
+                   SET completed_at = ?, status = 'failed', error = ?
+                   WHERE id = ? AND status = 'running'""",
+                (_now(), error[:500], sync_id),
+            )
+
+    def replace_home_catalog(
+        self,
+        sync_id: int,
+        records: list[dict[str, Any]],
+        registry: dict[str, Any] | None = None,
+        *,
+        metadata_status: str = "not_attempted",
+        metadata_error: str | None = None,
+        preserve_entity_metadata: bool = False,
+    ) -> dict[str, Any]:
+        now = _now()
+        entity_ids = {record["entity_id"] for record in records}
+        if len(entity_ids) != len(records):
+            raise ValueError("home catalogue contains duplicate entity IDs")
+        with self._lock, self._connection:
+            sync = self._connection.execute(
+                """SELECT 1 FROM home_catalog_syncs
+                   WHERE id = ? AND status = 'running'""",
+                (sync_id,),
+            ).fetchone()
+            if sync is None:
+                raise KeyError(sync_id)
+            self._connection.execute("UPDATE home_entities SET missing = 1")
+            for record in records:
+                metadata_updates = (
+                    """stable_id=home_entities.stable_id,
+                       area_id=COALESCE(home_entities.area_id, excluded.area_id),
+                       device_id=COALESCE(home_entities.device_id, excluded.device_id),
+                       aliases_json=CASE
+                         WHEN home_entities.aliases_json != '[]'
+                         THEN home_entities.aliases_json
+                         ELSE excluded.aliases_json
+                       END,"""
+                    if preserve_entity_metadata
+                    else
+                    """stable_id=excluded.stable_id,
+                       area_id=excluded.area_id,
+                       device_id=excluded.device_id,
+                       aliases_json=excluded.aliases_json,"""
+                )
+                self._connection.execute(
+                    f"""INSERT INTO home_entities
+                       (entity_id, stable_id, domain, name, state,
+                        attributes_json, area_id, device_id, aliases_json,
+                        availability, observed_at, synced_at, first_seen_at,
+                        last_seen_at, missing)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+                       ON CONFLICT(entity_id) DO UPDATE SET
+                         {metadata_updates}
+                         domain=excluded.domain,
+                         name=excluded.name,
+                         state=excluded.state,
+                         attributes_json=excluded.attributes_json,
+                         availability=excluded.availability,
+                         observed_at=excluded.observed_at,
+                         synced_at=excluded.synced_at,
+                         last_seen_at=excluded.last_seen_at,
+                         missing=0""",
+                    (
+                        record["entity_id"],
+                        record["stable_id"],
+                        record["domain"],
+                        record["name"],
+                        record["state"],
+                        json.dumps(
+                            record["attributes"],
+                            separators=(",", ":"),
+                            ensure_ascii=False,
+                        ),
+                        record.get("area_id"),
+                        record.get("device_id"),
+                        json.dumps(
+                            record["aliases"],
+                            separators=(",", ":"),
+                            ensure_ascii=False,
+                        ),
+                        record["availability"],
+                        record.get("observed_at"),
+                        record["synced_at"],
+                        now,
+                        now,
+                    ),
+                )
+            if registry is not None:
+                self._replace_home_registry_locked(registry, now)
+            missing_count = int(
+                self._connection.execute(
+                    "SELECT COUNT(*) FROM home_entities WHERE missing = 1"
+                ).fetchone()[0]
+            )
+            self._connection.execute(
+                """UPDATE home_catalog_syncs
+                   SET completed_at = ?, status = 'succeeded',
+                       entity_count = ?, upserted_count = ?,
+                       missing_count = ?, metadata_status = ?,
+                       metadata_error = ?, error = NULL
+                   WHERE id = ?""",
+                (
+                    now,
+                    len(records),
+                    len(records),
+                    missing_count,
+                    metadata_status,
+                    metadata_error[:500] if metadata_error else None,
+                    sync_id,
+                ),
+            )
+        return self.home_catalog_sync_status()
+
+    def _replace_home_registry_locked(
+        self,
+        registry: dict[str, Any],
+        synced_at: str,
+    ) -> None:
+        sections = (
+            (
+                "floors",
+                "home_floors",
+                ("id", "name", "level"),
+            ),
+            (
+                "areas",
+                "home_areas",
+                ("id", "name", "floor_id"),
+            ),
+            (
+                "devices",
+                "home_devices",
+                ("id", "name", "area_id", "manufacturer", "model"),
+            ),
+        )
+        for section, table, columns in sections:
+            rows = registry.get(section)
+            if rows is None:
+                continue
+            self._connection.execute(f"UPDATE {table} SET missing = 1")
+            placeholders = ", ".join("?" for _ in range(len(columns) + 2))
+            update_columns = ", ".join(
+                f"{column}=excluded.{column}" for column in columns if column != "id"
+            )
+            update_columns += (
+                ", synced_at=excluded.synced_at, missing=excluded.missing"
+            )
+            column_sql = ", ".join((*columns, "synced_at", "missing"))
+            for row in rows:
+                self._connection.execute(
+                    f"""INSERT INTO {table} ({column_sql})
+                        VALUES ({placeholders})
+                        ON CONFLICT(id) DO UPDATE SET {update_columns}""",
+                    (
+                        *(row.get(column) for column in columns),
+                        synced_at,
+                        0,
+                    ),
+                )
+
+    def home_catalog_sync_status(
+        self,
+        stale_after_seconds: int = 900,
+    ) -> dict[str, Any]:
+        with self._lock:
+            latest = self._connection.execute(
+                "SELECT * FROM home_catalog_syncs ORDER BY id DESC LIMIT 1"
+            ).fetchone()
+            last_success = self._connection.execute(
+                """SELECT * FROM home_catalog_syncs
+                   WHERE status = 'succeeded' ORDER BY id DESC LIMIT 1"""
+            ).fetchone()
+            entity_count = int(
+                self._connection.execute(
+                    "SELECT COUNT(*) FROM home_entities WHERE missing = 0"
+                ).fetchone()[0]
+            )
+            missing_count = int(
+                self._connection.execute(
+                    "SELECT COUNT(*) FROM home_entities WHERE missing = 1"
+                ).fetchone()[0]
+            )
+
+        last_success_at = last_success["completed_at"] if last_success else None
+        stale = True
+        if last_success_at:
+            try:
+                completed = datetime.fromisoformat(last_success_at)
+                if completed.tzinfo is None:
+                    completed = completed.replace(tzinfo=UTC)
+                stale = datetime.now(UTC) - completed.astimezone(UTC) > timedelta(
+                    seconds=stale_after_seconds
+                )
+            except ValueError:
+                stale = True
+        return {
+            "status": latest["status"] if latest else "never_synced",
+            "started_at": latest["started_at"] if latest else None,
+            "completed_at": latest["completed_at"] if latest else None,
+            "last_success_at": last_success_at,
+            "entity_count": entity_count,
+            "missing_count": missing_count,
+            "stale": stale,
+            "metadata_status": (
+                latest["metadata_status"]
+                if latest and "metadata_status" in latest.keys()
+                else "not_attempted"
+            ),
+            "metadata_error": (
+                latest["metadata_error"]
+                if latest and "metadata_error" in latest.keys()
+                else None
+            ),
+            "error": latest["error"] if latest else None,
+        }
+
+    def search_home_entities(
+        self,
+        *,
+        query: str | None = None,
+        domain: str | None = None,
+        area_id: str | None = None,
+        availability: str | None = None,
+        include_missing: bool = False,
+        limit: int = 100,
+        stale_after_seconds: int = 900,
+    ) -> dict[str, Any]:
+        clauses: list[str] = []
+        values: list[Any] = []
+        normalized_query = " ".join((query or "").split())[:200]
+        if normalized_query:
+            escaped = (
+                normalized_query.casefold()
+                .replace("\\", "\\\\")
+                .replace("%", "\\%")
+                .replace("_", "\\_")
+            )
+            for token in escaped.split()[:8]:
+                pattern = f"%{token}%"
+                clauses.append(
+                    """(lower(entity_id) LIKE ? ESCAPE '\\'
+                        OR lower(name) LIKE ? ESCAPE '\\'
+                        OR lower(aliases_json) LIKE ? ESCAPE '\\')"""
+                )
+                values.extend((pattern, pattern, pattern))
+        if domain:
+            clauses.append("domain = ?")
+            values.append(domain)
+        if area_id:
+            clauses.append("area_id = ?")
+            values.append(area_id)
+        if availability:
+            clauses.append("availability = ?")
+            values.append(availability)
+        if not include_missing:
+            clauses.append("missing = 0")
+        where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
+        bounded_limit = min(max(int(limit), 1), 500)
+        with self._lock:
+            total = int(
+                self._connection.execute(
+                    f"SELECT COUNT(*) FROM home_entities{where}",
+                    values,
+                ).fetchone()[0]
+            )
+            rows = self._connection.execute(
+                f"""SELECT * FROM home_entities{where}
+                    ORDER BY missing, name COLLATE NOCASE, entity_id
+                    LIMIT ?""",
+                [*values, bounded_limit],
+            ).fetchall()
+        return {
+            "entities": [
+                self._home_entity_view(row, stale_after_seconds) for row in rows
+            ],
+            "count": len(rows),
+            "total": total,
+        }
+
+    def get_home_entity(
+        self,
+        entity_id: str,
+        stale_after_seconds: int = 900,
+    ) -> dict[str, Any] | None:
+        with self._lock:
+            row = self._connection.execute(
+                "SELECT * FROM home_entities WHERE entity_id = ?",
+                (entity_id,),
+            ).fetchone()
+        return (
+            self._home_entity_view(row, stale_after_seconds)
+            if row is not None
+            else None
+        )
+
+    def home_catalog_coverage(
+        self,
+        stale_after_seconds: int = 900,
+    ) -> dict[str, Any]:
+        with self._lock:
+            rows = self._connection.execute(
+                """SELECT domain, area_id, availability, missing,
+                          COUNT(*) AS count, MIN(synced_at) AS oldest_sync
+                   FROM home_entities
+                   GROUP BY domain, area_id, availability, missing"""
+            ).fetchall()
+        by_domain: dict[str, int] = {}
+        by_area: dict[str, int] = {}
+        availability: dict[str, int] = {}
+        total = 0
+        missing = 0
+        unassigned = 0
+        stale = 0
+        cutoff = datetime.now(UTC) - timedelta(seconds=stale_after_seconds)
+        for row in rows:
+            count = int(row["count"])
+            total += count
+            by_domain[row["domain"]] = by_domain.get(row["domain"], 0) + count
+            area = row["area_id"] or "unassigned"
+            by_area[area] = by_area.get(area, 0) + count
+            availability[row["availability"]] = (
+                availability.get(row["availability"], 0) + count
+            )
+            if row["missing"]:
+                missing += count
+            if not row["area_id"]:
+                unassigned += count
+            try:
+                synced = datetime.fromisoformat(row["oldest_sync"])
+                if synced.tzinfo is None:
+                    synced = synced.replace(tzinfo=UTC)
+                if synced.astimezone(UTC) < cutoff:
+                    stale += count
+            except (TypeError, ValueError):
+                stale += count
+        active_total = total - missing
+        return {
+            "total": total,
+            "active": active_total,
+            "missing": missing,
+            "stale": stale,
+            "unassigned_area": unassigned,
+            "readable": active_total,
+            "excluded": 0,
+            "by_domain": dict(sorted(by_domain.items())),
+            "by_area": dict(sorted(by_area.items())),
+            "by_availability": dict(sorted(availability.items())),
+            "sync": self.home_catalog_sync_status(stale_after_seconds),
+        }
+
+    def home_area_summaries(
+        self,
+        stale_after_seconds: int = 900,
+    ) -> list[dict[str, Any]]:
+        with self._lock:
+            rows = self._connection.execute(
+                """SELECT * FROM home_entities
+                   WHERE missing = 0
+                   ORDER BY area_id, name COLLATE NOCASE"""
+            ).fetchall()
+        entities = [
+            self._home_entity_view(row, stale_after_seconds) for row in rows
+        ]
+        areas: dict[str, dict[str, Any]] = {}
+        for entity in entities:
+            area_id = entity["area_id"] or "unassigned"
+            area = areas.setdefault(
+                area_id,
+                {
+                    "id": area_id,
+                    "name": (
+                        "Unassigned"
+                        if area_id == "unassigned"
+                        else area_id.replace("_", " ").replace("-", " ").title()
+                    ),
+                    "entity_count": 0,
+                    "available_count": 0,
+                    "unavailable_count": 0,
+                    "stale_count": 0,
+                },
+            )
+            area["entity_count"] += 1
+            if entity["unavailable"]:
+                area["unavailable_count"] += 1
+            else:
+                area["available_count"] += 1
+            if entity["stale"]:
+                area["stale_count"] += 1
+        with self._lock:
+            metadata_rows = self._connection.execute(
+                """SELECT home_areas.id, home_areas.name, home_areas.floor_id,
+                          home_floors.name AS floor_name
+                   FROM home_areas
+                   LEFT JOIN home_floors
+                     ON home_floors.id = home_areas.floor_id
+                    AND home_floors.missing = 0
+                   WHERE home_areas.missing = 0"""
+            ).fetchall()
+        for row in metadata_rows:
+            area = areas.setdefault(
+                row["id"],
+                {
+                    "id": row["id"],
+                    "name": row["name"],
+                    "entity_count": 0,
+                    "available_count": 0,
+                    "unavailable_count": 0,
+                    "stale_count": 0,
+                },
+            )
+            area["name"] = row["name"]
+            area["floor_id"] = row["floor_id"]
+            area["floor_name"] = row["floor_name"]
+        return sorted(areas.values(), key=lambda item: item["name"].casefold())
+
+    def home_floor_summaries(self) -> list[dict[str, Any]]:
+        with self._lock:
+            rows = self._connection.execute(
+                """SELECT home_floors.*,
+                          COUNT(DISTINCT home_areas.id) AS area_count,
+                          COUNT(DISTINCT home_entities.entity_id) AS entity_count
+                   FROM home_floors
+                   LEFT JOIN home_areas
+                     ON home_areas.floor_id = home_floors.id
+                    AND home_areas.missing = 0
+                   LEFT JOIN home_entities
+                     ON home_entities.area_id = home_areas.id
+                    AND home_entities.missing = 0
+                   WHERE home_floors.missing = 0
+                   GROUP BY home_floors.id
+                   ORDER BY home_floors.level, home_floors.name COLLATE NOCASE"""
+            ).fetchall()
+        return [
+            {
+                "id": row["id"],
+                "name": row["name"],
+                "level": row["level"],
+                "area_count": int(row["area_count"]),
+                "entity_count": int(row["entity_count"]),
+            }
+            for row in rows
+        ]
+
+    def home_device_summaries(
+        self,
+        *,
+        area_id: str | None = None,
+        limit: int = 500,
+    ) -> list[dict[str, Any]]:
+        where = "WHERE home_devices.missing = 0"
+        values: list[Any] = []
+        if area_id:
+            where += " AND home_devices.area_id = ?"
+            values.append(area_id)
+        values.append(min(max(limit, 1), 1000))
+        with self._lock:
+            rows = self._connection.execute(
+                f"""SELECT home_devices.*,
+                           home_areas.name AS area_name,
+                           COUNT(home_entities.entity_id) AS entity_count
+                    FROM home_devices
+                    LEFT JOIN home_areas
+                      ON home_areas.id = home_devices.area_id
+                     AND home_areas.missing = 0
+                    LEFT JOIN home_entities
+                      ON home_entities.device_id = home_devices.id
+                     AND home_entities.missing = 0
+                    {where}
+                    GROUP BY home_devices.id
+                    ORDER BY home_devices.name COLLATE NOCASE
+                    LIMIT ?""",
+                values,
+            ).fetchall()
+        return [
+            {
+                "id": row["id"],
+                "name": row["name"],
+                "area_id": row["area_id"],
+                "area_name": row["area_name"],
+                "manufacturer": row["manufacturer"],
+                "model": row["model"],
+                "entity_count": int(row["entity_count"]),
+            }
+            for row in rows
+        ]
+
+    @staticmethod
+    def _home_entity_view(
+        row: sqlite3.Row,
+        stale_after_seconds: int,
+    ) -> dict[str, Any]:
+        stale = bool(row["missing"])
+        try:
+            synced_at = datetime.fromisoformat(row["synced_at"])
+            if synced_at.tzinfo is None:
+                synced_at = synced_at.replace(tzinfo=UTC)
+            stale = stale or (
+                datetime.now(UTC) - synced_at.astimezone(UTC)
+                > timedelta(seconds=stale_after_seconds)
+            )
+        except ValueError:
+            stale = True
+        return {
+            "entity_id": row["entity_id"],
+            "stable_id": row["stable_id"],
+            "domain": row["domain"],
+            "name": row["name"],
+            "state": row["state"],
+            "attributes": json.loads(row["attributes_json"]),
+            "area_id": row["area_id"],
+            "device_id": row["device_id"],
+            "aliases": json.loads(row["aliases_json"]),
+            "availability": row["availability"],
+            "unavailable": row["availability"] == "unavailable",
+            "stale": stale,
+            "missing": bool(row["missing"]),
+            "observed_at": row["observed_at"],
+            "synced_at": row["synced_at"],
+        }
 
     @staticmethod
     def _meeting_row(row: sqlite3.Row) -> dict[str, Any]:

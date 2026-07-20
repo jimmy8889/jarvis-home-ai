@@ -35,6 +35,7 @@ from .conversation import (
     OpenAICompatibleLLM,
 )
 from .firmware import FirmwareReleaseError, FirmwareReleases, is_newer_version
+from .home_intelligence import HomeIntelligence, HomeResolutionError
 from .integrations import IntegrationRequestFailed, IntegrationUnavailable, Integrations
 from .media_state import MediaStateReader
 from .meetings import MeetingRecordingError, MeetingRecordings
@@ -350,6 +351,12 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
     orchestrator = RoomOrchestrator(registry, database)
     integrations = Integrations(settings.integrations)
     media_states = MediaStateReader(registry, integrations)
+    home_intelligence = HomeIntelligence(
+        database,
+        integrations,
+        settings.integrations,
+        settings.rooms,
+    )
     audio_assets = AudioAssets(
         database,
         settings.server.audio_asset_path,
@@ -365,6 +372,7 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
         integrations,
         media_states,
         database,
+        home_intelligence,
     )
     conversation_engine = ConversationEngine(
         database,
@@ -400,9 +408,23 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
             if focus_bridge.enabled
             else None
         )
+        home_sync_task = (
+            asyncio.create_task(home_intelligence.run(), name="home-catalog-sync")
+            if (
+                home_intelligence.configured
+                and read_secret(settings.integrations.home_assistant_token_env)
+            )
+            else None
+        )
         try:
             yield
         finally:
+            await home_intelligence.stop()
+            if home_sync_task:
+                try:
+                    await asyncio.wait_for(home_sync_task, timeout=6)
+                except TimeoutError:
+                    home_sync_task.cancel()
             if focus_bridge:
                 await focus_bridge.stop()
             if focus_task:
@@ -1021,6 +1043,129 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
                 for room_id in sorted(registry.rooms)
             },
         }
+
+    @app.post("/v1/home/sync", dependencies=[Depends(require_admin)])
+    async def sync_home_catalog(response: Response) -> dict[str, Any]:
+        response.headers["Cache-Control"] = "no-store"
+        try:
+            sync = await home_intelligence.sync()
+        except IntegrationUnavailable as error:
+            raise HTTPException(status_code=503, detail=str(error)) from None
+        except IntegrationRequestFailed as error:
+            raise HTTPException(status_code=502, detail=str(error)) from None
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from None
+        return {"status": sync["status"], "sync": home_intelligence.sync_status()}
+
+    @app.get("/v1/home/sync", dependencies=[Depends(require_admin)])
+    async def home_catalog_sync_status(response: Response) -> dict[str, Any]:
+        response.headers["Cache-Control"] = "no-store"
+        return home_intelligence.sync_status()
+
+    @app.get("/v1/home/catalog", dependencies=[Depends(require_admin)])
+    async def home_catalog(
+        response: Response,
+        q: str | None = Query(default=None, min_length=1, max_length=200),
+        domain: str | None = Query(
+            default=None,
+            min_length=1,
+            max_length=64,
+            pattern=r"^[a-z0-9_]+$",
+        ),
+        area_id: str | None = Query(
+            default=None,
+            min_length=1,
+            max_length=128,
+            pattern=r"^[a-z0-9_-]+$",
+        ),
+        availability: Literal["available", "unavailable", "unknown"] | None = None,
+        include_missing: bool = False,
+        limit: int = Query(default=100, ge=1, le=500),
+    ) -> dict[str, Any]:
+        response.headers["Cache-Control"] = "no-store"
+        return home_intelligence.catalog(
+            query=q,
+            domain=domain,
+            area_id=area_id,
+            availability=availability,
+            include_missing=include_missing,
+            limit=limit,
+        )
+
+    @app.get("/v1/home/catalog/{entity_id}", dependencies=[Depends(require_admin)])
+    async def home_catalog_entity(
+        entity_id: str,
+        response: Response,
+    ) -> dict[str, Any]:
+        response.headers["Cache-Control"] = "no-store"
+        entity = home_intelligence.entity(entity_id.casefold())
+        if entity is None:
+            raise HTTPException(status_code=404, detail="entity not found")
+        return entity
+
+    @app.get("/v1/home/coverage", dependencies=[Depends(require_admin)])
+    async def home_catalog_coverage(response: Response) -> dict[str, Any]:
+        response.headers["Cache-Control"] = "no-store"
+        return home_intelligence.coverage()
+
+    @app.get("/v1/home/areas", dependencies=[Depends(require_admin)])
+    async def home_catalog_areas(response: Response) -> dict[str, Any]:
+        response.headers["Cache-Control"] = "no-store"
+        return {"areas": home_intelligence.areas()}
+
+    @app.get("/v1/home/floors", dependencies=[Depends(require_admin)])
+    async def home_catalog_floors(response: Response) -> dict[str, Any]:
+        response.headers["Cache-Control"] = "no-store"
+        return {"floors": home_intelligence.floors()}
+
+    @app.get("/v1/home/devices", dependencies=[Depends(require_admin)])
+    async def home_catalog_devices(
+        response: Response,
+        area_id: str | None = Query(
+            default=None,
+            min_length=1,
+            max_length=128,
+            pattern=r"^[a-z0-9_-]+$",
+        ),
+        limit: int = Query(default=500, ge=1, le=1000),
+    ) -> dict[str, Any]:
+        response.headers["Cache-Control"] = "no-store"
+        devices = home_intelligence.devices(area_id=area_id, limit=limit)
+        return {"devices": devices, "count": len(devices)}
+
+    @app.get("/v1/home/search", dependencies=[Depends(require_admin)])
+    async def home_entity_search(
+        response: Response,
+        q: str = Query(min_length=1, max_length=200),
+        domain: str | None = Query(
+            default=None,
+            min_length=1,
+            max_length=64,
+            pattern=r"^[a-z0-9_]+$",
+        ),
+        area_id: str | None = Query(
+            default=None,
+            min_length=1,
+            max_length=128,
+            pattern=r"^[a-z0-9_-]+$",
+        ),
+        limit: int = Query(default=20, ge=1, le=100),
+    ) -> dict[str, Any]:
+        response.headers["Cache-Control"] = "no-store"
+        try:
+            return home_intelligence.search(
+                q,
+                domain=domain,
+                area_id=area_id,
+                limit=limit,
+            )
+        except HomeResolutionError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from None
+
+    @app.get("/v1/home/energy", dependencies=[Depends(require_admin)])
+    async def home_energy(response: Response) -> dict[str, Any]:
+        response.headers["Cache-Control"] = "no-store"
+        return home_intelligence.energy_snapshot()
 
     async def build_operations_snapshot() -> dict[str, Any]:
         connected = await device_hub.connected_ids()

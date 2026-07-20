@@ -2,6 +2,24 @@
 
 ## 2026-07-20
 
+- Added Pilot Core 0.20's persistent Home Assistant intelligence catalogue.
+  It synchronizes bounded state and registry metadata, records coverage and
+  staleness, supports ranked entity discovery, rejects ambiguous matches, and
+  exposes four read-only assistant tools without leaking Home Assistant
+  credentials to clients.
+- Added Home Intelligence controls and telemetry to the administrator
+  dashboard, including manual synchronization, entity search, domain coverage,
+  and the current bounded energy projection.
+- Rebuilt Pilot iOS as a polished adaptive iPhone/iPad client with onboarding,
+  connection validation, room-centric navigation, richer music search and
+  now-playing surfaces, contextual chat, accessibility, foreground refresh,
+  and explicit offline and stale-data handling.
+- Added the native Pilot Android wall-tablet application with encrypted
+  device-token storage, adaptive room and media controls, contextual assistant,
+  animated energy flow, night-friendly presentation, burn-in mitigation,
+  fixtures, previews, and focused protocol/security tests.
+- Added Android and iOS CI gates. Android builds, unit tests, lint, and APK
+  assembly run in GitHub Actions; iOS performs a signing-free simulator build.
 - Added the Pilot Home Digital Twin roadmap for an app-first interactive 3D
   house shared by iOS/iPadOS and a native Android wall-tablet client. Pilot
   Core projects live state and typed actions while Home Assistant remains the

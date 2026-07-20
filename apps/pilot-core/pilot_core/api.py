@@ -11,6 +11,7 @@ import time
 from typing import Any, Literal
 
 from fastapi import (
+    BackgroundTasks,
     Depends,
     FastAPI,
     Header,
@@ -44,7 +45,12 @@ from .home_actions import (
 from .home_intelligence import HomeIntelligence, HomeResolutionError
 from .integrations import IntegrationRequestFailed, IntegrationUnavailable, Integrations
 from .media_state import MediaStateReader
-from .meetings import MeetingRecordingError, MeetingRecordings
+from .meetings import (
+    MeetingProcessingError,
+    MeetingProcessor,
+    MeetingRecordingError,
+    MeetingRecordings,
+)
 from .observability import evaluate_observability, prometheus_metrics
 from .orchestration import ResolutionError, RoomOrchestrator
 from .registry import Registry
@@ -482,6 +488,7 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
         settings.server.meeting_asset_path,
         settings.server.meeting_asset_max_bytes,
     )
+    meeting_processor = MeetingProcessor(database, settings.integrations)
     hub = EventHub()
     device_hub = DeviceHub()
     dashboard_directory = Path(__file__).with_name("dashboard")
@@ -996,6 +1003,7 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
             "player_count": len(registry.players),
             "tts_configured": local_tts.status()["configured"],
             "assistant": conversation_engine.status(),
+            "meetings": meeting_processor.status(),
             "legacy_bootstrap_enabled": settings.server.legacy_bootstrap_enabled,
         }
 
@@ -1022,7 +1030,9 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
     @app.get("/v1/meetings", dependencies=[Depends(require_admin)])
     async def list_meetings(
         limit: int = Query(default=50, ge=1, le=200),
-        status: Literal["created", "recorded", "transcribed", "ready", "failed"]
+        status: Literal[
+            "created", "recorded", "processing", "transcribed", "ready", "failed"
+        ]
         | None = None,
     ) -> dict[str, Any]:
         return {"meetings": database.list_meetings(limit, status)}
@@ -1124,6 +1134,39 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
             )
         except KeyError:
             raise HTTPException(status_code=404, detail="meeting not found") from None
+
+    @app.post(
+        "/v1/meetings/{meeting_id}/process",
+        dependencies=[Depends(require_admin)],
+    )
+    async def process_meeting(meeting_id: str) -> dict[str, Any]:
+        try:
+            return await meeting_processor.process(meeting_id)
+        except KeyError:
+            raise HTTPException(status_code=404, detail="meeting not found") from None
+        except MeetingProcessingError as error:
+            raise HTTPException(status_code=502, detail=str(error)) from None
+
+    def device_meeting(
+        device: dict[str, Any], meeting_id: str
+    ) -> dict[str, Any]:
+        meeting = database.get_meeting(meeting_id)
+        if meeting is None or meeting["source_device_id"] != device["id"]:
+            raise HTTPException(status_code=404, detail="meeting not found")
+        return meeting
+
+    def require_meetings(device: dict[str, Any]) -> None:
+        if "meetings" not in device["capabilities"]:
+            raise HTTPException(
+                status_code=403, detail="device does not have meetings capability"
+            )
+
+    async def process_meeting_background(meeting_id: str) -> None:
+        try:
+            await meeting_processor.process(meeting_id)
+        except (KeyError, MeetingProcessingError):
+            # MeetingProcessor records a bounded failure reason for operational review.
+            return
 
     @app.get("/v1/state", dependencies=[Depends(require_admin)])
     async def whole_home_state() -> dict[str, Any]:
@@ -1766,6 +1809,119 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
         except KeyError:
             raise HTTPException(status_code=404, detail="room not found") from None
         return {"device_id": request.device_id, "device_token": token}
+
+    @app.post("/v1/devices/{device_id}/meetings", status_code=201)
+    async def create_device_meeting(
+        device_id: str,
+        request: MeetingCreate,
+        response: Response,
+        x_pilot_device_id: str = Header(),
+        authorization: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        device = authenticated_device(device_id, x_pilot_device_id, authorization)
+        require_meetings(device)
+        if request.source_device_id not in (None, device_id):
+            raise HTTPException(
+                status_code=403, detail="meeting source device cannot be overridden"
+            )
+        started_at = request.started_at or datetime.now(UTC)
+        if started_at.tzinfo is None:
+            started_at = started_at.replace(tzinfo=UTC)
+        response.headers["Cache-Control"] = "no-store"
+        return database.create_meeting(
+            request.title.strip(),
+            request.language,
+            started_at.astimezone(UTC).isoformat(),
+            device_id,
+        )
+
+    @app.get("/v1/devices/{device_id}/meetings")
+    async def list_device_meetings(
+        device_id: str,
+        response: Response,
+        limit: int = Query(default=50, ge=1, le=200),
+        status: Literal[
+            "created", "recorded", "processing", "transcribed", "ready", "failed"
+        ]
+        | None = None,
+        x_pilot_device_id: str = Header(),
+        authorization: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        device = authenticated_device(device_id, x_pilot_device_id, authorization)
+        require_meetings(device)
+        response.headers["Cache-Control"] = "no-store"
+        return {
+            "device_id": device_id,
+            "meetings": database.list_meetings(
+                limit,
+                status,
+                source_device_id=device_id,
+            ),
+        }
+
+    @app.get("/v1/devices/{device_id}/meetings/{meeting_id}")
+    async def device_meeting_detail(
+        device_id: str,
+        meeting_id: str,
+        response: Response,
+        x_pilot_device_id: str = Header(),
+        authorization: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        device = authenticated_device(device_id, x_pilot_device_id, authorization)
+        require_meetings(device)
+        response.headers["Cache-Control"] = "no-store"
+        return device_meeting(device, meeting_id)
+
+    @app.put(
+        "/v1/devices/{device_id}/meetings/{meeting_id}/recording",
+        status_code=201,
+    )
+    async def upload_device_meeting_recording(
+        device_id: str,
+        meeting_id: str,
+        request: Request,
+        response: Response,
+        x_pilot_device_id: str = Header(),
+        authorization: str | None = Header(default=None),
+        x_pilot_filename: str = Header(default="recording"),
+    ) -> dict[str, Any]:
+        device = authenticated_device(device_id, x_pilot_device_id, authorization)
+        require_meetings(device)
+        device_meeting(device, meeting_id)
+        try:
+            recording = await meeting_recordings.save(
+                meeting_id,
+                x_pilot_filename,
+                request.headers.get("content-type", ""),
+                request.stream(),
+            )
+        except MeetingRecordingError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from None
+        response.headers["Cache-Control"] = "no-store"
+        return {key: value for key, value in recording.items() if key != "path"}
+
+    @app.post(
+        "/v1/devices/{device_id}/meetings/{meeting_id}/process",
+        status_code=202,
+    )
+    async def process_device_meeting(
+        device_id: str,
+        meeting_id: str,
+        background_tasks: BackgroundTasks,
+        response: Response,
+        x_pilot_device_id: str = Header(),
+        authorization: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        device = authenticated_device(device_id, x_pilot_device_id, authorization)
+        require_meetings(device)
+        device_meeting(device, meeting_id)
+        try:
+            meeting = database.begin_meeting_processing(meeting_id)
+        except ValueError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from None
+        background_tasks.add_task(process_meeting_background, meeting_id)
+        response.headers["Cache-Control"] = "no-store"
+        return {"device_id": device_id, "meeting": meeting}
 
     @app.get("/v1/devices/{device_id}/snapshot")
     async def display_node_snapshot(

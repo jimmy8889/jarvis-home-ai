@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import json
+import re
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -92,7 +93,7 @@ def _ha_matched(result: Any) -> bool:
 
 
 def _bounded(value: Any, depth: int = 0) -> Any:
-    if depth >= 5:
+    if depth >= 7:
         return "[truncated]"
     if isinstance(value, dict):
         return {
@@ -123,6 +124,18 @@ def _contains_string(value: Any, expected: str) -> bool:
 def _required_read_tool(text: str) -> str | None:
     """Force fresh-state tools for clear read requests; never force mutations."""
     normalized = " ".join(text.casefold().split())
+    if any(
+        phrase in normalized
+        for phrase in (
+            "meeting",
+            "did i agree",
+            "did we agree",
+            "action item",
+            "what did i say",
+            "what did we say",
+        )
+    ):
+        return "search_meetings"
     if any(
         phrase in normalized
         for phrase in ("temperature", "how hot", "how cold", "warmer", "cooler")
@@ -363,6 +376,31 @@ class AssistantTools:
                 ("query",),
             ),
             tool(
+                "search_meetings",
+                (
+                    "Search local meeting titles, summaries, transcripts, decisions, "
+                    "and action items. Results include timestamped transcript evidence."
+                ),
+                {
+                    "query": {"type": "string", "minLength": 1, "maxLength": 300},
+                    "limit": {"type": "integer", "minimum": 1, "maximum": 20},
+                },
+                ("query",),
+            ),
+            tool(
+                "get_meeting",
+                "Read one local meeting and its transcript evidence by exact meeting id.",
+                {
+                    "meeting_id": {
+                        "type": "string",
+                        "minLength": 32,
+                        "maxLength": 32,
+                        "pattern": "^[a-f0-9]{32}$",
+                    }
+                },
+                ("meeting_id",),
+            ),
+            tool(
                 "play_music",
                 "Play a Music Assistant media URI in a room.",
                 {
@@ -527,6 +565,39 @@ class AssistantTools:
                     },
                 )
             )
+        if name == "search_meetings":
+            query = arguments.get("query")
+            limit = arguments.get("limit", 8)
+            if not isinstance(query, str) or not query.strip():
+                raise ValueError("query is required")
+            if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 20:
+                raise ValueError("limit must be between 1 and 20")
+            return _bounded(
+                {
+                    "query": query.strip(),
+                    "meetings": self.store.search_meetings(query.strip(), limit),
+                }
+            )
+        if name == "get_meeting":
+            meeting_id = arguments.get("meeting_id")
+            if (
+                not isinstance(meeting_id, str)
+                or not re.fullmatch(r"[a-f0-9]{32}", meeting_id)
+            ):
+                raise ValueError("meeting_id is invalid")
+            meeting = self.store.get_meeting(meeting_id)
+            if meeting is None:
+                raise ValueError("meeting not found")
+            meeting["recording"] = (
+                {
+                    key: value
+                    for key, value in meeting["recording"].items()
+                    if key != "path"
+                }
+                if meeting["recording"]
+                else None
+            )
+            return _bounded(meeting)
         if name in {"play_music", "control_media"}:
             target_room = self._resolve_room(arguments.get("room"), room_id)
             try:

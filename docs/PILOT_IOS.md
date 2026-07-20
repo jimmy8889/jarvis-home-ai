@@ -70,6 +70,12 @@ The current energy presentation is deliberately readiness-oriented until a
 portable-client energy contract is exposed by Pilot Core. The app does not
 invent sensor values or connect directly to Home Assistant.
 
-The next product milestones are the shared versioned house model and
-interactive home controls, followed by background voice capture, meeting
-recording, artwork caching, transfer gestures, and push notification delivery.
+Pilot iOS now includes the first device-scoped meeting recorder and review
+surface. It records AAC only after an explicit tap, supports iOS background
+audio, uploads directly to Pilot Core, queues local processing, and shows
+meeting status without holding Home Assistant or inference credentials.
+Real-device long-recording acceptance is still required.
+
+The next client milestones are meeting detail/evidence review, participant
+renaming, approved action export, background voice capture, artwork caching,
+transfer gestures, and push notification delivery.

@@ -1086,7 +1086,10 @@ class Store:
         return meeting
 
     def list_meetings(
-        self, limit: int = 50, status: str | None = None
+        self,
+        limit: int = 50,
+        status: str | None = None,
+        source_device_id: str | None = None,
     ) -> list[dict[str, Any]]:
         query = """
             SELECT m.*,
@@ -1105,14 +1108,88 @@ class Store:
             FROM meetings m
         """
         params: list[Any] = []
+        filters: list[str] = []
         if status is not None:
-            query += " WHERE m.status = ?"
+            filters.append("m.status = ?")
             params.append(status)
+        if source_device_id is not None:
+            filters.append("m.source_device_id = ?")
+            params.append(source_device_id)
+        if filters:
+            query += " WHERE " + " AND ".join(filters)
         query += " ORDER BY m.started_at DESC LIMIT ?"
         params.append(limit)
         with self._lock:
             rows = self._connection.execute(query, params).fetchall()
         return [self._meeting_summary(row) for row in rows]
+
+    def search_meetings(self, query: str, limit: int = 10) -> list[dict[str, Any]]:
+        normalized = " ".join(query.split())[:300]
+        if not normalized:
+            return []
+        terms = list(dict.fromkeys(
+            term.casefold() for term in normalized.split() if len(term) > 1
+        ))[:8]
+        if not terms:
+            terms = [normalized.casefold()]
+        conditions: list[str] = []
+        params: list[Any] = []
+        for term in terms:
+            escaped = term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            pattern = f"%{escaped}%"
+            conditions.append(
+                """(m.title LIKE ? ESCAPE '\\'
+                     OR COALESCE(m.summary, '') LIKE ? ESCAPE '\\'
+                     OR EXISTS (
+                       SELECT 1 FROM transcript_segments matched
+                       WHERE matched.meeting_id = m.id
+                         AND matched.text LIKE ? ESCAPE '\\'
+                     ))"""
+            )
+            params.extend((pattern, pattern, pattern))
+        with self._lock:
+            rows = self._connection.execute(
+                f"""SELECT m.id
+                    FROM meetings m
+                    WHERE {" AND ".join(conditions)}
+                    ORDER BY m.started_at DESC
+                    LIMIT ?""",
+                (*params, min(max(limit, 1), 50)),
+            ).fetchall()
+        output: list[dict[str, Any]] = []
+        for row in rows:
+            meeting = self.get_meeting(row["id"])
+            if meeting is None:
+                continue
+            evidence = [
+                {
+                    "id": segment["id"],
+                    "speaker_label": segment["speaker_label"],
+                    "start_ms": segment["start_ms"],
+                    "end_ms": segment["end_ms"],
+                    "text": segment["text"][:1000],
+                }
+                for segment in meeting["transcript"]
+                if not terms
+                or any(term in segment["text"].casefold() for term in terms)
+            ][:8]
+            output.append(
+                {
+                    "id": meeting["id"],
+                    "title": meeting["title"],
+                    "started_at": meeting["started_at"],
+                    "status": meeting["status"],
+                    "summary": meeting["summary"],
+                    "matching_segments": evidence,
+                    "decisions": meeting["decisions"][:10],
+                    "open_action_items": [
+                        action
+                        for action in meeting["action_items"]
+                        if action["status"] == "open"
+                    ][:20],
+                }
+            )
+        return output
 
     def get_meeting(self, meeting_id: str) -> dict[str, Any] | None:
         with self._lock:
@@ -1339,6 +1416,46 @@ class Store:
                    SET summary = ?, status = 'ready', updated_at = ?
                    WHERE id = ?""",
                 (summary, now, meeting_id),
+            )
+        meeting = self.get_meeting(meeting_id)
+        assert meeting is not None
+        return meeting
+
+    def fail_meeting(self, meeting_id: str, error: str) -> dict[str, Any]:
+        now = _now()
+        bounded = " ".join(str(error).split())[:1000]
+        with self._lock, self._connection:
+            cursor = self._connection.execute(
+                """UPDATE meetings SET status = 'failed', summary = ?, updated_at = ?
+                   WHERE id = ?""",
+                (f"Processing failed: {bounded}", now, meeting_id),
+            )
+            if cursor.rowcount != 1:
+                raise KeyError(meeting_id)
+        meeting = self.get_meeting(meeting_id)
+        assert meeting is not None
+        return meeting
+
+    def begin_meeting_processing(self, meeting_id: str) -> dict[str, Any]:
+        now = _now()
+        with self._lock, self._connection:
+            row = self._connection.execute(
+                "SELECT status FROM meetings WHERE id = ?", (meeting_id,)
+            ).fetchone()
+            if row is None:
+                raise KeyError(meeting_id)
+            if row["status"] == "processing":
+                raise ValueError("meeting is already processing")
+            if not self._connection.execute(
+                "SELECT 1 FROM meeting_recordings WHERE meeting_id = ?",
+                (meeting_id,),
+            ).fetchone():
+                raise ValueError("meeting recording is required")
+            self._connection.execute(
+                """UPDATE meetings SET status = 'processing', summary = NULL,
+                          updated_at = ?
+                   WHERE id = ?""",
+                (now, meeting_id),
             )
         meeting = self.get_meeting(meeting_id)
         assert meeting is not None

@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import AVFoundation
 
 @MainActor
 @Observable
@@ -26,6 +27,14 @@ final class PilotModel {
     var isLoadingHome = false
     var activeHomeEntityID: String?
     var homeError: String?
+    var meetings: [PilotMeeting] = []
+    var meetingError: String?
+    var isLoadingMeetings = false
+    var isRecordingMeeting = false
+    var activeMeetingID: String?
+    var meetingRecordingStartedAt: Date?
+    @ObservationIgnored private var meetingRecorder: AVAudioRecorder?
+    @ObservationIgnored private var meetingRecordingURL: URL?
 
     init(loadStoredSettings: Bool = true) {
         if loadStoredSettings {
@@ -136,6 +145,7 @@ final class PilotModel {
             lastSuccessfulRefresh = .now
             connectionState = .connected
             await refreshHome(silent: true)
+            await refreshMeetings(silent: true)
             return true
         } catch {
             connectionState = .offline(Self.friendlyMessage(for: error))
@@ -288,6 +298,100 @@ final class PilotModel {
     func startNewConversation() {
         conversationID = nil
         messages = []
+    }
+
+    func refreshMeetings(silent: Bool = false) async {
+        guard isConfigured else { return }
+        if !silent { isLoadingMeetings = true }
+        defer { isLoadingMeetings = false }
+        do {
+            meetings = try await api().meetings()
+            meetingError = nil
+        } catch {
+            meetingError = Self.friendlyMessage(for: error)
+        }
+    }
+
+    func startMeeting(title: String) async {
+        let normalized = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty, !isRecordingMeeting else { return }
+        do {
+            guard await AVAudioApplication.requestRecordPermission() else {
+                meetingError = "Microphone permission is required to record a meeting."
+                return
+            }
+            let meeting = try await api().createMeeting(title: normalized)
+            let audioSession = AVAudioSession.sharedInstance()
+            try audioSession.setCategory(
+                .playAndRecord,
+                mode: .spokenAudio,
+                options: [.defaultToSpeaker, .allowBluetoothHFP]
+            )
+            try audioSession.setActive(true)
+            let directory = FileManager.default.temporaryDirectory
+                .appending(path: "PilotMeetings", directoryHint: .isDirectory)
+            try FileManager.default.createDirectory(
+                at: directory,
+                withIntermediateDirectories: true
+            )
+            let recordingURL = directory.appending(path: "\(meeting.id).m4a")
+            let recorder = try AVAudioRecorder(
+                url: recordingURL,
+                settings: [
+                    AVFormatIDKey: Int(kAudioFormatMPEG4AAC),
+                    AVSampleRateKey: 24_000,
+                    AVNumberOfChannelsKey: 1,
+                    AVEncoderAudioQualityKey: AVAudioQuality.high.rawValue,
+                ]
+            )
+            recorder.prepareToRecord()
+            guard recorder.record() else {
+                throw PilotAPIError.server("The microphone could not start recording.")
+            }
+            meetingRecorder = recorder
+            meetingRecordingURL = recordingURL
+            activeMeetingID = meeting.id
+            meetingRecordingStartedAt = .now
+            isRecordingMeeting = true
+            meetings.insert(meeting, at: 0)
+            meetingError = nil
+        } catch {
+            meetingError = Self.friendlyMessage(for: error)
+        }
+    }
+
+    func stopAndProcessMeeting() async {
+        guard
+            isRecordingMeeting,
+            let meetingID = activeMeetingID,
+            let recordingURL = meetingRecordingURL
+        else { return }
+        meetingRecorder?.stop()
+        meetingRecorder = nil
+        isRecordingMeeting = false
+        meetingRecordingStartedAt = nil
+        defer {
+            activeMeetingID = nil
+            meetingRecordingURL = nil
+            try? FileManager.default.removeItem(at: recordingURL)
+            try? AVAudioSession.sharedInstance().setActive(
+                false,
+                options: .notifyOthersOnDeactivation
+            )
+        }
+        do {
+            let service = try api()
+            try await service.uploadMeetingRecording(
+                meetingID: meetingID,
+                recordingURL: recordingURL
+            )
+            _ = try await service.processMeeting(meetingID)
+            await refreshMeetings(silent: true)
+            meetingError = nil
+        } catch {
+            meetingError = Self.friendlyMessage(for: error)
+            await refreshMeetings(silent: true)
+        }
     }
 
     static func friendlyMessage(for error: Error) -> String {

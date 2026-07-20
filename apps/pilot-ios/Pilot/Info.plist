@@ -27,6 +27,12 @@
 	</dict>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Pilot connects to your local Pilot Core server and room audio devices.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Pilot records meetings you explicitly start and uploads them to your private Pilot Core for local transcription.</string>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>audio</string>
+	</array>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

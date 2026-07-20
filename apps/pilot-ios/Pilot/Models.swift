@@ -364,3 +364,47 @@ struct HomeAction: Codable, Identifiable, Sendable {
         case confirmationRequired = "confirmation_required"
     }
 }
+
+struct MeetingEnvelope: Codable, Sendable {
+    let meetings: [PilotMeeting]
+}
+
+struct MeetingProcessEnvelope: Codable, Sendable {
+    let meeting: PilotMeeting
+}
+
+struct PilotMeeting: Codable, Identifiable, Hashable, Sendable {
+    let id: String
+    let title: String
+    let language: String
+    let sourceDeviceID: String?
+    let startedAt: String
+    let endedAt: String?
+    let status: String
+    let summary: String?
+    let hasRecording: Bool?
+    let transcriptSegmentCount: Int?
+    let actionItemCount: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case id, title, language, status, summary
+        case sourceDeviceID = "source_device_id"
+        case startedAt = "started_at"
+        case endedAt = "ended_at"
+        case hasRecording = "has_recording"
+        case transcriptSegmentCount = "transcript_segment_count"
+        case actionItemCount = "action_item_count"
+    }
+
+    var statusLabel: String {
+        switch status {
+        case "created": "Ready to record"
+        case "recorded": "Uploaded"
+        case "processing": "Processing locally"
+        case "transcribed": "Analysing"
+        case "ready": "Ready"
+        case "failed": "Needs attention"
+        default: status.capitalized
+        }
+    }
+}

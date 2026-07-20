@@ -86,6 +86,33 @@ final class PilotTests: XCTestCase {
         XCTAssertEqual(try XCTUnwrap(projection.entities[0].brightnessPercent), 50.2, accuracy: 0.2)
     }
 
+    func testMeetingListDecodesProcessingAndEvidenceCounts() throws {
+        let data = Data(
+            """
+            {
+              "device_id": "pilot-ios-james",
+              "meetings": [{
+                "id": "meeting-1",
+                "title": "Office planning",
+                "language": "en-AU",
+                "source_device_id": "pilot-ios-james",
+                "started_at": "2026-07-21T00:00:00Z",
+                "ended_at": null,
+                "status": "processing",
+                "summary": null,
+                "has_recording": true,
+                "transcript_segment_count": 8,
+                "action_item_count": 2
+              }]
+            }
+            """.utf8
+        )
+        let envelope = try JSONDecoder().decode(MeetingEnvelope.self, from: data)
+        XCTAssertEqual(envelope.meetings[0].statusLabel, "Processing locally")
+        XCTAssertEqual(envelope.meetings[0].transcriptSegmentCount, 8)
+        XCTAssertEqual(envelope.meetings[0].actionItemCount, 2)
+    }
+
     @MainActor
     func testPreviewModelHasAdaptiveProductContent() {
         let model = PilotModel.preview()

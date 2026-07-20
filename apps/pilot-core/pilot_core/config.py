@@ -67,6 +67,11 @@ class IntegrationSettings:
     llm_timeout_seconds: int = 60
     llm_max_tool_rounds: int = 4
     llm_context_turns: int = 12
+    meeting_stt_url: str = ""
+    meeting_stt_token_env: str = "PILOT_MEETING_STT_TOKEN"
+    meeting_stt_model: str = "whisper-1"
+    meeting_stt_timeout_seconds: int = 600
+    meeting_transcript_max_characters: int = 500_000
 
 
 @dataclass(frozen=True)
@@ -376,6 +381,22 @@ def load_settings(path: str | Path) -> Settings:
         llm_timeout_seconds=int(integration_values.get("llm_timeout_seconds", 60)),
         llm_max_tool_rounds=int(integration_values.get("llm_max_tool_rounds", 4)),
         llm_context_turns=int(integration_values.get("llm_context_turns", 12)),
+        meeting_stt_url=str(integration_values.get("meeting_stt_url", "")).rstrip("/"),
+        meeting_stt_token_env=str(
+            integration_values.get(
+                "meeting_stt_token_env",
+                "PILOT_MEETING_STT_TOKEN",
+            )
+        ),
+        meeting_stt_model=str(
+            integration_values.get("meeting_stt_model", "whisper-1")
+        ).strip(),
+        meeting_stt_timeout_seconds=int(
+            integration_values.get("meeting_stt_timeout_seconds", 600)
+        ),
+        meeting_transcript_max_characters=int(
+            integration_values.get("meeting_transcript_max_characters", 500_000)
+        ),
     )
     if not 30 <= integrations.home_catalog_sync_interval_seconds <= 86_400:
         raise ValueError(
@@ -415,6 +436,15 @@ def load_settings(path: str | Path) -> Settings:
         raise ValueError("integrations.llm_max_tool_rounds must be between 1 and 8")
     if not 2 <= integrations.llm_context_turns <= 40:
         raise ValueError("integrations.llm_context_turns must be between 2 and 40")
+    if not 30 <= integrations.meeting_stt_timeout_seconds <= 3600:
+        raise ValueError(
+            "integrations.meeting_stt_timeout_seconds must be between 30 and 3600"
+        )
+    if not 10_000 <= integrations.meeting_transcript_max_characters <= 2_000_000:
+        raise ValueError(
+            "integrations.meeting_transcript_max_characters must be between "
+            "10000 and 2000000"
+        )
     if not 5 <= integrations.home_assistant_assist_timeout_seconds <= 300:
         raise ValueError(
             "integrations.home_assistant_assist_timeout_seconds must be "

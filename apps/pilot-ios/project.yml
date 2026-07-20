@@ -19,6 +19,9 @@ targets:
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: true
         NSLocalNetworkUsageDescription: Pilot connects to your local Pilot Core server and room audio devices.
+        NSMicrophoneUsageDescription: Pilot records meetings you explicitly start and uploads them to your private Pilot Core for local transcription.
+        UIBackgroundModes:
+          - audio
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: false
         UIApplicationSupportsIndirectInputEvents: true

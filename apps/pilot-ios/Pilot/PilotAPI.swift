@@ -127,6 +127,55 @@ struct PilotAPI: Sendable {
         return try JSONDecoder().decode(AssistantReply.self, from: data)
     }
 
+    func meetings() async throws -> [PilotMeeting] {
+        let data = try await request(path: "v1/devices/\(deviceID)/meetings")
+        return try JSONDecoder().decode(MeetingEnvelope.self, from: data).meetings
+    }
+
+    func createMeeting(title: String) async throws -> PilotMeeting {
+        let body = try JSONSerialization.data(withJSONObject: [
+            "title": title,
+            "language": "en-AU",
+        ])
+        let data = try await request(
+            path: "v1/devices/\(deviceID)/meetings",
+            method: "POST",
+            body: body
+        )
+        return try JSONDecoder().decode(PilotMeeting.self, from: data)
+    }
+
+    func uploadMeetingRecording(
+        meetingID: String,
+        recordingURL: URL
+    ) async throws {
+        let url = coreURL.appending(
+            path: "v1/devices/\(deviceID)/meetings/\(meetingID)/recording"
+        )
+        var request = URLRequest(url: url)
+        request.httpMethod = "PUT"
+        request.timeoutInterval = 600
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue(deviceID, forHTTPHeaderField: "X-Pilot-Device-ID")
+        request.setValue(recordingURL.lastPathComponent, forHTTPHeaderField: "X-Pilot-Filename")
+        request.setValue("audio/m4a", forHTTPHeaderField: "Content-Type")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        let (data, response) = try await URLSession.shared.upload(
+            for: request,
+            fromFile: recordingURL
+        )
+        try Self.validate(response, data: data)
+    }
+
+    func processMeeting(_ meetingID: String) async throws -> PilotMeeting {
+        let data = try await request(
+            path: "v1/devices/\(deviceID)/meetings/\(meetingID)/process",
+            method: "POST",
+            body: Data()
+        )
+        return try JSONDecoder().decode(MeetingProcessEnvelope.self, from: data).meeting
+    }
+
     static func flattenSearch(_ object: Any) -> [MusicSearchResult] {
         var output: [MusicSearchResult] = []
         var seen = Set<String>()

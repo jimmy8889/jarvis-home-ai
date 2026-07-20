@@ -710,10 +710,11 @@ deployed integration, hardware boundary, or milestone status changes.
 
 ### Phase 5 — Productivity and meetings
 
-- [ ] Meeting recorder
-- [ ] Transcription and diarisation pipeline
+- [x] Device-scoped meeting recorder and local processing foundation
+- [x] Timestamped local transcription and evidence-linked analysis pipeline
+- [ ] Multi-speaker diarisation and participant review
 - [ ] macOS dictation client
-- [ ] iOS meeting client
+- [x] iOS meeting capture and status client foundation
 
 ### Phase 6 — Memory and advanced workflows
 
@@ -931,3 +932,8 @@ deployed integration, hardware boundary, or milestone status changes.
   file-type allowlisting, fixed mpv launch arguments, bounded seek/audio/
   subtitle controls, durable expiring command delivery, and Ansible packaging.
   Physical HDMI/HDR10 acceptance remains intentionally separate.
+- **3.8** — Added Core 0.23's private local meeting worker, timestamped
+  evidence-linked summaries/actions, deterministic meeting-memory retrieval,
+  capability- and ownership-scoped mobile APIs, and Pilot iOS background AAC
+  capture/upload/status UI. Production Whisper deployment, diarisation, and
+  physical long-recording acceptance remain explicit follow-up gates.

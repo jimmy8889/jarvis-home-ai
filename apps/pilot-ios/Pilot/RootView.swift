@@ -4,6 +4,7 @@ import UIKit
 enum PilotSection: String, CaseIterable, Identifiable {
     case home
     case music
+    case meetings
     case assistant
     case settings
 
@@ -13,6 +14,7 @@ enum PilotSection: String, CaseIterable, Identifiable {
         switch self {
         case .home: "Home"
         case .music: "Music"
+        case .meetings: "Meetings"
         case .assistant: "Pilot"
         case .settings: "Settings"
         }
@@ -22,6 +24,7 @@ enum PilotSection: String, CaseIterable, Identifiable {
         switch self {
         case .home: "house.fill"
         case .music: "music.note"
+        case .meetings: "waveform.badge.mic"
         case .assistant: "waveform.circle.fill"
         case .settings: "gearshape.fill"
         }
@@ -118,6 +121,7 @@ struct RootView: View {
         switch item {
         case .home: HomeView()
         case .music: MusicView()
+        case .meetings: MeetingsView()
         case .assistant: AssistantView()
         case .settings: SettingsView()
         }
@@ -891,6 +895,190 @@ private struct SearchResultRow: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Play \(result.title), \(result.subtitle)")
+    }
+}
+
+private struct MeetingsView: View {
+    @Environment(PilotModel.self) private var model
+    @State private var title = ""
+
+    var body: some View {
+        ZStack {
+            PilotTheme.background.ignoresSafeArea()
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 20) {
+                    recordingCard
+                    if let error = model.meetingError {
+                        Label(error, systemImage: "exclamationmark.triangle.fill")
+                            .font(.footnote)
+                            .foregroundStyle(.orange)
+                            .padding(14)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(Color.orange.opacity(0.10), in: RoundedRectangle(cornerRadius: 16))
+                    }
+                    SectionTitle(
+                        eyebrow: "PRIVATE MEETING MEMORY",
+                        title: "Recent meetings",
+                        trailing: "\(model.meetings.count)"
+                    )
+                    if model.meetings.isEmpty && model.isLoadingMeetings {
+                        ProgressView("Loading meetings…")
+                            .frame(maxWidth: .infinity)
+                            .padding(32)
+                    } else if model.meetings.isEmpty {
+                        ContentUnavailableView(
+                            "No meetings yet",
+                            systemImage: "waveform.badge.mic",
+                            description: Text("Start a recording above. Audio stays in your Pilot infrastructure.")
+                        )
+                        .padding(.vertical, 34)
+                    } else {
+                        ForEach(model.meetings) { meeting in
+                            MeetingCard(meeting: meeting)
+                        }
+                    }
+                }
+                .frame(maxWidth: 900)
+                .padding(18)
+                .padding(.bottom, 100)
+                .frame(maxWidth: .infinity)
+            }
+            .refreshable { await model.refreshMeetings() }
+        }
+        .navigationTitle("Meetings")
+        .task { await model.refreshMeetings(silent: true) }
+    }
+
+    private var recordingCard: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(spacing: 13) {
+                ZStack {
+                    Circle().fill(Color.red.opacity(model.isRecordingMeeting ? 0.24 : 0.10))
+                    Image(systemName: model.isRecordingMeeting ? "waveform" : "mic.fill")
+                        .foregroundStyle(model.isRecordingMeeting ? .red : PilotTheme.cyan)
+                }
+                .frame(width: 48, height: 48)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(model.isRecordingMeeting ? "Recording in progress" : "Record a meeting")
+                        .font(.headline)
+                    if model.isRecordingMeeting, let started = model.meetingRecordingStartedAt {
+                        Text(timerInterval: started ... .distantFuture, countsDown: false)
+                            .font(.system(.subheadline, design: .monospaced, weight: .semibold))
+                            .foregroundStyle(.red)
+                    } else {
+                        Text("Transcribed, summarised and indexed locally")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                Spacer()
+            }
+
+            if !model.isRecordingMeeting {
+                TextField("Meeting title", text: $title)
+                    .textFieldStyle(.plain)
+                    .padding(14)
+                    .background(Color.black.opacity(0.20), in: RoundedRectangle(cornerRadius: 14))
+                    .accessibilityLabel("Meeting title")
+            }
+
+            Button {
+                if model.isRecordingMeeting {
+                    Task { await model.stopAndProcessMeeting() }
+                } else {
+                    let meetingTitle = title
+                    title = ""
+                    Task { await model.startMeeting(title: meetingTitle) }
+                }
+                PilotHaptics.impact()
+            } label: {
+                Label(
+                    model.isRecordingMeeting ? "Stop and process" : "Start recording",
+                    systemImage: model.isRecordingMeeting ? "stop.fill" : "record.circle"
+                )
+                .font(.headline)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 13)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.white)
+            .background(
+                model.isRecordingMeeting ? Color.red : PilotTheme.blue,
+                in: RoundedRectangle(cornerRadius: 15)
+            )
+            .disabled(!model.isRecordingMeeting && title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        }
+        .padding(18)
+        .background(PilotTheme.card, in: RoundedRectangle(cornerRadius: 24))
+        .overlay { RoundedRectangle(cornerRadius: 24).stroke(PilotTheme.border) }
+    }
+}
+
+private struct MeetingCard: View {
+    let meeting: PilotMeeting
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 11) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(meeting.title)
+                        .font(.headline)
+                    Text(Self.date(meeting.startedAt))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Label(meeting.statusLabel, systemImage: statusSymbol)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(statusColor)
+            }
+            if let summary = meeting.summary, !summary.isEmpty {
+                Text(summary)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(4)
+            }
+            HStack(spacing: 18) {
+                if let segments = meeting.transcriptSegmentCount {
+                    Label("\(segments) segments", systemImage: "text.quote")
+                }
+                if let actions = meeting.actionItemCount {
+                    Label("\(actions) actions", systemImage: "checklist")
+                }
+                if meeting.hasRecording == true {
+                    Label("Audio", systemImage: "waveform")
+                }
+            }
+            .font(.caption)
+            .foregroundStyle(.tertiary)
+        }
+        .padding(17)
+        .background(PilotTheme.card, in: RoundedRectangle(cornerRadius: 20))
+        .overlay { RoundedRectangle(cornerRadius: 20).stroke(PilotTheme.border) }
+    }
+
+    private var statusColor: Color {
+        switch meeting.status {
+        case "ready": PilotTheme.mint
+        case "failed": .orange
+        case "processing", "transcribed": PilotTheme.cyan
+        default: .secondary
+        }
+    }
+
+    private var statusSymbol: String {
+        switch meeting.status {
+        case "ready": "checkmark.circle.fill"
+        case "failed": "exclamationmark.triangle.fill"
+        case "processing", "transcribed": "sparkles"
+        default: "clock"
+        }
+    }
+
+    private static func date(_ value: String) -> String {
+        let formatter = ISO8601DateFormatter()
+        guard let date = formatter.date(from: value) else { return value }
+        return date.formatted(date: .abbreviated, time: .shortened)
     }
 }
 

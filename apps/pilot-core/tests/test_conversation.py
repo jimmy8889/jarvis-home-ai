@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+from datetime import UTC, datetime
 import unittest
 from unittest.mock import AsyncMock
 
@@ -276,6 +277,92 @@ class ConversationEngineTests(unittest.IsolatedAsyncioTestCase):
         await llm.chat([{"role": "user", "content": "Hello"}], [])
         self.assertEqual(observed["reasoning_effort"], "none")
         self.assertEqual(observed["tool_choice"], "auto")
+
+    async def test_meeting_question_forces_evidence_search_tool(self) -> None:
+        engine, store, integrations, llm = self.engine(test_settings(llm=True))
+        meeting = store.create_meeting(
+            "Release planning",
+            "en-AU",
+            datetime.now(UTC).isoformat(),
+            None,
+        )
+        stored = store.replace_transcript(
+            meeting["id"],
+            [
+                {
+                    "speaker_label": "James",
+                    "start_ms": 1000,
+                    "end_ms": 3000,
+                    "text": "I will prepare the proposal by Friday.",
+                    "confidence": 0.95,
+                }
+            ],
+        )
+        segment_id = stored["transcript"][0]["id"]
+        store.replace_meeting_analysis(
+            meeting["id"],
+            "James agreed to prepare the proposal.",
+            [],
+            [
+                {
+                    "task": "Prepare the proposal",
+                    "owner": "James",
+                    "due_at": None,
+                    "confidence": 0.95,
+                    "segment_ids": [segment_id],
+                }
+            ],
+        )
+        integrations.home_assistant_conversation = AsyncMock(
+            return_value={
+                "response": {
+                    "response_type": "error",
+                    "data": {"code": "no_intent_match"},
+                    "speech": {"plain": {"speech": "I couldn't understand."}},
+                }
+            }
+        )
+        llm.chat = AsyncMock(
+            side_effect=[
+                {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [
+                        {
+                            "id": "meeting-search",
+                            "type": "function",
+                            "function": {
+                                "name": "search_meetings",
+                                "arguments": json.dumps(
+                                    {"query": "proposal Friday", "limit": 5}
+                                ),
+                            },
+                        }
+                    ],
+                },
+                {
+                    "role": "assistant",
+                    "content": (
+                        "You agreed to prepare the proposal by Friday in "
+                        "Release planning."
+                    ),
+                },
+            ]
+        )
+        response = await engine.respond(
+            "What did I agree to in the meeting about the proposal?",
+            "bedroom",
+            device_id="bedroom-display",
+        )
+        self.assertEqual(response.provider, "pilot_llm")
+        self.assertEqual(response.tool_calls[0]["name"], "search_meetings")
+        evidence = response.tool_calls[0]["output"]["meetings"][0]["matching_segments"]
+        self.assertEqual(evidence[0]["id"], segment_id)
+        self.assertEqual(
+            llm.chat.await_args_list[0].kwargs["tool_choice"]["function"]["name"],
+            "search_meetings",
+        )
+        store.close()
 
 
 if __name__ == "__main__":

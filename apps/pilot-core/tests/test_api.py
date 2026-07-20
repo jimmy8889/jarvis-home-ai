@@ -210,6 +210,111 @@ class ApiTests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 422)
 
+    @patch("pilot_core.api.MeetingProcessor.process", new_callable=AsyncMock)
+    def test_device_meetings_are_capability_scoped_owned_and_queued(
+        self, process
+    ) -> None:
+        registration = self.client.post(
+            "/v1/devices/register",
+            headers={"Authorization": "Bearer bootstrap-test"},
+            json={
+                "device_id": "pilot-ios",
+                "room_id": "office",
+                "name": "Pilot iPhone",
+                "capabilities": ["meetings", "portable-client"],
+            },
+        )
+        token = registration.json()["device_token"]
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "X-Pilot-Device-ID": "pilot-ios",
+        }
+        created = self.client.post(
+            "/v1/devices/pilot-ios/meetings",
+            headers=headers,
+            json={
+                "title": "Client planning",
+                "source_device_id": "pilot-ios",
+            },
+        )
+        self.assertEqual(created.status_code, 201, created.text)
+        meeting_id = created.json()["id"]
+        self.assertEqual(created.json()["source_device_id"], "pilot-ios")
+
+        upload = self.client.put(
+            f"/v1/devices/pilot-ios/meetings/{meeting_id}/recording",
+            headers={
+                **headers,
+                "Content-Type": "audio/wav",
+                "X-Pilot-Filename": "planning.wav",
+            },
+            content=b"RIFF\x10\x00\x00\x00WAVEfmt ",
+        )
+        self.assertEqual(upload.status_code, 201, upload.text)
+        process.return_value = {
+            **self.store.get_meeting(meeting_id),
+            "status": "ready",
+        }
+        queued = self.client.post(
+            f"/v1/devices/pilot-ios/meetings/{meeting_id}/process",
+            headers=headers,
+        )
+        self.assertEqual(queued.status_code, 202, queued.text)
+        self.assertEqual(queued.json()["meeting"]["status"], "processing")
+        process.assert_awaited_once_with(meeting_id)
+
+        listing = self.client.get(
+            "/v1/devices/pilot-ios/meetings",
+            headers=headers,
+        )
+        self.assertEqual(listing.status_code, 200)
+        self.assertEqual([item["id"] for item in listing.json()["meetings"]], [meeting_id])
+
+        other_id = self.store.create_meeting(
+            "Another device",
+            "en",
+            "2026-07-21T00:00:00+00:00",
+            "another-device",
+        )["id"]
+        forbidden = self.client.get(
+            f"/v1/devices/pilot-ios/meetings/{other_id}",
+            headers=headers,
+        )
+        self.assertEqual(forbidden.status_code, 404)
+
+        no_capability_token = self.register_device()
+        no_capability = self.client.get(
+            "/v1/devices/office-n150/meetings",
+            headers={
+                "Authorization": f"Bearer {no_capability_token}",
+                "X-Pilot-Device-ID": "office-n150",
+            },
+        )
+        self.assertEqual(no_capability.status_code, 403)
+
+    @patch("pilot_core.api.MeetingProcessor.process", new_callable=AsyncMock)
+    def test_meeting_processing_endpoint_is_admin_only(self, process) -> None:
+        headers = {"Authorization": "Bearer admin-test"}
+        meeting_id = self.client.post(
+            "/v1/meetings",
+            headers=headers,
+            json={"title": "Local processing"},
+        ).json()["id"]
+        process.return_value = {
+            **self.store.get_meeting(meeting_id),
+            "status": "ready",
+            "summary": "Processed locally.",
+        }
+        unauthorized = self.client.post(f"/v1/meetings/{meeting_id}/process")
+        self.assertEqual(unauthorized.status_code, 401)
+        response = self.client.post(
+            f"/v1/meetings/{meeting_id}/process",
+            headers=headers,
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["status"], "ready")
+        process.assert_awaited_once_with(meeting_id)
+
     def test_dashboard_shell_and_assets_have_security_headers(self) -> None:
         root = self.client.get("/", follow_redirects=False)
         self.assertEqual(root.status_code, 307)
@@ -245,7 +350,7 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.headers["cache-control"], "no-store")
         payload = response.json()
-        self.assertEqual(payload["deployment"]["version"], "0.22.0")
+        self.assertEqual(payload["deployment"]["version"], "0.23.0")
         self.assertEqual(payload["summary"]["room_count"], 2)
         self.assertEqual(payload["summary"]["device_count"], 0)
         self.assertEqual(payload["summary"]["armed_room_count"], 0)

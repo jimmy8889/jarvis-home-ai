@@ -325,7 +325,7 @@ final class PilotModel {
             try audioSession.setCategory(
                 .playAndRecord,
                 mode: .spokenAudio,
-                options: [.defaultToSpeaker, .allowBluetoothHFP]
+                options: [.defaultToSpeaker, .allowBluetooth]
             )
             try audioSession.setActive(true)
             let directory = FileManager.default.temporaryDirectory

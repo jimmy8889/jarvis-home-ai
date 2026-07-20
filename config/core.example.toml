@@ -53,6 +53,16 @@ tts_sample_rate = 16000
 tts_sample_channels = 1
 tts_sample_bytes = 2
 tts_timeout_seconds = 60
+# Optional local OpenAI-compatible reasoning provider, including Ollama /v1.
+llm_provider = ""
+llm_url = ""
+llm_token_env = "PILOT_LLM_TOKEN"
+llm_model = ""
+# Set to "none" for low-latency voice models that otherwise emit hidden thought.
+llm_reasoning_effort = ""
+llm_timeout_seconds = 60
+llm_max_tool_rounds = 4
+llm_context_turns = 12
 
 [[rooms]]
 id = "bedroom"

@@ -59,6 +59,7 @@ class IntegrationSettings:
     llm_url: str = ""
     llm_token_env: str = "PILOT_LLM_TOKEN"
     llm_model: str = ""
+    llm_reasoning_effort: str = ""
     llm_timeout_seconds: int = 60
     llm_max_tool_rounds: int = 4
     llm_context_turns: int = 12
@@ -339,6 +340,9 @@ def load_settings(path: str | Path) -> Settings:
         llm_url=str(integration_values.get("llm_url", "")).rstrip("/"),
         llm_token_env=str(integration_values.get("llm_token_env", "PILOT_LLM_TOKEN")),
         llm_model=str(integration_values.get("llm_model", "")).strip(),
+        llm_reasoning_effort=str(
+            integration_values.get("llm_reasoning_effort", "")
+        ).strip(),
         llm_timeout_seconds=int(integration_values.get("llm_timeout_seconds", 60)),
         llm_max_tool_rounds=int(integration_values.get("llm_max_tool_rounds", 4)),
         llm_context_turns=int(integration_values.get("llm_context_turns", 12)),
@@ -357,6 +361,10 @@ def load_settings(path: str | Path) -> Settings:
         raise ValueError("integrations.tts_timeout_seconds must be between 1 and 300")
     if integrations.llm_provider not in {"", "openai"}:
         raise ValueError("integrations.llm_provider must be openai")
+    if integrations.llm_reasoning_effort not in {"", "none", "low", "medium", "high"}:
+        raise ValueError(
+            "integrations.llm_reasoning_effort must be none, low, medium, or high"
+        )
     if not 1 <= integrations.llm_timeout_seconds <= 300:
         raise ValueError("integrations.llm_timeout_seconds must be between 1 and 300")
     if not 1 <= integrations.llm_max_tool_rounds <= 8:

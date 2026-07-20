@@ -135,6 +135,7 @@ class OpenAICompatibleLLM:
             ),
             "provider": self.settings.llm_provider or None,
             "model": self.settings.llm_model or None,
+            "reasoning_effort": self.settings.llm_reasoning_effort or None,
             "max_tool_rounds": self.settings.llm_max_tool_rounds,
             "context_turns": self.settings.llm_context_turns,
         }
@@ -163,6 +164,8 @@ class OpenAICompatibleLLM:
             "tool_choice": "auto",
             "temperature": 0.2,
         }
+        if self.settings.llm_reasoning_effort:
+            payload["reasoning_effort"] = self.settings.llm_reasoning_effort
         try:
             async with httpx.AsyncClient(
                 timeout=self.settings.llm_timeout_seconds,

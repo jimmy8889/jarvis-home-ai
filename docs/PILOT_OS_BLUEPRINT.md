@@ -90,7 +90,7 @@ Music streams: TCP 8097
 Sendspin server: TCP 8927
 Pilot Core: 10.0.1.64:8770
 Pilot Core host: debian-docker / Debian 12
-Pilot Core image: jarvis-home-ai/pilot-core:core-0.15.0-20260720.1
+Pilot Core image: jarvis-home-ai/pilot-core:core-0.16.0-20260720.1
 ```
 
 The Home Assistant add-on is the preferred initial Music Assistant deployment.
@@ -119,6 +119,18 @@ fixed phrase through `tts.piper`, validates the streaming WAV, feeds its PCM to
 the pinned `stt.faster_whisper` pipeline, and requires at least 80% word
 coverage. The deployed acceptance returned all five expected words with 100%
 coverage. Home Assistant reports Piper 2.3.1 and Whisper 3.5.0 running.
+
+Pilot Core 0.16 enables its bounded contextual reasoning path against Ollama
+0.32.1 at `10.0.1.20:11434/v1`, using `qwen3.5:9b`. Home Assistant's built-in
+agent remains the deterministic first pass. Unmatched requests receive bounded
+room/media context and may invoke only Pilot's typed tools. Reasoning effort is
+disabled for the voice path after live tests showed an approximately one-second
+warm factual response while preserving native tool selection.
+
+Home Assistant now has a separate `Pilot Contextual` Assist pipeline with
+Faster Whisper, Piper Amy, preferred local intents, and its RTX Ollama
+conversation agent. The Office satellite is assigned to it; `Full local
+assistant` remains available as a deterministic-only rollback.
 
 Pilot Core now owns short-lived, room- and device-scoped conversation sessions.
 Voice audio uses Home Assistant for STT only, then Pilot tries the built-in
@@ -591,6 +603,7 @@ deployed integration, hardware boundary, or milestone status changes.
 - [x] Home Assistant connection
 - [x] Local Faster Whisper STT and Piper TTS engine round-trip
 - [x] Home Assistant-to-K3 TTS delivery at a bounded test volume
+- [x] Office contextual Ollama pipeline with deterministic-intent preference
 - [x] Reboot persistence and rollback
 
 ### Phase 2 — Network audio: in progress
@@ -678,6 +691,7 @@ deployed integration, hardware boundary, or milestone status changes.
 - [x] Add normalized live player state to Pilot Core and its dashboard
 - [x] Add Pilot-owned conversation continuity and administrator session APIs
 - [x] Add deterministic Home Assistant routing with local-model fallback
+- [x] Deploy the RTX Ollama model and low-latency reasoning configuration
 - [x] Add bounded typed tools for home state/control, weather, and music
 - [x] Deploy the first Raspberry Pi large-format Pilot display appliance
 
@@ -687,19 +701,17 @@ deployed integration, hardware boundary, or milestone status changes.
    room-specific pages and controls.
 2. Confirm a display follow-up request reuses the same Pilot conversation
    session through speech and local TTS.
-3. Make the RTX 3080 inference endpoint reachable from Pilot Core, select a
-   tool-capable local model, and enable the 0.13 reasoning provider.
-4. Run contextual acceptance prompts for pronouns, follow-ups, room-relative
+3. Run contextual acceptance prompts for pronouns, follow-ups, room-relative
    language, live weather, and typed home/music tools.
-5. Complete human acceptance of wake word through spoken response on the Office K3.
-6. Validate a local lossless Music Assistant track.
-7. Complete the supervised K3 acceptance receipt and explicitly arm room
+4. Complete human acceptance of contextual wake-word responses on the Office K3.
+5. Validate a local lossless Music Assistant track.
+6. Complete the supervised K3 acceptance receipt and explicitly arm room
    playback.
-8. Validate assistant ducking and gain restoration at a safe listening volume.
-9. Validate the native Intel Bluetooth controller; add a dedicated adapter only
+7. Validate assistant ducking and gain restoration at a safe listening volume.
+8. Validate the native Intel Bluetooth controller; add a dedicated adapter only
    if its receiver behavior is inadequate.
-10. Train and deploy the **Hey Pilot** wake model.
-11. Complete the in-person Denon power, source, playback, and safe-volume
+9. Train and deploy the **Hey Pilot** wake model.
+10. Complete the in-person Denon power, source, playback, and safe-volume
    acceptance before enabling Media Room control.
 
 ## 15. Decision log

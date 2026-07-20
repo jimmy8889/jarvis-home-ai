@@ -5,6 +5,8 @@ import os
 import unittest
 from unittest.mock import AsyncMock
 
+import httpx
+
 from pilot_core.config import (
     IntegrationSettings,
     Player,
@@ -32,6 +34,7 @@ def test_settings(llm: bool = False) -> Settings:
         llm_provider="openai" if llm else "",
         llm_url="http://rtx.local:11434/v1" if llm else "",
         llm_model="qwen3:8b" if llm else "",
+        llm_reasoning_effort="none" if llm else "",
     )
     return Settings(
         server=ServerSettings(database_path=":memory:"),
@@ -245,6 +248,28 @@ class ConversationEngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(result.tool_calls[0]["output"]["success"])
         self.assertIn("search_music", result.tool_calls[0]["output"]["error"])
         store.close()
+
+    async def test_openai_client_sends_configured_reasoning_effort(self) -> None:
+        observed: dict[str, object] = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            observed.update(json.loads(request.content))
+            return httpx.Response(
+                200,
+                json={
+                    "choices": [
+                        {"message": {"role": "assistant", "content": "Brief answer."}}
+                    ]
+                },
+            )
+
+        settings = test_settings(llm=True)
+        llm = OpenAICompatibleLLM(
+            settings.integrations,
+            httpx.MockTransport(handler),
+        )
+        await llm.chat([{"role": "user", "content": "Hello"}], [])
+        self.assertEqual(observed["reasoning_effort"], "none")
 
 
 if __name__ == "__main__":

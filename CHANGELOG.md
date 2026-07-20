@@ -2,6 +2,17 @@
 
 ## 2026-07-20
 
+- Added and deployed Pilot Core 0.16 contextual reasoning through the local
+  Ollama server at `10.0.1.20:11434/v1`, using the installed tool-capable
+  `qwen3.5:9b` model. Home Assistant deterministic intents remain first; only
+  unmatched requests fall through to the bounded model and typed Pilot tools.
+- Added configurable OpenAI-compatible `reasoning_effort` and set production
+  to `none`. This prevents Qwen's hidden thinking mode from adding tens of
+  seconds to spoken requests while retaining correct native tool calls.
+- Created the Home Assistant `Pilot Contextual` pipeline with Faster Whisper,
+  Piper Amy, local-intent preference, and the existing RTX Ollama conversation
+  agent, then assigned the Office satellite to it. `Full local assistant`
+  remains the one-selection rollback.
 - Added Pilot Core 0.15's authenticated, non-audible local voice acceptance
   route and operator command. It generates a fixed phrase using Home Assistant
   Piper, validates streaming-length WAV safely, passes the bounded 16 kHz mono

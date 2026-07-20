@@ -71,6 +71,7 @@ llm_provider = "openai"
 llm_url = "http://RTX_HOST:11434/v1"
 llm_token_env = "PILOT_LLM_TOKEN"
 llm_model = "LOCAL_TOOL_CAPABLE_MODEL"
+llm_reasoning_effort = "none"
 llm_timeout_seconds = 60
 llm_max_tool_rounds = 4
 llm_context_turns = 12
@@ -78,8 +79,23 @@ llm_context_turns = 12
 
 The token is optional for a private unauthenticated Ollama listener. Never
 expose that listener outside trusted infrastructure. The deployed production
-configuration keeps `llm_provider` empty until the RTX endpoint and model have
-passed tool-use and latency acceptance.
+configuration uses `qwen3.5:9b` at `10.0.1.20:11434/v1`. Its native tool call
+selected the inside-temperature tool with schema-correct arguments.
+`reasoning_effort = "none"` is deliberate for voice latency: the same warm
+model answered a short factual question in about one second rather than
+spending many seconds generating hidden reasoning tokens.
+
+The Office Home Assistant satellite uses a separate `Pilot Contextual`
+pipeline. It preserves Faster Whisper and Piper, prefers Home Assistant's local
+intents, and falls back to the existing `conversation.ollama_rtx3080` agent for
+general questions. `Full local assistant` remains available in the device's
+pipeline selector as the immediate deterministic-only rollback.
+
+Pilot-owned sessions and typed tools apply to requests that enter through Pilot
+Core, including embedded display nodes and API clients. The Home Assistant
+satellite's Ollama fallback gives the Office broader answers immediately, but
+does not yet expose Pilot's Music Assistant tools or retained Pilot session
+history. A future Home Assistant conversation bridge will converge those paths.
 
 ## Administration
 

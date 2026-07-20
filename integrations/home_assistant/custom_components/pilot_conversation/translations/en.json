@@ -16,7 +16,8 @@
     },
     "error": {
       "cannot_connect": "Could not connect to Pilot Core.",
-      "invalid_url": "Enter a valid HTTP or HTTPS Pilot Core URL."
+      "invalid_url": "Enter a valid HTTP or HTTPS Pilot Core URL.",
+      "required": "This field is required."
     },
     "abort": {
       "already_configured": "This Pilot device is already configured."

@@ -52,14 +52,33 @@ class PilotConversationConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Create a Pilot Core conversation entry."""
         errors: dict[str, str] = {}
         if user_input is not None:
+            user_input = {
+                CONF_NAME: str(user_input.get(CONF_NAME, "Pilot Core")).strip(),
+                CONF_CORE_URL: str(
+                    user_input.get(CONF_CORE_URL, DEFAULT_CORE_URL)
+                ).strip(),
+                CONF_DEVICE_ID: str(
+                    user_input.get(CONF_DEVICE_ID, DEFAULT_DEVICE_ID)
+                ).strip(),
+                CONF_DEVICE_TOKEN: str(
+                    user_input.get(CONF_DEVICE_TOKEN, "")
+                ).strip(),
+                CONF_ROOM_ID: str(
+                    user_input.get(CONF_ROOM_ID, DEFAULT_ROOM_ID)
+                ).strip(),
+            }
             try:
                 user_input[CONF_CORE_URL] = _valid_url(
                     str(user_input[CONF_CORE_URL])
                 )
             except vol.Invalid:
                 errors[CONF_CORE_URL] = "invalid_url"
-            await self.async_set_unique_id(str(user_input[CONF_DEVICE_ID]))
-            self._abort_if_unique_id_configured()
+            for key in (CONF_NAME, CONF_DEVICE_ID, CONF_DEVICE_TOKEN, CONF_ROOM_ID):
+                if not user_input[key]:
+                    errors[key] = "required"
+            if not errors:
+                await self.async_set_unique_id(str(user_input[CONF_DEVICE_ID]))
+                self._abort_if_unique_id_configured()
             session = async_get_clientsession(self.hass)
             if not errors:
                 try:
@@ -83,11 +102,11 @@ class PilotConversationConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         schema = vol.Schema(
             {
-                vol.Required(CONF_NAME, default="Pilot Core"): str,
-                vol.Required(CONF_CORE_URL, default=DEFAULT_CORE_URL): str,
-                vol.Required(CONF_DEVICE_ID, default=DEFAULT_DEVICE_ID): str,
-                vol.Required(CONF_DEVICE_TOKEN): str,
-                vol.Required(CONF_ROOM_ID, default=DEFAULT_ROOM_ID): str,
+                vol.Optional(CONF_NAME, default="Pilot Core"): str,
+                vol.Optional(CONF_CORE_URL, default=DEFAULT_CORE_URL): str,
+                vol.Optional(CONF_DEVICE_ID, default=DEFAULT_DEVICE_ID): str,
+                vol.Optional(CONF_DEVICE_TOKEN, default=""): str,
+                vol.Optional(CONF_ROOM_ID, default=DEFAULT_ROOM_ID): str,
             }
         )
         return self.async_show_form(

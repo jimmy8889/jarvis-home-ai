@@ -243,7 +243,7 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.headers["cache-control"], "no-store")
         payload = response.json()
-        self.assertEqual(payload["deployment"]["version"], "0.17.0")
+        self.assertEqual(payload["deployment"]["version"], "0.18.0")
         self.assertEqual(payload["summary"]["room_count"], 2)
         self.assertEqual(payload["summary"]["device_count"], 0)
         self.assertEqual(payload["summary"]["armed_room_count"], 0)
@@ -867,6 +867,42 @@ class ApiTests(unittest.TestCase):
             "media_player.media_room",
             "select_source",
             source="Media Room - Media Player",
+        )
+
+    @patch(
+        "pilot_core.api.Integrations.denon_avr_command",
+        new_callable=AsyncMock,
+    )
+    def test_media_room_can_use_separate_denon_control_endpoint(
+        self, denon_command
+    ) -> None:
+        denon_command.return_value = {"accepted": True}
+        config = settings(self.audio_directory.name)
+        config = replace(
+            config,
+            players=tuple(
+                replace(
+                    player,
+                    control_endpoint="http://10.0.1.150:8080",
+                )
+                if player.id == "media-music"
+                else player
+                for player in config.players
+            ),
+        )
+        store = Store(":memory:", config)
+        with TestClient(create_app(config, store)) as client:
+            response = client.post(
+                "/v1/rooms/media-room/media",
+                headers={"Authorization": "Bearer admin-test"},
+                json={"action": "select_source", "source": "HEOS Music"},
+            )
+        store.close()
+        self.assertEqual(response.status_code, 200)
+        denon_command.assert_awaited_once_with(
+            "http://10.0.1.150:8080",
+            "select_source",
+            source="HEOS Music",
         )
 
     @patch("pilot_core.api.Integrations.music_assistant", new_callable=AsyncMock)

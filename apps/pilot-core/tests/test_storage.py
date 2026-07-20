@@ -251,6 +251,7 @@ class StorageTests(unittest.TestCase):
             }
             connection.close()
         self.assertIn("control_enabled", columns)
+        self.assertIn("control_endpoint", columns)
         self.assertEqual(policies["office-music"], 1)
 
 

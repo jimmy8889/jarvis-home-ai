@@ -59,6 +59,17 @@ class ConfigTests(unittest.TestCase):
         self.assertTrue(settings.players[1].enabled)
         self.assertFalse(settings.players[1].control_enabled)
 
+    def test_loads_separate_player_control_endpoint(self) -> None:
+        configured = VALID_CONFIG.replace(
+            'kind = "music"',
+            'kind = "music"\ncontrol_endpoint = "http://10.0.1.150:8080"',
+        )
+        settings = self._load(configured)
+        self.assertEqual(
+            settings.players[1].control_endpoint,
+            "http://10.0.1.150:8080",
+        )
+
     def test_can_disable_legacy_bootstrap(self) -> None:
         configured = VALID_CONFIG.replace(
             "listen_port = 8770",

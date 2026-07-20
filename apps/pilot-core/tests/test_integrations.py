@@ -100,6 +100,50 @@ class IntegrationDiagnosticTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(result, {"changed_states": []})
 
+    async def test_denon_command_uses_only_whitelisted_receiver_path(self) -> None:
+        requests: list[httpx.Request] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            requests.append(request)
+            return httpx.Response(200, text="")
+
+        integrations = Integrations(
+            IntegrationSettings(),
+            httpx.MockTransport(handler),
+        )
+        result = await integrations.denon_avr_command(
+            "http://10.0.1.150:8080",
+            "select_source",
+            source="HEOS Music",
+        )
+        self.assertEqual(result["accepted"], True)
+        self.assertEqual(len(requests), 1)
+        self.assertEqual(
+            requests[0].url.path,
+            "/goform/formiPhoneAppDirect.xml",
+        )
+        self.assertEqual(requests[0].url.query, b"SIHEOS")
+
+    async def test_denon_command_rejects_unknown_source_without_network(self) -> None:
+        called = False
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            nonlocal called
+            called = True
+            return httpx.Response(200)
+
+        integrations = Integrations(
+            IntegrationSettings(),
+            httpx.MockTransport(handler),
+        )
+        with self.assertRaisesRegex(IntegrationRequestFailed, "not allowed"):
+            await integrations.denon_avr_command(
+                "http://10.0.1.150:8080",
+                "select_source",
+                source="Arbitrary command",
+            )
+        self.assertFalse(called)
+
     async def test_weather_reads_current_state_and_daily_forecast(self) -> None:
         requests: list[httpx.Request] = []
 

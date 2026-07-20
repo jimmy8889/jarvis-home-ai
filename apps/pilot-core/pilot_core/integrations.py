@@ -22,6 +22,21 @@ class IntegrationRequestFailed(RuntimeError):
 
 
 _ENTITY_ID = re.compile(r"^[a-z0-9_]+\.[a-z0-9_]+$")
+_DENON_SOURCE_COMMANDS = {
+    "aux 1": "SIAUX1",
+    "aux 2": "SIAUX2",
+    "blu-ray": "SIBD",
+    "bluetooth": "SIBT",
+    "cbl/sat": "SISAT/CBL",
+    "cd": "SICD",
+    "dvd": "SIDVD",
+    "game": "SIGAME",
+    "heos music": "SIHEOS",
+    "media player": "SIMPLAY",
+    "phono": "SIPHONO",
+    "tv audio": "SITV",
+    "tuner": "SITUNER",
+}
 
 
 class Integrations:
@@ -170,6 +185,57 @@ class Integrations:
             raise IntegrationRequestFailed(
                 f"Home Assistant media command failed: {error}"
             ) from error
+
+    async def denon_avr_command(
+        self,
+        control_endpoint: str,
+        action: str,
+        *,
+        source: str | None = None,
+    ) -> dict[str, Any]:
+        endpoint = httpx.URL(control_endpoint)
+        if (
+            endpoint.scheme not in {"http", "https"}
+            or not endpoint.host
+            or endpoint.username
+            or endpoint.password
+            or endpoint.query
+            or endpoint.fragment
+            or endpoint.path not in {"", "/"}
+        ):
+            raise IntegrationRequestFailed("Denon control endpoint is invalid")
+        commands = {
+            "power_on": "PWON",
+            "power_off": "PWSTANDBY",
+        }
+        command = commands.get(action)
+        if action == "select_source":
+            if not source:
+                raise IntegrationRequestFailed("source is required")
+            command = _DENON_SOURCE_COMMANDS.get(source.strip().casefold())
+            if command is None:
+                raise IntegrationRequestFailed("Denon source is not allowed")
+        if command is None:
+            raise IntegrationRequestFailed("Denon media action is invalid")
+        url = endpoint.copy_with(
+            path="/goform/formiPhoneAppDirect.xml",
+            query=command.encode(),
+        )
+        try:
+            async with httpx.AsyncClient(
+                timeout=8, transport=self.transport, follow_redirects=False
+            ) as client:
+                response = await client.get(url)
+                response.raise_for_status()
+        except httpx.HTTPError as error:
+            raise IntegrationRequestFailed(
+                f"Denon AVR command failed: {error}"
+            ) from error
+        return {
+            "accepted": True,
+            "action": action,
+            "source": source if action == "select_source" else None,
+        }
 
     async def home_assistant_weather(self) -> dict[str, Any]:
         entity_id = self.settings.weather_entity_id

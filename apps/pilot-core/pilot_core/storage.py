@@ -60,6 +60,7 @@ class Store:
                     protocol TEXT NOT NULL,
                     kind TEXT NOT NULL,
                     endpoint TEXT NOT NULL DEFAULT '',
+                    control_endpoint TEXT NOT NULL DEFAULT '',
                     external_id TEXT NOT NULL DEFAULT '',
                     enabled INTEGER NOT NULL DEFAULT 1,
                     control_enabled INTEGER NOT NULL DEFAULT 1
@@ -245,6 +246,11 @@ class Store:
                 self._connection.execute(
                     """ALTER TABLE players ADD COLUMN control_enabled
                        INTEGER NOT NULL DEFAULT 1"""
+                )
+            if "control_endpoint" not in player_columns:
+                self._connection.execute(
+                    """ALTER TABLE players ADD COLUMN control_endpoint
+                       TEXT NOT NULL DEFAULT ''"""
                 )
 
     def resolve_conversation_session(
@@ -539,15 +545,16 @@ class Store:
             for player in settings.players:
                 self._connection.execute(
                     """INSERT INTO players
-                       (id, room_id, name, protocol, kind, endpoint, external_id,
-                        enabled, control_enabled)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                       (id, room_id, name, protocol, kind, endpoint,
+                        control_endpoint, external_id, enabled, control_enabled)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                        ON CONFLICT(id) DO UPDATE SET
                          room_id=excluded.room_id,
                          name=excluded.name,
                          protocol=excluded.protocol,
                          kind=excluded.kind,
                          endpoint=excluded.endpoint,
+                         control_endpoint=excluded.control_endpoint,
                          external_id=excluded.external_id,
                          enabled=excluded.enabled,
                          control_enabled=excluded.control_enabled""",
@@ -558,6 +565,7 @@ class Store:
                         player.protocol,
                         player.kind,
                         player.endpoint,
+                        player.control_endpoint,
                         player.external_id,
                         int(player.enabled),
                         int(player.control_enabled),

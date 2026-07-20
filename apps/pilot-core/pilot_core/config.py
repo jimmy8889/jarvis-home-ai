@@ -95,6 +95,7 @@ class Player:
     protocol: str
     kind: str
     endpoint: str = ""
+    control_endpoint: str = ""
     external_id: str = ""
     enabled: bool = True
     control_enabled: bool = True
@@ -107,6 +108,7 @@ class Player:
             "protocol": self.protocol,
             "kind": self.kind,
             "endpoint": self.endpoint,
+            "control_endpoint": self.control_endpoint,
             "external_id": self.external_id,
             "enabled": self.enabled,
             "control_enabled": self.control_enabled,
@@ -159,6 +161,7 @@ def _parse_player(value: dict[str, object]) -> Player:
         ),
         kind=_require_nonempty(value.get("kind"), f"player[{player_id}].kind"),
         endpoint=str(value.get("endpoint", "")).strip(),
+        control_endpoint=str(value.get("control_endpoint", "")).strip(),
         external_id=str(value.get("external_id", "")).strip(),
         enabled=bool(value.get("enabled", True)),
         control_enabled=bool(value.get("control_enabled", True)),

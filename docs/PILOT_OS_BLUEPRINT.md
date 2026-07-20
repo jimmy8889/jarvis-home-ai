@@ -1,6 +1,6 @@
 # Pilot OS Blueprint
 
-Version 2.2
+Version 2.3
 
 Last updated: 2026-07-20
 
@@ -90,7 +90,7 @@ Music streams: TCP 8097
 Sendspin server: TCP 8927
 Pilot Core: 10.0.1.64:8770
 Pilot Core host: debian-docker / Debian 12
-Pilot Core image: jarvis-home-ai/pilot-core:core-0.17.0-20260720.1
+Pilot Core image: jarvis-home-ai/pilot-core:core-0.18.0-20260720.1
 ```
 
 The Home Assistant add-on is the preferred initial Music Assistant deployment.
@@ -143,12 +143,16 @@ remain the action boundaries.
 
 The Media Room is registered with staged control. Music Assistant identifies the
 Denon AVC-X8500H as HEOS player `1174905188` at `10.0.1.150`; Home Assistant
-exposes the same receiver as `media_player.media_room`. The NVIDIA Shield is
-registered through Music Assistant player
+exposes the same receiver's HEOS state as `media_player.media_room`. Pilot Core
+uses the receiver's allowlisted port-8080 command endpoint for power and named
+input selection because Home Assistant's separate Denon AVR discovery failed
+against the receiver's redirected legacy API. The NVIDIA Shield is registered
+through Music Assistant player
 `upb0713734fca0742d2bf2125b59cbf3b1` at `10.0.1.101`. Pilot Core normalizes
 their live provider state. The accepted Denon HEOS music route permits bounded
-music, volume, power, and source commands. The separate assistant-response
-route and Shield remain read-only.
+music, volume, power, and source commands. Raw receiver commands and unlisted
+sources are rejected. The separate assistant-response route and Shield remain
+read-only.
 
 Office audio focus is active. Pilot Core subscribes to the configured Home
 Assistant Assist-satellite state and forwards expiring listening/responding
@@ -842,3 +846,7 @@ deployed integration, hardware boundary, or milestone status changes.
 - **2.9** — Activated measured Office Sendspin ducking, added the Home Assistant
   satellite-state focus bridge, enabled the accepted Denon HEOS music route,
   and added entity-scoped Denon power and source commands.
+- **3.0** — Added Pilot Core 0.18's split Denon transport: Music Assistant and
+  HEOS remain authoritative for playback/state while a configuration-only,
+  allowlisted port-8080 adapter handles receiver power and named input
+  selection after native Home Assistant AVR discovery failed.

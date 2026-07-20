@@ -748,16 +748,23 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
             )
         external_id = player.external_id or player.id
         if action in {"power_on", "power_off", "select_source"}:
-            if not player.endpoint:
+            control_endpoint = player.control_endpoint or player.endpoint
+            if not control_endpoint:
                 raise HTTPException(
                     status_code=422,
-                    detail=f"player {player.id} has no Home Assistant endpoint",
+                    detail=f"player {player.id} has no control endpoint",
                 )
             if action == "select_source" and not source:
                 raise HTTPException(status_code=422, detail="source is required")
             try:
+                if control_endpoint.startswith(("http://", "https://")):
+                    return await integrations.denon_avr_command(
+                        control_endpoint,
+                        action,
+                        source=source,
+                    )
                 return await integrations.home_assistant_media_player_command(
-                    player.endpoint,
+                    control_endpoint,
                     action,
                     source=source,
                 )

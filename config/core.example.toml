@@ -152,6 +152,7 @@ name = "Media Room"
 protocol = "heos"
 kind = "music"
 endpoint = "media_player.media_room"
+control_endpoint = "http://10.0.1.150:8080"
 external_id = "1174905188"
 control_enabled = false
 

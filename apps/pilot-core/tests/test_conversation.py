@@ -192,6 +192,11 @@ class ConversationEngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.provider, "pilot_llm")
         self.assertEqual(result.response_text, "The bedroom is 22.4 degrees.")
         self.assertEqual(result.tool_calls[0]["name"], "get_temperature")
+        first_call = llm.chat.await_args_list[0]
+        self.assertEqual(
+            first_call.kwargs["tool_choice"]["function"]["name"],
+            "get_temperature",
+        )
         turns = store.conversation_turns(result.session_id)
         self.assertEqual(
             [turn["role"] for turn in turns],
@@ -270,6 +275,7 @@ class ConversationEngineTests(unittest.IsolatedAsyncioTestCase):
         )
         await llm.chat([{"role": "user", "content": "Hello"}], [])
         self.assertEqual(observed["reasoning_effort"], "none")
+        self.assertEqual(observed["tool_choice"], "auto")
 
 
 if __name__ == "__main__":

@@ -9,6 +9,9 @@
 - Added configurable OpenAI-compatible `reasoning_effort` and set production
   to `none`. This prevents Qwen's hidden thinking mode from adding tens of
   seconds to spoken requests while retaining correct native tool calls.
+- Added deterministic read-tool enforcement for current temperature, weather,
+  forecast, and now-playing questions. The model must fetch fresh state before
+  answering these requests and cannot substitute a plausible invented value.
 - Created the Home Assistant `Pilot Contextual` pipeline with Faster Whisper,
   Piper Amy, local-intent preference, and the existing RTX Ollama conversation
   agent, then assigned the Office satellite to it. `Full local assistant`

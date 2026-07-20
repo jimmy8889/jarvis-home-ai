@@ -60,6 +60,13 @@ are bounded, secret-like keys are removed, and disabled players remain
 fail-closed. Context and tool output are explicitly treated as untrusted data
 in the system prompt.
 
+Pilot forces the corresponding read-only tool for clear requests about current
+temperature, weather, forecast, and now-playing state. This guards the voice
+experience against a small model returning a plausible sensor value from its
+language prior instead of consulting the live home. Mutating tools are never
+forced by keyword; real-world actions still pass through Home Assistant or
+Music Assistant and their existing control gates.
+
 ## Configuration
 
 Pilot supports a local OpenAI-compatible endpoint, including an Ollama `/v1`

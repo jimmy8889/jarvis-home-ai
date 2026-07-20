@@ -90,7 +90,7 @@ Music streams: TCP 8097
 Sendspin server: TCP 8927
 Pilot Core: 10.0.1.64:8770
 Pilot Core host: debian-docker / Debian 12
-Pilot Core image: jarvis-home-ai/pilot-core:core-0.16.0-20260720.1
+Pilot Core image: jarvis-home-ai/pilot-core:core-0.16.0-20260720.2
 ```
 
 The Home Assistant add-on is the preferred initial Music Assistant deployment.
@@ -126,6 +126,8 @@ agent remains the deterministic first pass. Unmatched requests receive bounded
 room/media context and may invoke only Pilot's typed tools. Reasoning effort is
 disabled for the voice path after live tests showed an approximately one-second
 warm factual response while preserving native tool selection.
+Clear temperature, weather, forecast, and now-playing questions additionally
+force their read-only tool so current home state cannot be improvised.
 
 Home Assistant now has a separate `Pilot Contextual` Assist pipeline with
 Faster Whisper, Piper Amy, preferred local intents, and its RTX Ollama

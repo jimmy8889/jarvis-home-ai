@@ -115,6 +115,27 @@ def _contains_string(value: Any, expected: str) -> bool:
     return False
 
 
+def _required_read_tool(text: str) -> str | None:
+    """Force fresh-state tools for clear read requests; never force mutations."""
+    normalized = " ".join(text.casefold().split())
+    if any(
+        phrase in normalized
+        for phrase in ("temperature", "how hot", "how cold", "warmer", "cooler")
+    ):
+        return "get_temperature"
+    if any(
+        phrase in normalized
+        for phrase in ("weather", "forecast", "will it rain", "is it raining")
+    ):
+        return "get_weather"
+    if any(
+        phrase in normalized
+        for phrase in ("what is playing", "what's playing", "now playing")
+    ):
+        return "get_room_status"
+    return None
+
+
 class OpenAICompatibleLLM:
     """Small, bounded client for a local OpenAI-compatible chat endpoint."""
 
@@ -144,6 +165,8 @@ class OpenAICompatibleLLM:
         self,
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]],
+        *,
+        tool_choice: str | dict[str, Any] = "auto",
     ) -> dict[str, Any]:
         if not self.status()["configured"]:
             raise AssistantUnavailable("local LLM is not configured")
@@ -161,7 +184,7 @@ class OpenAICompatibleLLM:
             "model": self.settings.llm_model,
             "messages": messages,
             "tools": tools,
-            "tool_choice": "auto",
+            "tool_choice": tool_choice,
             "temperature": 0.2,
         }
         if self.settings.llm_reasoning_effort:
@@ -560,9 +583,20 @@ class ConversationEngine:
         )
         messages.append({"role": "user", "content": text})
         executed: list[dict[str, Any]] = []
+        required_tool = _required_read_tool(text)
 
         for round_index in range(self.llm.settings.llm_max_tool_rounds + 1):
-            message = await self.llm.chat(messages, self.tools.definitions())
+            tool_choice: str | dict[str, Any] = "auto"
+            if round_index == 0 and required_tool:
+                tool_choice = {
+                    "type": "function",
+                    "function": {"name": required_tool},
+                }
+            message = await self.llm.chat(
+                messages,
+                self.tools.definitions(),
+                tool_choice=tool_choice,
+            )
             content = message.get("content")
             tool_calls = message.get("tool_calls")
             if not isinstance(tool_calls, list) or not tool_calls:

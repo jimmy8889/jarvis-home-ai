@@ -90,7 +90,7 @@ Music streams: TCP 8097
 Sendspin server: TCP 8927
 Pilot Core: 10.0.1.64:8770
 Pilot Core host: debian-docker / Debian 12
-Pilot Core image: jarvis-home-ai/pilot-core:core-0.14.0-20260719.1
+Pilot Core image: jarvis-home-ai/pilot-core:core-0.15.0-20260720.1
 ```
 
 The Home Assistant add-on is the preferred initial Music Assistant deployment.
@@ -113,6 +113,12 @@ validated to return 16 kHz, mono,
 operations dashboard is available at `/dashboard`;
 its room, device, integration, safety, command, event, and deployment data
 remain protected by the existing administrator bearer token.
+
+Pilot Core 0.15 adds a safe speech-engine acceptance route. It synthesizes a
+fixed phrase through `tts.piper`, validates the streaming WAV, feeds its PCM to
+the pinned `stt.faster_whisper` pipeline, and requires at least 80% word
+coverage. The deployed acceptance returned all five expected words with 100%
+coverage. Home Assistant reports Piper 2.3.1 and Whisper 3.5.0 running.
 
 Pilot Core now owns short-lived, room- and device-scoped conversation sessions.
 Voice audio uses Home Assistant for STT only, then Pilot tries the built-in
@@ -583,6 +589,8 @@ deployed integration, hardware boundary, or milestone status changes.
 - [x] Stable PipeWire defaults
 - [x] Local wake word
 - [x] Home Assistant connection
+- [x] Local Faster Whisper STT and Piper TTS engine round-trip
+- [x] Home Assistant-to-K3 TTS delivery at a bounded test volume
 - [x] Reboot persistence and rollback
 
 ### Phase 2 — Network audio: in progress
@@ -657,6 +665,7 @@ deployed integration, hardware boundary, or milestone status changes.
 - [x] Joined room state and room-level media/control APIs
 - [x] Secure room-bound audio delivery
 - [x] Local TTS provider abstraction and room speech API
+- [x] Authenticated silent Piper-to-Faster-Whisper acceptance test
 - [x] Hardened central deployment and file-backed secret handling
 - [x] One-time device enrollment grants
 - [x] Silent integration diagnostics and central backup/restore tooling
@@ -682,7 +691,7 @@ deployed integration, hardware boundary, or milestone status changes.
    tool-capable local model, and enable the 0.13 reasoning provider.
 4. Run contextual acceptance prompts for pronouns, follow-ups, room-relative
    language, live weather, and typed home/music tools.
-5. Validate wake word through spoken response on the Office K3.
+5. Complete human acceptance of wake word through spoken response on the Office K3.
 6. Validate a local lossless Music Assistant track.
 7. Complete the supervised K3 acceptance receipt and explicitly arm room
    playback.

@@ -77,6 +77,8 @@ Room-bound, authenticated assistant and announcement playback is documented in
 
 Local Home Assistant/Piper and OpenAI-compatible speech synthesis is documented
 in [docs/LOCAL_TTS.md](docs/LOCAL_TTS.md).
+The same runbook includes the authenticated, silent Piper-to-Faster-Whisper
+acceptance test used after voice-engine upgrades.
 
 The ESP32-C6 AMOLED bedroom node firmware, including motion-aware dim/off,
 weather, touch push-to-talk, local voice responses, authenticated OTA,

@@ -48,6 +48,7 @@ from .voice import (
     VoicePipelineFailed,
     VoicePipelineUnavailable,
 )
+from .voice_acceptance import VoiceAcceptanceFailed, validate_voice_round_trip
 
 
 class DeviceRegistration(BaseModel):
@@ -1244,6 +1245,24 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
     @app.get("/v1/tts", dependencies=[Depends(require_admin)])
     async def tts_status() -> dict[str, Any]:
         return local_tts.status()
+
+    @app.post(
+        "/v1/voice/acceptance",
+        dependencies=[Depends(require_admin)],
+    )
+    async def voice_acceptance(response: Response) -> dict[str, Any]:
+        response.headers["Cache-Control"] = "no-store"
+        try:
+            result = await validate_voice_round_trip(local_tts, voice_pipeline)
+        except (TTSUnavailable, VoicePipelineUnavailable) as error:
+            raise HTTPException(status_code=503, detail=str(error)) from None
+        except (
+            TTSRequestFailed,
+            VoicePipelineFailed,
+            VoiceAcceptanceFailed,
+        ) as error:
+            raise HTTPException(status_code=502, detail=str(error)) from None
+        return result.as_dict()
 
     @app.post(
         "/v1/rooms/{room_id}/speak",

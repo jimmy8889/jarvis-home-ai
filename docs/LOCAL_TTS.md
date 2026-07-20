@@ -143,11 +143,34 @@ Omit the text to read it from standard input. Use
 ## Current activation state
 
 The provider remains disabled in the generic example configuration. It is
-enabled in the production container configuration and has passed a silent
-format check against Home Assistant Piper. Audible acceptance remains
-room-specific:
+enabled in the production container configuration. The production
+`Full local assistant` pipeline is explicitly configured with:
+
+```text
+STT: stt.faster_whisper / English
+TTS: tts.piper / en_US-amy-low
+Audio: 16 kHz, mono, 16-bit PCM WAV
+```
+
+Pilot Core exposes an administrator-only, non-audible round-trip acceptance
+test. It synthesizes a fixed phrase through Piper, validates and extracts the
+bounded WAV PCM, submits that audio to the configured Home Assistant STT
+pipeline, and requires at least 80% expected-word coverage:
+
+```bash
+deploy/scripts/pilot-voice-acceptance \
+  --core-url http://10.0.1.64:8770
+```
+
+The route is `POST /v1/voice/acceptance`. It never creates a room audio asset,
+queues a playback command, or invokes a conversation agent. This makes it safe
+for scheduled checks while preventing a healthy provider configuration from
+being mistaken for a working speech engine.
+
+Audible acceptance remains room-specific:
 
 1. Verify `/v1/tts` and synthesize without enabling live audio focus.
-2. With someone in the room, play a quiet test through the intended endpoint.
-3. Verify cancellation, source-state reporting, and volume restoration.
-4. Enable live ducking only after that room's physical acceptance passes.
+2. Run the silent TTS-to-STT round-trip.
+3. With someone in the room, play a quiet test through the intended endpoint.
+4. Verify cancellation, source-state reporting, and volume restoration.
+5. Enable live ducking only after that room's physical acceptance passes.

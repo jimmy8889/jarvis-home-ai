@@ -45,6 +45,18 @@ The test records speech, plays it back, and then records while replaying the
 same bounded sample. The last stage proves simultaneous input/output at the
 device layer; it does not yet validate acoustic echo cancellation.
 
+Before an audible voice test, validate the central local speech engines:
+
+```bash
+deploy/scripts/pilot-voice-acceptance \
+  --core-url http://10.0.1.64:8770
+```
+
+This fixed-phrase check must report the configured Piper engine and voice,
+Faster Whisper transcript, 16 kHz mono 16-bit PCM, and at least 0.8 word
+coverage. It is silent and does not test the room microphone, speaker, wake
+word, or acoustics.
+
 For the supervised production acceptance, create the one-hour arming receipt:
 
 ```bash

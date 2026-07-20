@@ -1,5 +1,18 @@
 # Changelog
 
+## 2026-07-20
+
+- Added Pilot Core 0.15's authenticated, non-audible local voice acceptance
+  route and operator command. It generates a fixed phrase using Home Assistant
+  Piper, validates streaming-length WAV safely, passes the bounded 16 kHz mono
+  PCM through the configured Faster Whisper pipeline, and requires at least
+  80% expected-word coverage without invoking conversation or room playback.
+- Audited the deployed `Full local assistant` pipeline and confirmed it is
+  explicitly bound to `stt.faster_whisper`, `tts.piper`, English STT, and the
+  `en_US-amy-low` voice. Both add-ons report running and current.
+- Revalidated Office satellite delivery through the K3 with a brief
+  low-volume Piper request and restoration of the prior satellite volume.
+
 ## 2026-07-19
 
 - Added the N150 Media Console architecture and delivery plan. A

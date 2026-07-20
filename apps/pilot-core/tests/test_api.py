@@ -350,7 +350,7 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.headers["cache-control"], "no-store")
         payload = response.json()
-        self.assertEqual(payload["deployment"]["version"], "0.23.0")
+        self.assertEqual(payload["deployment"]["version"], "0.23.1")
         self.assertEqual(payload["summary"]["room_count"], 2)
         self.assertEqual(payload["summary"]["device_count"], 0)
         self.assertEqual(payload["summary"]["armed_room_count"], 0)
@@ -387,6 +387,37 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(metrics.headers["cache-control"], "no-store")
         self.assertIn("pilot_core_up 1", metrics.text)
         self.assertNotIn("admin-test", metrics.text)
+
+    def test_configured_tts_is_not_reported_as_unhealthy(self) -> None:
+        config = settings(self.audio_directory.name)
+        config = replace(
+            config,
+            integrations=replace(
+                config.integrations,
+                tts_url="http://tts.internal:8000",
+                tts_provider="piper",
+            ),
+        )
+        store = Store(":memory:", config)
+        client = TestClient(create_app(config, store))
+        try:
+            response = client.get(
+                "/v1/operations",
+                headers={"Authorization": "Bearer admin-test"},
+            )
+            self.assertEqual(response.status_code, 200)
+            payload = response.json()
+            self.assertEqual(payload["integrations"]["tts"]["status"], "ok")
+            self.assertNotIn(
+                "tts",
+                {
+                    alert.get("integration_id")
+                    for alert in payload["observability"]["alerts"]
+                },
+            )
+        finally:
+            client.close()
+            store.close()
 
     def test_operations_aggregates_health_commands_and_events(self) -> None:
         token = self.register_device()

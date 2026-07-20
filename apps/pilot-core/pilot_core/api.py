@@ -1340,9 +1340,9 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
             media_states.snapshot(),
         )
         tts_status = local_tts.status()
-        tts_status["status"] = (
-            "configured" if tts_status["configured"] else "not_configured"
-        )
+        # Configuration is the local TTS health check: synthesis itself is never
+        # triggered by this silent operations snapshot.
+        tts_status["status"] = "ok" if tts_status["configured"] else "not_configured"
         diagnostics["tts"] = tts_status
         devices = database.list_devices()
         commands = database.list_commands(limit=50)

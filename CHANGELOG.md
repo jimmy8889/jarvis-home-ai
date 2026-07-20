@@ -2,6 +2,10 @@
 
 ## 2026-07-20
 
+- Added the Pilot Home Digital Twin roadmap for an app-first interactive 3D
+  house shared by iOS/iPadOS and a native Android wall-tablet client. Pilot
+  Core projects live state and typed actions while Home Assistant remains the
+  authoritative control boundary and its credentials stay server-side.
 - Added Pilot Core 0.19's device-authenticated text-assistant, media-state,
   Music Assistant search, and media-control APIs. Fixed room devices remain
   room-bound while explicitly enrolled portable clients may select a room.

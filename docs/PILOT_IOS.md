@@ -8,6 +8,13 @@ Pilot iOS is a native SwiftUI client for Pilot Core. The first release provides:
 - room-selectable contextual Pilot conversations;
 - Keychain-backed device authentication.
 
+The next major application surface is the Pilot Home Digital Twin: an
+interactive 3D representation of the house with live room state and bounded
+lighting, scene, climate, blind, media, occupancy, environmental, and later
+confirmation-gated security controls. It shares its model and Pilot Core
+contracts with the native Android wall-tablet client. See
+[HOME_DIGITAL_TWIN.md](HOME_DIGITAL_TWIN.md).
+
 The app never connects directly to Home Assistant, Music Assistant, Ollama,
 Denon, or room endpoints.
 

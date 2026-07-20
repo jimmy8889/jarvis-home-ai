@@ -104,6 +104,10 @@ path are documented in
 The native iPhone room, media, and assistant client is documented in
 [docs/PILOT_IOS.md](docs/PILOT_IOS.md).
 
+The app-first interactive 3D home representation, shared iOS/Android digital
+twin, Home Assistant projection, and wall-tablet roadmap are documented in
+[docs/HOME_DIGITAL_TWIN.md](docs/HOME_DIGITAL_TWIN.md).
+
 Read-only Denon HEOS and NVIDIA Shield discovery, Media Room registration, and
 the fail-closed player control gate are documented in
 [docs/MEDIA_ROOM.md](docs/MEDIA_ROOM.md).

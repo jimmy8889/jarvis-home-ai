@@ -1,6 +1,6 @@
 # Pilot OS Blueprint
 
-Version 3.3
+Version 3.4
 
 Last updated: 2026-07-20
 
@@ -31,6 +31,13 @@ Core goals:
 Local wake word, natural conversation, Home Assistant control, room context,
 tool execution, and contextual memory.
 
+### Home digital twin
+
+An app-first, interactive 3D representation of the house for iPhone, iPad, and
+wall-mounted Android tablets. Rooms and represented devices expose live
+lighting, climate, scene, media, occupancy, environmental, and permitted home
+controls through Pilot Core while Home Assistant remains authoritative.
+
 ### Multi-room audio
 
 Music Assistant, TIDAL, local libraries, Bluetooth input, AirPlay, native
@@ -59,7 +66,7 @@ and room dashboards.
                               │
         ┌──────────┬──────────┼──────────┬───────────┐
         │          │          │          │           │
-   Room agents   macOS       iOS      Shield TV     Web UI
+   Room agents   macOS    iOS/iPadOS   Android    Shield TV    Web UI
         │
         ├── Home Assistant Assist
         ├── Music Assistant
@@ -408,9 +415,14 @@ Planned responsibilities:
 ### Client applications
 
 - macOS: dictation, push-to-talk, AI compose, and menu bar controls
-- iOS: meeting recording, remote assistant, notifications, and secure
-  room/media-console control
+- iOS/iPadOS: interactive home digital twin, meeting recording, remote
+  assistant, notifications, and secure room/media-console control
+- Android: native wall-tablet digital twin, room controls, media, alerts, and
+  resilient kiosk lifecycle
 - Shield TV: dashboard, media browser, assistant overlay, and home controls
+
+The shared digital-twin design, model contract, security boundary, and ordered
+delivery plan are documented in `docs/HOME_DIGITAL_TWIN.md`.
 
 Pilot TV 0.1 now exists as a buildable Kotlin/Compose for TV application. It
 reads the authenticated operations snapshot, renders rooms, integrations,
@@ -664,21 +676,37 @@ deployed integration, hardware boundary, or milestone status changes.
 - [ ] Fullscreen N150 idle/music/assistant shell
 - [ ] Supervised mpv local-video playback
 - [ ] Jellyfin browse, resume, subtitle, and audio-track integration
-- [ ] iOS room/media remote
+- [x] iOS room/media remote foundation
+- [ ] iOS physical-device deployment and secure QR pairing
+- [ ] Music Assistant library, artwork, queue, and playback-transfer UX
 - [x] Bounded Home Assistant Denon power and source commands
 - [ ] HDMI/CEC source coordination for a future media-room N150
 - [ ] N150 HDR10 and HD-audio acceptance
 - [ ] N150/Shield playback-engine selection and handoff
 - [ ] Multi-room sync and announcements
 
-### Phase 4 — Productivity and meetings
+### Phase 4 — Home digital twin clients
+
+- [ ] Home Assistant room/entity inventory and security classification
+- [ ] Optimized house GLB asset and versioned room/entity manifest
+- [ ] Pilot Core home-model, state, action, event, permission, and audit APIs
+- [ ] Shared 2D room-control fallback
+- [ ] iOS/iPadOS interactive 3D house surface
+- [ ] Live lighting representation and room/device interaction
+- [ ] Native Android wall-tablet application
+- [ ] Android kiosk startup, dimming, offline, and crash recovery
+- [ ] Climate, blinds, media, occupancy, environmental, and energy overlays
+- [ ] Confirmation-gated locks, garage, alarm, and security actions
+- [ ] Model mapping and calibration tools
+
+### Phase 5 — Productivity and meetings
 
 - [ ] Meeting recorder
 - [ ] Transcription and diarisation pipeline
 - [ ] macOS dictation client
 - [ ] iOS meeting client
 
-### Phase 5 — Memory and advanced workflows
+### Phase 6 — Memory and advanced workflows
 
 - [ ] Semantic meeting memory
 - [x] Short-lived room/device conversation sessions and retained turns
@@ -868,3 +896,7 @@ deployed integration, hardware boundary, or milestone status changes.
   recorded the live Core 0.19 and Pi Display 0.4 topology, and extended the
   Pilot iOS target to iOS 17. Pilot Core 0.19.1 also closes explicit-player and
   transfer room-boundary bypasses while retaining portable iOS control.
+- **3.4** — Added the Pilot Home Digital Twin roadmap: one versioned 3D house
+  and entity model, device-authenticated Pilot Core state/action/event APIs,
+  an interactive iOS/iPadOS home surface, and a resilient native Android
+  wall-tablet client without exposing Home Assistant credentials.

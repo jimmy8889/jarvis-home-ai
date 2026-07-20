@@ -67,3 +67,25 @@ Before enabling in a room:
 
 The policy never changes the K3 hardware/default-sink volume. It adjusts only
 application streams, preserving the user's room volume setting.
+
+## Office activation
+
+Office focus was activated on 2026-07-20 after Music Assistant and AirPlay
+playback were accepted through the K3. Sendspin 7.5 exposes its native ALSA
+stream to PipeWire as `PipeWire ALSA [python3.13]`; the enforcer therefore
+resolves actual output node IDs from `pw-dump` properties instead of trusting
+the grouped IDs printed by `wpctl status`.
+
+Pilot Core subscribes to Home Assistant's `state_changed` WebSocket events for
+the configured Assist satellite. `listening` and `processing` create an
+expiring listening focus; `responding` transitions to assistant-speech focus;
+and `idle` restores the captured stream gain. Active commands retain TTLs, so a
+Core or Home Assistant disconnect cannot leave music permanently ducked.
+
+The measured Office acceptance result was:
+
+```text
+Sendspin baseline  1.00
+Listening gain     0.20
+Restored gain      1.00
+```

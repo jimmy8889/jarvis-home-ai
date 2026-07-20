@@ -87,6 +87,7 @@ response_player_id = "office-assistant"
 default_music_player_id = "office-music"
 default_device_id = "pilot-office"
 agent_url = ""
+assist_satellite_entity_id = "assist_satellite.pilot_office_assist_satellite_2"
 
 [[players]]
 id = "office-assistant"
@@ -139,7 +140,7 @@ protocol = "heos"
 kind = "music"
 endpoint = "media_player.media_room"
 external_id = "1174905188"
-control_enabled = false
+control_enabled = true
 
 [[players]]
 id = "media-room-shield"

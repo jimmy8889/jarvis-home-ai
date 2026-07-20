@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 import re
 import subprocess
 from threading import Event, Thread
@@ -23,6 +24,10 @@ STREAM_NAMES = {
     "Shairport Sync": "airplay",
     "Sendspin": "music",
     "sendspin": "music",
+    # Sendspin 7.5 opens ALSA through Python. PipeWire exposes the generic ALSA
+    # client label rather than the configured renderer name.
+    "PipeWire ALSA [python": "music",
+    "ALSA Playback [python": "music",
     "linux_voice_assistant": "assistant",
 }
 
@@ -61,6 +66,36 @@ def parse_stream_nodes(text: str) -> dict[str, int]:
         for prefix, source in STREAM_NAMES.items():
             if name.startswith(prefix):
                 result[source] = node_id
+                break
+    return result
+
+
+def parse_pipewire_nodes(text: str) -> dict[str, int]:
+    """Resolve actual PipeWire node IDs rather than wpctl's grouped client IDs."""
+
+    try:
+        objects = json.loads(text)
+    except (json.JSONDecodeError, TypeError):
+        return {}
+    if not isinstance(objects, list):
+        return {}
+    result: dict[str, int] = {}
+    for item in objects:
+        if not isinstance(item, dict) or item.get("type") != "PipeWire:Interface:Node":
+            continue
+        info = item.get("info")
+        props = info.get("props") if isinstance(info, dict) else None
+        if not isinstance(props, dict) or props.get("media.class") != "Stream/Output/Audio":
+            continue
+        labels = " ".join(
+            str(props.get(field) or "")
+            for field in ("application.name", "node.name", "node.description")
+        )
+        for prefix, source in STREAM_NAMES.items():
+            if prefix in labels:
+                node_id = item.get("id")
+                if isinstance(node_id, int):
+                    result[source] = node_id
                 break
     return result
 
@@ -130,12 +165,12 @@ class AudioFocusLoop:
             try:
                 status = collect_status(self.settings)
                 output = subprocess.run(
-                    ["wpctl", "status", "--name"],
+                    ["pw-dump"],
                     capture_output=True,
                     text=True,
                     check=False,
                 )
-                nodes = parse_stream_nodes(output.stdout)
+                nodes = parse_pipewire_nodes(output.stdout)
                 transient = self.control_state.focus_sources()
                 active = {
                     "critical": transient["critical"],

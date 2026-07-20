@@ -1,8 +1,8 @@
 # Pilot OS Blueprint
 
-Version 2.1
+Version 2.2
 
-Last updated: 2026-07-19
+Last updated: 2026-07-20
 
 Status: Canonical architecture reference
 
@@ -90,7 +90,7 @@ Music streams: TCP 8097
 Sendspin server: TCP 8927
 Pilot Core: 10.0.1.64:8770
 Pilot Core host: debian-docker / Debian 12
-Pilot Core image: jarvis-home-ai/pilot-core:core-0.16.0-20260720.2
+Pilot Core image: jarvis-home-ai/pilot-core:core-0.17.0-20260720.1
 ```
 
 The Home Assistant add-on is the preferred initial Music Assistant deployment.
@@ -120,7 +120,7 @@ the pinned `stt.faster_whisper` pipeline, and requires at least 80% word
 coverage. The deployed acceptance returned all five expected words with 100%
 coverage. Home Assistant reports Piper 2.3.1 and Whisper 3.5.0 running.
 
-Pilot Core 0.16 enables its bounded contextual reasoning path against Ollama
+Pilot Core 0.17 retains its bounded contextual reasoning path against Ollama
 0.32.1 at `10.0.1.20:11434/v1`, using `qwen3.5:9b`. Home Assistant's built-in
 agent remains the deterministic first pass. Unmatched requests receive bounded
 room/media context and may invoke only Pilot's typed tools. Reasoning effort is
@@ -137,18 +137,24 @@ assistant` remains available as a deterministic-only rollback.
 Pilot Core now owns short-lived, room- and device-scoped conversation sessions.
 Voice audio uses Home Assistant for STT only, then Pilot tries the built-in
 Home Assistant agent as a fast deterministic path. Unmatched contextual
-requests can fall back to a local OpenAI-compatible model with bounded
+requests fall back to the accepted local OpenAI-compatible model with bounded
 room/media context and typed Pilot tools; Home Assistant and Music Assistant
-remain the action boundaries. The production model endpoint is intentionally
-disabled until the RTX service and selected model pass acceptance.
+remain the action boundaries.
 
-The Media Room is registered in read-only mode. Music Assistant identifies the
+The Media Room is registered with staged control. Music Assistant identifies the
 Denon AVC-X8500H as HEOS player `1174905188` at `10.0.1.150`; Home Assistant
 exposes the same receiver as `media_player.media_room`. The NVIDIA Shield is
 registered through Music Assistant player
 `upb0713734fca0742d2bf2125b59cbf3b1` at `10.0.1.101`. Pilot Core normalizes
-their live provider state while `control_enabled = false` rejects every media
-mutation before it reaches Music Assistant, HEOS, or Home Assistant.
+their live provider state. The accepted Denon HEOS music route permits bounded
+music, volume, power, and source commands. The separate assistant-response
+route and Shield remain read-only.
+
+Office audio focus is active. Pilot Core subscribes to the configured Home
+Assistant Assist-satellite state and forwards expiring listening/responding
+focus commands to the authenticated room endpoint. The deployed enforcer
+resolved the real Sendspin PipeWire node and measured gain `1.00 -> 0.20 ->
+1.00` without changing the K3 sink volume.
 
 The 0.10 deployment adds derived observability and Prometheus-format metrics,
 the read-only Media Room acceptance harness, and the first durable
@@ -639,7 +645,8 @@ deployed integration, hardware boundary, or milestone status changes.
 - [x] Media-room player registration and deterministic selection
 - [x] Provider-neutral Denon and Shield state
 - [x] Fail-closed Media Room control gate
-- [ ] In-person Denon control acceptance
+- [x] Enable the accepted Denon HEOS music route
+- [ ] In-person Denon audible playback and source-switch acceptance
 - [x] Shield application foundation
 - [ ] Shield device pairing and physical deployment
 - [x] N150 Media Console architecture and native-HDMI boundary
@@ -648,7 +655,8 @@ deployed integration, hardware boundary, or milestone status changes.
 - [ ] Supervised mpv local-video playback
 - [ ] Jellyfin browse, resume, subtitle, and audio-track integration
 - [ ] iOS room/media remote
-- [ ] HDMI/CEC/Denon power and source coordination
+- [x] Bounded Home Assistant Denon power and source commands
+- [ ] HDMI/CEC source coordination for a future media-room N150
 - [ ] N150 HDR10 and HD-audio acceptance
 - [ ] N150/Shield playback-engine selection and handoff
 - [ ] Multi-room sync and announcements
@@ -689,7 +697,7 @@ deployed integration, hardware boundary, or milestone status changes.
 - [x] Enable and verify the registered office room-agent reporter
 - [x] Verify authenticated command delivery and restart reconnection
 - [x] Deploy the authenticated Pilot Core operations dashboard
-- [x] Register Media Room, Denon HEOS, and Shield in read-only mode
+- [x] Register Media Room, Denon HEOS, and Shield with per-player control gates
 - [x] Add normalized live player state to Pilot Core and its dashboard
 - [x] Add Pilot-owned conversation continuity and administrator session APIs
 - [x] Add deterministic Home Assistant routing with local-model fallback
@@ -705,16 +713,16 @@ deployed integration, hardware boundary, or milestone status changes.
    session through speech and local TTS.
 3. Run contextual acceptance prompts for pronouns, follow-ups, room-relative
    language, live weather, and typed home/music tools.
-4. Complete human acceptance of contextual wake-word responses on the Office K3.
+4. Confirm wake-word-triggered ducking and restoration by ear on the Office K3.
 5. Validate a local lossless Music Assistant track.
-6. Complete the supervised K3 acceptance receipt and explicitly arm room
+6. Complete the supervised K3 acceptance receipt and explicitly arm Core speech
    playback.
-7. Validate assistant ducking and gain restoration at a safe listening volume.
-8. Validate the native Intel Bluetooth controller; add a dedicated adapter only
+7. Validate the native Intel Bluetooth controller; add a dedicated adapter only
    if its receiver behavior is inadequate.
-9. Train and deploy the **Hey Pilot** wake model.
-10. Complete the in-person Denon power, source, playback, and safe-volume
-   acceptance before enabling Media Room control.
+8. Train and deploy the **Hey Pilot** wake model.
+9. Complete the audible Denon playback/source acceptance at a safe volume.
+10. Converge the Office wake-word path onto Pilot Core so it uses the same
+    retained sessions and typed tools as Pilot clients.
 
 ## 15. Decision log
 
@@ -831,3 +839,6 @@ deployed integration, hardware boundary, or milestone status changes.
   room role with a fullscreen Pilot shell, Music Assistant presentation,
   supervised mpv/Jellyfin local video, iOS control through Pilot Core, and a
   strict Shield boundary for Dolby Vision, DRM, and commercial streaming.
+- **2.9** — Activated measured Office Sendspin ducking, added the Home Assistant
+  satellite-state focus bridge, enabled the accepted Denon HEOS music route,
+  and added entity-scoped Denon power and source commands.

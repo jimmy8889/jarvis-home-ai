@@ -3,7 +3,12 @@ from __future__ import annotations
 import subprocess
 import unittest
 
-from pilot_room_agent.audio_focus import FocusEnforcer, decide, parse_stream_nodes
+from pilot_room_agent.audio_focus import (
+    FocusEnforcer,
+    decide,
+    parse_pipewire_nodes,
+    parse_stream_nodes,
+)
 from pilot_room_agent.controls import ControlState
 
 
@@ -17,6 +22,33 @@ class AudioFocusTests(unittest.TestCase):
             """
         )
         self.assertEqual(nodes, {"airplay": 56, "assistant": 62, "music": 70})
+
+    def test_parses_sendspin_generic_python_alsa_stream(self) -> None:
+        nodes = parse_stream_nodes("        44. PipeWire ALSA [python3.13]\n")
+        self.assertEqual(nodes, {"music": 44})
+
+    def test_pipewire_dump_resolves_real_sendspin_node_id(self) -> None:
+        nodes = parse_pipewire_nodes(
+            """
+            [
+              {
+                "id": 69,
+                "type": "PipeWire:Interface:Node",
+                "info": {"props": {
+                  "media.class": "Stream/Output/Audio",
+                  "application.name": "PipeWire ALSA [python3.13]",
+                  "node.name": "alsa_playback.python3.13"
+                }}
+              },
+              {
+                "id": 44,
+                "type": "PipeWire:Interface:Client",
+                "info": {"props": {"application.name": "PipeWire ALSA [python3.13]"}}
+              }
+            ]
+            """
+        )
+        self.assertEqual(nodes, {"music": 69})
 
     def test_assistant_ducks_lower_priority_sources(self) -> None:
         decision = decide({"assistant": True, "music": True}, 0.2)

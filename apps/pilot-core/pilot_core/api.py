@@ -25,6 +25,7 @@ from fastapi.responses import FileResponse, PlainTextResponse, RedirectResponse
 from pydantic import BaseModel, Field, model_validator
 
 from . import __version__
+from .assist_focus import AssistFocusBridge
 from .audio_assets import AudioAssetError, AudioAssets
 from .config import Settings
 from .conversation import (
@@ -74,6 +75,7 @@ class MediaCommand(BaseModel):
     media_uri: str | None = None
     target_player_id: str | None = None
     volume: int | None = Field(default=None, ge=0, le=100)
+    source: str | None = Field(default=None, min_length=1, max_length=200)
 
 
 class AssistantRequest(BaseModel):
@@ -143,12 +145,23 @@ class RoomControlInput(DeviceCommandInput):
 
 
 class RoomMediaCommand(BaseModel):
-    action: Literal["play", "pause", "stop", "set_volume", "play_media", "transfer"]
+    action: Literal[
+        "play",
+        "pause",
+        "stop",
+        "set_volume",
+        "play_media",
+        "transfer",
+        "power_on",
+        "power_off",
+        "select_source",
+    ]
     player_id: str | None = None
     media_uri: str | None = None
     target_room_id: str | None = None
     target_player_id: str | None = None
     volume: int | None = Field(default=None, ge=0, le=100)
+    source: str | None = Field(default=None, min_length=1, max_length=200)
 
     @model_validator(mode="after")
     def validate_action_fields(self) -> "RoomMediaCommand":
@@ -158,6 +171,8 @@ class RoomMediaCommand(BaseModel):
             raise ValueError("media_uri is required for play_media")
         if self.action == "transfer" and not self.target_room_id:
             raise ValueError("target_room_id is required for transfer")
+        if self.action == "select_source" and not self.source:
+            raise ValueError("source is required for select_source")
         return self
 
 
@@ -359,12 +374,33 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
     hub = EventHub()
     device_hub = DeviceHub()
     dashboard_directory = Path(__file__).with_name("dashboard")
+    focus_bridge: AssistFocusBridge | None = None
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
-        yield
-        if owns_store:
-            database.close()
+        nonlocal focus_bridge
+        focus_bridge = AssistFocusBridge(
+            settings.integrations,
+            settings.rooms,
+            queue_device_command,
+        )
+        focus_task = (
+            asyncio.create_task(focus_bridge.run(), name="assist-focus-bridge")
+            if focus_bridge.enabled
+            else None
+        )
+        try:
+            yield
+        finally:
+            if focus_bridge:
+                await focus_bridge.stop()
+            if focus_task:
+                try:
+                    await asyncio.wait_for(focus_task, timeout=6)
+                except TimeoutError:
+                    focus_task.cancel()
+            if owns_store:
+                database.close()
 
     app = FastAPI(title="Pilot Core", version=__version__, lifespan=lifespan)
 
@@ -700,6 +736,7 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
         volume: int | None = None,
         media_uri: str | None = None,
         target_player_id: str | None = None,
+        source: str | None = None,
     ) -> Any:
         player = registry.players.get(player_id)
         if not player:
@@ -710,6 +747,24 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
                 detail=f"player {player.id} controls are disabled",
             )
         external_id = player.external_id or player.id
+        if action in {"power_on", "power_off", "select_source"}:
+            if not player.endpoint:
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"player {player.id} has no Home Assistant endpoint",
+                )
+            if action == "select_source" and not source:
+                raise HTTPException(status_code=422, detail="source is required")
+            try:
+                return await integrations.home_assistant_media_player_command(
+                    player.endpoint,
+                    action,
+                    source=source,
+                )
+            except IntegrationUnavailable as error:
+                raise HTTPException(status_code=503, detail=str(error)) from None
+            except IntegrationRequestFailed as error:
+                raise HTTPException(status_code=502, detail=str(error)) from None
         target_external_id: str | None = None
         if target_player_id is not None:
             target = registry.players.get(target_player_id)
@@ -1143,6 +1198,7 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
             request.volume,
             request.media_uri,
             target_player.id if target_player else None,
+            request.source,
         )
         return {
             "room_id": room_id,
@@ -1856,6 +1912,7 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
             command.volume,
             command.media_uri,
             command.target_player_id,
+            command.source,
         )
 
     @app.post("/v1/assistant", dependencies=[Depends(require_admin)])

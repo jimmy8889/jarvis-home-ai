@@ -118,6 +118,59 @@ class Integrations:
                 f"Home Assistant state request failed: {error}"
             ) from error
 
+    async def home_assistant_media_player_command(
+        self,
+        entity_id: str,
+        action: str,
+        *,
+        source: str | None = None,
+    ) -> dict[str, Any]:
+        if not _ENTITY_ID.fullmatch(entity_id) or not entity_id.startswith(
+            "media_player."
+        ):
+            raise IntegrationRequestFailed("Home Assistant media player is invalid")
+        services = {
+            "power_on": "turn_on",
+            "power_off": "turn_off",
+            "select_source": "select_source",
+        }
+        service = services.get(action)
+        if service is None:
+            raise IntegrationRequestFailed("Home Assistant media action is invalid")
+        if action == "select_source" and not source:
+            raise IntegrationRequestFailed("source is required")
+        if not self.settings.home_assistant_url:
+            raise IntegrationUnavailable("Home Assistant URL is not configured")
+        token = read_secret(self.settings.home_assistant_token_env)
+        if not token:
+            raise IntegrationUnavailable("Home Assistant token is not configured")
+        payload: dict[str, Any] = {"entity_id": entity_id}
+        if source:
+            payload["source"] = source
+        try:
+            async with httpx.AsyncClient(
+                timeout=15, transport=self.transport, follow_redirects=False
+            ) as client:
+                response = await client.post(
+                    (
+                        f"{self.settings.home_assistant_url}"
+                        f"/api/services/media_player/{service}"
+                    ),
+                    headers={"Authorization": f"Bearer {token}"},
+                    json=payload,
+                )
+                response.raise_for_status()
+                result = response.json()
+                if isinstance(result, list):
+                    return {"changed_states": result}
+                if isinstance(result, dict):
+                    return result
+                raise ValueError("service response is not an object or array")
+        except (httpx.HTTPError, ValueError) as error:
+            raise IntegrationRequestFailed(
+                f"Home Assistant media command failed: {error}"
+            ) from error
+
     async def home_assistant_weather(self) -> dict[str, Any]:
         entity_id = self.settings.weather_entity_id
         if not entity_id:

@@ -124,15 +124,15 @@ def evaluate(
             player.get("external_id") == external_id,
             "Configured provider identity matches the accepted inventory",
         )
-        expected_control = phase == "control-ready"
+        expected_control = phase == "control-ready" and player_id == "media-room-heos"
         check(
             checks,
             f"{player_id}-control-gate",
             player.get("control_enabled") is expected_control,
             (
-                "Controls enabled after in-person acceptance"
+                "Accepted Denon music controls enabled"
                 if expected_control
-                else "Controls remain fail-closed"
+                else "Control path remains fail-closed"
             ),
         )
 

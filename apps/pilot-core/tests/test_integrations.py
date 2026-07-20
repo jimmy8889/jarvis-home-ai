@@ -72,6 +72,34 @@ class IntegrationDiagnosticTests(unittest.IsolatedAsyncioTestCase):
                 "media_player.media_room/../../config"
             )
 
+    async def test_media_player_source_command_is_entity_scoped(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            self.assertEqual(request.method, "POST")
+            self.assertEqual(
+                request.url.path,
+                "/api/services/media_player/select_source",
+            )
+            self.assertEqual(dict(request.url.params), {})
+            self.assertEqual(
+                json.loads(request.content),
+                {
+                    "entity_id": "media_player.media_room",
+                    "source": "Media Room - Media Player",
+                },
+            )
+            return httpx.Response(200, json=[])
+
+        integrations = Integrations(
+            IntegrationSettings(home_assistant_url="http://ha.local:8123"),
+            httpx.MockTransport(handler),
+        )
+        result = await integrations.home_assistant_media_player_command(
+            "media_player.media_room",
+            "select_source",
+            source="Media Room - Media Player",
+        )
+        self.assertEqual(result, {"changed_states": []})
+
     async def test_weather_reads_current_state_and_daily_forecast(self) -> None:
         requests: list[httpx.Request] = []
 

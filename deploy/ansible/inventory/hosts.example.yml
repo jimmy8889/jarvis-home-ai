@@ -40,6 +40,8 @@ all:
           room_endpoint_core_reporting_enabled: false
           room_endpoint_core_commands_enabled: false
           room_endpoint_core_url: http://192.0.2.30:8770
+          # Enable only after the room's source labels and gain restoration pass.
+          room_endpoint_audio_focus_enabled: false
           # Prefer an Ansible Vault variable in production. For one-time local
           # enrollment, this may point at a mode-0600 controller file.
           room_endpoint_core_device_token_source_file: ""

@@ -73,6 +73,7 @@ def settings(audio_asset_path: str = "/tmp/pilot-core-test-audio") -> Settings:
                 name="Media Music",
                 protocol="heos",
                 kind="music",
+                endpoint="media_player.media_room",
                 external_id="denon-media-room",
             ),
         ),
@@ -242,7 +243,7 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.headers["cache-control"], "no-store")
         payload = response.json()
-        self.assertEqual(payload["deployment"]["version"], "0.16.0")
+        self.assertEqual(payload["deployment"]["version"], "0.17.0")
         self.assertEqual(payload["summary"]["room_count"], 2)
         self.assertEqual(payload["summary"]["device_count"], 0)
         self.assertEqual(payload["summary"]["armed_room_count"], 0)
@@ -843,6 +844,29 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         music_assistant.assert_awaited_once_with(
             "players/cmd/play", {"player_id": "pilot-office"}
+        )
+
+    @patch(
+        "pilot_core.api.Integrations.home_assistant_media_player_command",
+        new_callable=AsyncMock,
+    )
+    def test_media_room_source_selection_uses_bounded_ha_endpoint(
+        self, media_command
+    ) -> None:
+        media_command.return_value = {"changed_states": []}
+        response = self.client.post(
+            "/v1/rooms/media-room/media",
+            headers={"Authorization": "Bearer admin-test"},
+            json={
+                "action": "select_source",
+                "source": "Media Room - Media Player",
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        media_command.assert_awaited_once_with(
+            "media_player.media_room",
+            "select_source",
+            source="Media Room - Media Player",
         )
 
     @patch("pilot_core.api.Integrations.music_assistant", new_callable=AsyncMock)

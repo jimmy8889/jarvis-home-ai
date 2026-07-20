@@ -32,10 +32,13 @@ entity `media_player.media_room`. The Shield is currently joined through its
 unambiguous Music Assistant identity; ambiguous legacy Home Assistant Shield
 entities are intentionally not guessed.
 
-All three players have `control_enabled = false`. This is distinct from
-`enabled`: discovery and state remain available while mutation is rejected.
-Both `/v1/media` and `/v1/rooms/media-room/media` enforce the gate before an
-integration request is made.
+The accepted `media-room-heos` music route now has `control_enabled = true`.
+The separate assistant-response and Shield routes remain read-only. This keeps
+music transport and bounded Denon control available without yet authorizing
+automatic announcements or third-party video-app control.
+
+Both `/v1/media` and `/v1/rooms/media-room/media` enforce the per-player gate
+before an integration request is made.
 
 ## Read-only APIs
 
@@ -66,6 +69,12 @@ Media Room control stays locked until an in-person acceptance session:
 
 An N150-to-HDMI endpoint remains deferred. Native HEOS will be evaluated first.
 
+Pilot Core supports `play`, `pause`, `stop`, `set_volume`, `play_media`, and
+`transfer` through Music Assistant. It also supports bounded `power_on`,
+`power_off`, and `select_source` commands through only the configured Home
+Assistant `media_player` entity; arbitrary Home Assistant services and entities
+cannot be supplied by the caller.
+
 ## Acceptance harness
 
 `deploy/scripts/pilot-media-room-acceptance` performs the discovery phase
@@ -81,6 +90,6 @@ deploy/scripts/pilot-media-room-acceptance \
   --token-file infra/secrets/pilot_core_admin_token
 ```
 
-The default `discovery` phase requires both Media Room players to remain
-read-only. The later `--phase control-ready` check is useful only after
-in-person receiver tests have deliberately enabled the accepted player paths.
+The legacy `discovery` phase requires both Media Room players to remain
+read-only. `--phase control-ready` requires the Denon music route to be enabled
+while the Shield remains fail-closed.

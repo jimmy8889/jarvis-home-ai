@@ -11,6 +11,11 @@ from homeassistant import config_entries
 from homeassistant.const import CONF_NAME
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.selector import (
+    TextSelector,
+    TextSelectorConfig,
+    TextSelectorType,
+)
 
 from .const import (
     CONF_CORE_URL,
@@ -102,11 +107,22 @@ class PilotConversationConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         schema = vol.Schema(
             {
-                vol.Optional(CONF_NAME, default="Pilot Core"): str,
-                vol.Optional(CONF_CORE_URL, default=DEFAULT_CORE_URL): str,
-                vol.Optional(CONF_DEVICE_ID, default=DEFAULT_DEVICE_ID): str,
-                vol.Optional(CONF_DEVICE_TOKEN, default=""): str,
-                vol.Optional(CONF_ROOM_ID, default=DEFAULT_ROOM_ID): str,
+                vol.Required(CONF_NAME, default="Pilot Core"): TextSelector(),
+                vol.Required(
+                    CONF_CORE_URL, default=DEFAULT_CORE_URL
+                ): TextSelector(TextSelectorConfig(type=TextSelectorType.URL)),
+                vol.Required(
+                    CONF_DEVICE_ID, default=DEFAULT_DEVICE_ID
+                ): TextSelector(),
+                vol.Required(CONF_DEVICE_TOKEN): TextSelector(
+                    TextSelectorConfig(
+                        type=TextSelectorType.PASSWORD,
+                        autocomplete="current-password",
+                    )
+                ),
+                vol.Required(
+                    CONF_ROOM_ID, default=DEFAULT_ROOM_ID
+                ): TextSelector(),
             }
         )
         return self.async_show_form(

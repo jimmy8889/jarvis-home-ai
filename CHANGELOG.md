@@ -12,6 +12,10 @@
   `en_US-amy-low` voice. Both add-ons report running and current.
 - Revalidated Office satellite delivery through the K3 with a brief
   low-volume Piper request and restoration of the prior satellite volume.
+- Added a guarded central-host source sync command that preserves the ignored
+  bind configuration, root-owned secrets, backups, and deployment marker.
+  This prevents a release mirror update from silently reverting Pilot Core to
+  its loopback-only fail-safe binding.
 
 ## 2026-07-19
 

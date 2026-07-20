@@ -1,0 +1,64 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+repo_root="$(cd "${script_dir}/../.." && pwd)"
+remote_host="root@10.0.1.64"
+remote_path="/opt/jarvis-home-ai"
+dry_run=false
+
+usage() {
+  printf '%s\n' \
+    "Usage: pilot-core-sync [--host SSH_HOST] [--path ABSOLUTE_PATH] [--dry-run]" \
+    "" \
+    "Mirrors committed source to a non-Git deployment tree while preserving" \
+    "host settings, credentials, backups, data, and the deployment marker."
+}
+
+while (($#)); do
+  case "$1" in
+    --host) remote_host="$2"; shift ;;
+    --path) remote_path="$2"; shift ;;
+    --dry-run) dry_run=true ;;
+    -h|--help) usage; exit 0 ;;
+    *) printf 'Unknown option: %s\n' "$1" >&2; usage >&2; exit 2 ;;
+  esac
+  shift
+done
+
+if [[ ! "$remote_host" =~ ^[a-zA-Z0-9_.@:-]+$ ]]; then
+  printf '%s\n' 'SSH host contains unsupported characters.' >&2
+  exit 2
+fi
+if [[ ! "$remote_path" =~ ^/[a-zA-Z0-9_./-]+$ ]] || [[ "$remote_path" == "/" ]]; then
+  printf '%s\n' 'Remote path must be a safe absolute path other than /.' >&2
+  exit 2
+fi
+
+commit="$(git -C "$repo_root" rev-parse HEAD)"
+ssh "$remote_host" "mkdir -p '$remote_path'"
+rsync_args=(
+  --archive
+  --compress
+  --delete
+  --exclude=.git/
+  --exclude=.venv/
+  --exclude=.artifacts/
+  --exclude=.DS_Store
+  --exclude=__pycache__/
+  --exclude='*.pyc'
+  --exclude=infra/.env
+  --exclude=infra/secrets/
+  --exclude=infra/backups/
+  --exclude=.deployed-commit
+)
+if [[ "$dry_run" == true ]]; then
+  rsync_args+=(--dry-run --itemize-changes)
+fi
+rsync "${rsync_args[@]}" "${repo_root}/" "${remote_host}:${remote_path}/"
+if [[ "$dry_run" != true ]]; then
+  printf '%s\n' "$commit" |
+    ssh "$remote_host" "install -m 0644 /dev/stdin '$remote_path/.deployed-commit'"
+  printf 'Synced Pilot source at commit %s to %s:%s\n' \
+    "$commit" "$remote_host" "$remote_path"
+fi

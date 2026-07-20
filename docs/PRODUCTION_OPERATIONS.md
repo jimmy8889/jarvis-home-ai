@@ -46,6 +46,20 @@ deploy/scripts/pilot-core-deploy \
   --core-url http://PILOT_CORE_BIND_ADDRESS:8770
 ```
 
+The central host uses a non-Git release mirror. Sync it with the guarded
+operator command:
+
+```bash
+deploy/scripts/pilot-core-sync \
+  --host root@10.0.1.64 \
+  --path /opt/jarvis-home-ai
+```
+
+The sync deliberately preserves `infra/.env`, `infra/secrets`,
+`infra/backups`, and `.deployed-commit`. Do not replace it with an unqualified
+`rsync --delete`: removing `infra/.env` makes Compose fail closed to its
+loopback-only default and disconnects room agents.
+
 The deployment command:
 
 1. validates secret ownership and modes;

@@ -611,10 +611,21 @@ final class PilotModel {
             }
             let meeting = try await api().createMeeting(title: normalized)
             let audioSession = AVAudioSession.sharedInstance()
+#if compiler(>=6.2)
+            let categoryOptions: AVAudioSession.CategoryOptions = [
+                .defaultToSpeaker,
+                .allowBluetoothHFP,
+            ]
+#else
+            let categoryOptions: AVAudioSession.CategoryOptions = [
+                .defaultToSpeaker,
+                .allowBluetooth,
+            ]
+#endif
             try audioSession.setCategory(
                 .playAndRecord,
                 mode: .spokenAudio,
-                options: [.defaultToSpeaker, .allowBluetoothHFP]
+                options: categoryOptions
             )
             try audioSession.setActive(true)
             let directory = try Self.meetingRecordingDirectory()

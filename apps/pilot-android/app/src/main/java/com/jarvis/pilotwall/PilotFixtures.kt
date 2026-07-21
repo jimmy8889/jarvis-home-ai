@@ -51,7 +51,16 @@ object PilotFixtures {
                 volumePercent = 34,
                 muted = false,
                 source = "Music Assistant",
-                media = CurrentMedia("Teardrop", "Massive Attack", "Mezzanine", null),
+                media = CurrentMedia(
+                    "Teardrop",
+                    "Massive Attack",
+                    "Mezzanine",
+                    null,
+                    durationSeconds = 300.0,
+                ),
+                positionSeconds = 62.0,
+                durationSeconds = 300.0,
+                capabilities = setOf("seek", "mute", "next", "previous", "group"),
             ),
         ),
         PilotPlayerState(
@@ -74,9 +83,67 @@ object PilotFixtures {
         configured = true,
         connection = ConnectionState.Online,
         snapshot = PilotSnapshot(
-            media = MediaSnapshot(Instant.now(), rooms, playerStates),
+            media = MediaSnapshot(
+                Instant.now(),
+                rooms,
+                playerStates,
+                revision = "fixture-1",
+                queues = mapOf(
+                    "office-n150" to MediaQueue(
+                        "office-n150",
+                        0,
+                        listOf(
+                            MediaQueueItem(
+                                "track-1",
+                                "Teardrop",
+                                "Massive Attack",
+                                "Mezzanine",
+                                null,
+                                300.0,
+                                true,
+                            ),
+                        ),
+                    ),
+                ),
+            ),
             surface = SurfaceSnapshot(Instant.now(), energy, playerStates.take(1)),
         ),
         selectedRoomId = "office",
+        home = HomeProjection(
+            "office",
+            "Office",
+            listOf(
+                HomeEntity(
+                    entityId = "light.office_lamp",
+                    domain = "light",
+                    name = "Office lamp",
+                    state = "on",
+                    areaId = "office",
+                    unavailable = false,
+                    stale = false,
+                    actions = listOf("turn_on", "turn_off", "set_brightness"),
+                    brightnessPercent = 50f,
+                    presentation = EntityPresentation(
+                        priority = 10,
+                        displayName = "Desk lamp",
+                        section = "Favourites",
+                        control = "light",
+                    ),
+                ),
+                HomeEntity(
+                    entityId = "sensor.office_temperature",
+                    domain = "sensor",
+                    name = "Temperature",
+                    state = "23.4",
+                    areaId = "office",
+                    unavailable = false,
+                    stale = false,
+                    actions = emptyList(),
+                    brightnessPercent = null,
+                    unit = "°C",
+                    numericValue = 23.4,
+                ),
+            ),
+        ),
     )
 }

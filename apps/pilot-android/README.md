@@ -3,20 +3,33 @@
 Pilot Wall is a native Kotlin/Jetpack Compose client for an always-powered,
 permanently mounted Android tablet.
 
-## Included in v0.1
+## Product capabilities
 
 - Adaptive tablet/phone navigation and a spacious 1024×600 wall layout.
 - Home overview with freshness, rooms, active media and an animated
   solar/grid/battery/home energy-flow diagram.
 - Room-aware media state and playback context.
-- Music Assistant search, play/pause and a persistent now-playing mini-player.
-- Contextual Pilot assistant chat with conversation continuity.
+- Server-curated Home Assistant presentation with purpose-built lighting,
+  climate, cover, fan, lock, scene, switch, sensor and contact tiles. Core's
+  inclusion policy, canonical IDs, duplicate suppression, display names,
+  sections, priorities and room trust are honored when supplied.
+- Music Assistant search plus artwork, progress, queue, seek, transport,
+  volume, mute, grouping and room-transfer presentation. Controls are shown
+  only when the player advertises the corresponding capability, with the
+  legacy play/pause/stop/volume/transfer contract retained.
+- Contextual Pilot assistant chat and microphone capture. Talk to Pilot sends
+  signed 16-bit 16 kHz mono PCM directly to the device-scoped Core voice API,
+  renders structured cards/sources and plays Core-generated TTS locally.
 - Loading, offline, stale, empty and API-error states with last-state retention.
-- Secure onboarding and device-token storage using Android Keystore AES-GCM.
-- Automatic polling, an automatic night palette, keep-awake control and small
-  periodic content offsets to reduce static-image wear.
-- Accessible energy descriptions, large targets, Material typography, fixtures,
-  Compose preview and parser/security unit tests.
+- Single-use grant pairing via pasted codes or `pilot://pair` QR/deep links,
+  with manual device-token entry retained behind an advanced disclosure.
+- Secure device-token storage using Android Keystore AES-GCM.
+- Reconnect-safe event snapshots and cursor-based long polling when advertised
+  by Core, with periodic polling retained as a heartbeat/fallback.
+- Automatic day/night palette, configurable ambient clock/energy/now-playing
+  mode, kiosk system-bar behavior, keep-awake control and burn-in offsets.
+- Accessible descriptions, large touch targets, adaptive 1024×600 layouts,
+  canonical contract fixtures, Compose previews and screenshot-test scaffolding.
 
 ## Authority and security
 
@@ -62,21 +75,26 @@ Gradle wrapper and dependency versions are included for reproducible CI builds.
 | Music search | `POST /v1/devices/{id}/media/search` |
 | Assistant chat | `POST /v1/devices/{id}/assistant` |
 | Energy and now playing | `GET /v1/devices/{id}/surface` |
+| Client manifest | `GET /v1/devices/{id}/manifest` |
+| Reconnect snapshot | `GET /v1/devices/{id}/events/snapshot?cursor=` |
+| Event long poll | `GET /v1/devices/{id}/events?cursor=&timeout_seconds=25` |
+| Talk to Pilot | `POST /v1/devices/{id}/voice` |
+| Single-use enrollment | `POST /v1/devices/bootstrap` |
 
-The state endpoints are polled concurrently. Core's current device WebSocket is
-a command transport for endpoint agents, not a general state subscription.
+The manifest advertises feature and endpoint availability. The client tolerates
+older Core versions by decoding richer fields optionally and falling back to
+the existing concurrent media/surface polling path.
 
-## Backend gaps for the next release
+## Physical acceptance still required
 
-The app does not bypass Core when an API is absent. The full Home
-Assistant-first wall experience still needs these Pilot Core contracts:
+Compilation and JVM contract tests do not prove the mounted-tablet experience.
+Before calling the wall appliance accepted, validate on the target hardware:
 
-1. Device-scoped floors, areas, devices, entities, capabilities and sanitized
-   live states.
-2. Typed, policy-checked actions for lights, climate, covers and scenes.
-3. A device-authorized state event WebSocket or resumable event cursor.
-4. Music queue, artwork proxy, seek, mute, grouping and transfer APIs with
-   stable typed results.
-5. Historical energy series with quality/freshness metadata.
-6. Assistant tool citations and structured action-result payloads.
-7. A digital-twin manifest with stable room/object bindings.
+1. QR/deep-link pairing and credential rotation/revocation.
+2. Kiosk recovery after reboot and Wi-Fi/Core outages.
+3. Microphone permission, capture quality and TTS speaker routing.
+4. Night brightness, ambient timeout and burn-in movement.
+5. Touch targeting and layout on both the mounted panel and 1024×600 Pi-class
+   display geometry.
+6. Real Music Assistant artwork/queue/group capability payloads and authenticated
+   artwork-proxy behavior.

@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pilot.local/schemas/pilot-client-event-v1.schema.json",
+  "title": "Pilot authenticated client event v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "type", "revision", "occurred_at", "room_id", "payload"],
+  "properties": {
+    "id": {"type": "string", "pattern": "^evt_[0-9]+$"},
+    "type": {"type": "string", "pattern": "^pilot\\.[a-z0-9_.-]+\\.v1$"},
+    "revision": {"type": "integer", "minimum": 1},
+    "occurred_at": {"type": "string", "format": "date-time"},
+    "room_id": {"type": ["string", "null"]},
+    "payload": {"type": "object"}
+  }
+}

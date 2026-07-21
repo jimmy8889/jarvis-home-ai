@@ -18,7 +18,7 @@ class CoreAddressPolicyTest {
     fun rejectsPublicCleartextAddresses() {
         assertFalse(CoreAddressPolicy.isPrivateHost("8.8.8.8"))
         assertTrue(
-            CoreConnection("http://8.8.8.8:8770", "secret")
+            CoreConnection("http://8.8.8.8:8770", "pilot-tv", "secret")
                 .validate()
                 ?.contains("private local") == true,
         )
@@ -26,11 +26,11 @@ class CoreAddressPolicyTest {
 
     @Test
     fun allowsHttpsAndRequiresToken() {
-        assertNull(CoreConnection("https://pilot.example", "secret").validate())
+        assertNull(CoreConnection("https://pilot.example", "pilot-tv", "secret").validate())
         assertTrue(
-            CoreConnection("https://pilot.example", "")
+            CoreConnection("https://pilot.example", "pilot-tv", "")
                 .validate()
-                ?.contains("token") == true,
+                ?.contains("credentials") == true,
         )
     }
 }

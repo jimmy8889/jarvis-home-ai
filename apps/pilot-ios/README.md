@@ -6,16 +6,22 @@ Home Assistant, Music Assistant, Ollama, Denon, or a room endpoint.
 The polished v1 application provides:
 
 - an adaptive phone `TabView` and iPad `NavigationSplitView`;
-- a premium home surface with room availability, playback state, quick actions,
-  explicit offline/stale handling, and a model-ready energy card;
-- a persistent mini-player and full now-playing surface with room transfer,
-  volume, play, pause, and stop controls;
+- a premium home surface with explainable Core-curated room controls, live energy,
+  explicit offline/stale handling, and cached last-known state;
+- a persistent mini-player and full now-playing surface with normalized artwork,
+  queue/progress, seek, previous/next, mute, volume, and room transfer controls;
 - grouped Music Assistant search for tracks, albums, artists, playlists, radio,
   and other results, with artwork support where Pilot Core supplies it;
-- a contextual Pilot conversation surface with room selection, continued
-  sessions, suggestions, errors, loading feedback, and a new-session action;
-- secure onboarding, Keychain-backed device credentials, connection testing,
-  pull-to-refresh, and 20-second foreground refresh;
+- a contextual Pilot conversation surface with rich result cards, tool outcomes,
+  citations, room selection, continued sessions, errors, and new-session actions;
+- transactional onboarding: manually entered credentials are not activated or
+  persisted until Core authenticates them, while single-use bootstrap grants can
+  be pasted or scanned as QR codes;
+- Keychain-backed credentials, cached product state, pull-to-refresh, and
+  resumable long-poll events with cursor-based snapshot recovery;
+- durable meeting recording handoff: files live in Application Support and are
+  only removed after Core accepts both upload and processing, with persisted
+  retry state for every failure path;
 - Dynamic Type-compatible layouts, VoiceOver labels, large touch targets,
   haptics, empty states, skeleton loading, mocks, and iPhone/iPad previews.
 
@@ -41,14 +47,16 @@ address is a trusted private-LAN IP. Do not expose port 8770 outside the trusted
 network. Replace this allowance with a pinned HTTPS origin before supporting
 remote access.
 
-## Pending Pilot Core contracts
+## Pilot Core contract
 
-The UI intentionally identifies these as unavailable rather than bypassing
-Pilot Core:
+The client consumes the device-scoped `pilot.client.v1` product contract:
 
-- a portable-client energy snapshot endpoint (the existing `/surface` contract
-  requires a display-capable fixed device);
-- queue, seek/progress, skip, favourites, and artwork-normalisation fields;
-- a client-safe Home Assistant catalogue/room summary contract for generated
-  controls and the future digital twin;
-- a WebSocket/SSE client stream so foreground polling can become event-driven.
+- `/manifest` for features and authorized endpoint discovery;
+- `/events/snapshot` plus resumable `/events` long polling;
+- `/energy`, `/home`, `/media`, `/assistant`, and `/meetings` projections;
+- explainable entity presentation metadata and normalized media state.
+
+The app retains bounded compatibility fallbacks while updated Core is deployed.
+Physical iPhone/iPad acceptance is still required for camera pairing, background
+recording interruptions, retained-upload retry, Dynamic Type, VoiceOver, and
+LAN reconnect behavior.

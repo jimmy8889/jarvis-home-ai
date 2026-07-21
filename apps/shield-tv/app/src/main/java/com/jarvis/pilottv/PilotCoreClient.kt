@@ -5,8 +5,9 @@ import java.net.HttpURLConnection
 import java.net.URI
 import java.net.URL
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
-import org.json.JSONArray
 import org.json.JSONObject
 
 class PilotCoreException(
@@ -16,15 +17,25 @@ class PilotCoreException(
 
 data class CoreConnection(
     val baseUrl: String,
-    val token: String,
+    val deviceId: String = "",
+    val token: String = "",
 ) {
     fun normalizedBaseUrl(): String = baseUrl.trim().removeSuffix("/")
 
-    fun validate(): String? {
-        if (token.isBlank()) return "Administrator token is required."
+    fun validate(requireCredentials: Boolean = true): String? {
+        if (requireCredentials && deviceId.isBlank()) return "Pilot TV has not been paired."
+        if (requireCredentials && token.isBlank()) return "Pilot TV credentials are missing."
         val uri = runCatching { URI(normalizedBaseUrl()) }.getOrNull()
             ?: return "Pilot Core address is invalid."
-        if (uri.host.isNullOrBlank()) return "Pilot Core address needs a host."
+        if (uri.host.isNullOrBlank() || uri.userInfo != null) {
+            return "Pilot Core address needs a host and cannot include credentials."
+        }
+        if (!uri.path.isNullOrBlank() && uri.path != "/") {
+            return "Pilot Core address cannot include a path."
+        }
+        if (uri.query != null || uri.fragment != null) {
+            return "Pilot Core address cannot include a query or fragment."
+        }
         if (uri.scheme == "https") return null
         if (uri.scheme != "http") return "Use HTTPS, or HTTP on a private local address."
         if (!CoreAddressPolicy.isPrivateHost(uri.host)) {
@@ -51,202 +62,182 @@ object CoreAddressPolicy {
     }
 }
 
-class PilotCoreClient(
+class PilotCoreClient private constructor(
     private val connection: CoreConnection,
 ) {
-    suspend fun operations(): OperationsSnapshot = withContext(Dispatchers.IO) {
-        val validationError = connection.validate()
-        if (validationError != null) throw PilotCoreException(validationError)
-        val url = URL("${connection.normalizedBaseUrl()}/v1/operations")
-        val request = (url.openConnection() as HttpURLConnection).apply {
-            requestMethod = "GET"
-            connectTimeout = 8_000
-            readTimeout = 12_000
-            useCaches = false
-            setRequestProperty("Accept", "application/json")
-            setRequestProperty("Authorization", "Bearer ${connection.token}")
-        }
-        try {
-            val status = request.responseCode
-            if (status !in 200..299) {
-                val detail = runCatching {
-                    request.errorStream?.bufferedReader()?.use { it.readText() }
-                }.getOrNull()
-                val message = when (status) {
-                    401 -> "Pilot Core rejected the administrator token."
-                    else -> "Pilot Core returned HTTP $status${detail?.let { ": $it" } ?: ""}"
-                }
-                throw PilotCoreException(message, status)
-            }
-            val body = request.inputStream.bufferedReader().use { it.readText() }
-            OperationsParser.parse(JSONObject(body))
-        } finally {
-            request.disconnect()
-        }
-    }
-}
-
-internal object OperationsParser {
-    private val sourceOrder = listOf(
-        "critical",
-        "assistant",
-        "bluetooth",
-        "airplay",
-        "music",
+    val credentials = DeviceCredentials(
+        baseUrl = connection.normalizedBaseUrl(),
+        deviceId = connection.deviceId,
+        token = connection.token,
     )
 
-    fun parse(root: JSONObject): OperationsSnapshot {
-        val deployment = root.getJSONObject("deployment")
-        val summary = root.getJSONObject("summary")
-        val safety = root.getJSONObject("safety")
-        val mediaPlayers = root.optJSONObject("media")
-            ?.optJSONObject("players")
-            ?: JSONObject()
+    companion object {
+        fun authenticated(credentials: DeviceCredentials): PilotCoreClient = PilotCoreClient(
+            CoreConnection(credentials.baseUrl, credentials.deviceId, credentials.token),
+        )
 
-        return OperationsSnapshot(
-            generatedAt = root.optString("generated_at"),
-            deployment = DeploymentInfo(
-                version = deployment.optString("version", "unknown"),
-                release = deployment.optString("release", "development"),
-                uptimeSeconds = deployment.optDouble("uptime_seconds", 0.0).toLong(),
-            ),
-            summary = SystemSummary(
-                roomCount = summary.optInt("room_count"),
-                deviceCount = summary.optInt("device_count"),
-                connectedDeviceCount = summary.optInt("connected_device_count"),
-                configuredIntegrationCount = summary.optInt("configured_integration_count"),
-                healthyIntegrationCount = summary.optInt("healthy_integration_count"),
-                armedRoomCount = summary.optInt("armed_room_count"),
-                unarmedRoomCount = summary.optInt("unarmed_room_count"),
-                pendingCommandCount = summary.optInt("pending_command_count"),
-            ),
-            safety = SafetyState(
-                audibleActionsGated = safety.optBoolean("audible_actions_gated", true),
-                armedRooms = safety.optJSONArray("armed_rooms").strings(),
-                unarmedRooms = safety.optJSONArray("unarmed_rooms").strings(),
-            ),
-            integrations = parseIntegrations(root.optJSONObject("integrations")),
-            rooms = parseRooms(root.optJSONObject("rooms"), mediaPlayers),
+        suspend fun pair(baseUrl: String, grantToken: String): DeviceCredentials {
+            val connection = CoreConnection(baseUrl)
+            connection.validate(requireCredentials = false)?.let {
+                throw PilotCoreException(it)
+            }
+            if (grantToken.isBlank()) {
+                throw PilotCoreException("Enter the one-time pairing code from Pilot Core.")
+            }
+            val result = requestJson(
+                connection = connection,
+                path = "/v1/devices/bootstrap",
+                method = "POST",
+                bearer = grantToken.trim(),
+            )
+            val deviceId = result.optString("device_id")
+            val token = result.optString("device_token")
+            if (deviceId.isBlank() || token.isBlank()) {
+                throw PilotCoreException("Pilot Core returned incomplete device credentials.")
+            }
+            return DeviceCredentials(connection.normalizedBaseUrl(), deviceId, token)
+        }
+
+        private suspend fun requestJson(
+            connection: CoreConnection,
+            path: String,
+            method: String = "GET",
+            body: JSONObject? = null,
+            bearer: String? = null,
+            includeDeviceHeader: Boolean = false,
+        ): JSONObject = withContext(Dispatchers.IO) {
+            val request = URL("${connection.normalizedBaseUrl()}$path")
+                .openConnection() as HttpURLConnection
+            try {
+                request.instanceFollowRedirects = false
+                request.requestMethod = method
+                request.connectTimeout = 8_000
+                request.readTimeout = 25_000
+                request.useCaches = false
+                request.setRequestProperty("Accept", "application/json")
+                bearer?.let { request.setRequestProperty("Authorization", "Bearer $it") }
+                if (includeDeviceHeader) {
+                    request.setRequestProperty("X-Pilot-Device-ID", connection.deviceId)
+                }
+                if (body != null) {
+                    request.doOutput = true
+                    request.setRequestProperty("Content-Type", "application/json")
+                    request.outputStream.use { output ->
+                        output.write(body.toString().toByteArray(Charsets.UTF_8))
+                    }
+                }
+                val status = request.responseCode
+                val content = (if (status in 200..299) {
+                    request.inputStream
+                } else {
+                    request.errorStream
+                })?.bufferedReader()?.use { it.readText() }.orEmpty()
+                if (status !in 200..299) {
+                    val detail = runCatching { JSONObject(content).optString("detail") }
+                        .getOrNull()
+                        ?.takeIf(String::isNotBlank)
+                    val message = when (status) {
+                        401 -> "Pilot Core rejected these device credentials."
+                        403 -> detail ?: "This Pilot TV is not permitted to use that feature."
+                        404 -> detail ?: "This feature requires a newer Pilot Core release."
+                        else -> detail ?: "Pilot Core returned HTTP $status."
+                    }
+                    throw PilotCoreException(message, status)
+                }
+                if (content.isBlank()) JSONObject() else JSONObject(content)
+            } catch (error: PilotCoreException) {
+                throw error
+            } catch (error: Exception) {
+                throw PilotCoreException("Unable to reach Pilot Core: ${error.message}")
+            } finally {
+                request.disconnect()
+            }
+        }
+    }
+
+    suspend fun manifest(): DeviceManifest {
+        connection.validate()?.let { throw PilotCoreException(it) }
+        val root = request("/v1/devices/${connection.deviceId}/manifest")
+        return PilotJson.manifest(root, credentials)
+    }
+
+    suspend fun snapshot(
+        manifest: DeviceManifest,
+        cursor: Long? = null,
+    ): PilotTvSnapshot = coroutineScope {
+        val eventEnvelope = async {
+            optionalRequest(
+                "/v1/devices/${connection.deviceId}/events/snapshot" +
+                    (cursor?.let { "?cursor=$it" } ?: ""),
+            )
+        }
+        val media = async {
+            request("/v1/devices/${connection.deviceId}/media")
+        }
+        val surface = async {
+            optionalRequest("/v1/devices/${connection.deviceId}/surface")
+        }
+        val home = async {
+            optionalRequest(
+                "/v1/devices/${connection.deviceId}/home?room_id=${urlEncode(manifest.roomId)}",
+            )
+        }
+        val mediaValue = media.await()
+        PilotJson.snapshot(
+            manifest = manifest,
+            mediaRoot = mediaValue,
+            surfaceRoot = surface.await(),
+            homeRoot = home.await(),
+            envelope = eventEnvelope.await(),
         )
     }
 
-    private fun parseIntegrations(values: JSONObject?): List<IntegrationState> =
-        values.keysList().map { id ->
-            val value = values?.optJSONObject(id) ?: JSONObject()
-            IntegrationState(
-                id = id,
-                status = value.optString("status", "unknown"),
-                configured = value.optBoolean("configured", false),
-                latencyMs = value.nullableLong("latency_ms"),
-            )
-        }
-
-    private fun parseRooms(
-        values: JSONObject?,
-        mediaPlayers: JSONObject,
-    ): List<RoomState> = values.keysList().map { roomId ->
-        val state = values?.optJSONObject(roomId) ?: JSONObject()
-        val room = state.optJSONObject("room") ?: JSONObject()
-        val devices = state.optJSONArray("devices").objects().map { device ->
-            val health = device.optJSONObject("health")?.optJSONObject("payload")
-            EndpointState(
-                id = device.optString("id"),
-                name = device.optString("name", device.optString("id")),
-                connected = device.optBoolean("connected"),
-                ready = health.nullableBoolean("ready"),
-                uptimeSeconds = health.nullableLong("uptime_seconds"),
-            )
-        }
-        val players = room.optJSONArray("players").objects().map { player ->
-            parsePlayer(player, mediaPlayers.optJSONObject(player.optString("id")))
-        }
-        val sourcesObject = state.optJSONObject("sources")
-        val sources = sourceOrder.map { source ->
-            SourceState(
-                id = source,
-                active = sourcesObject
-                    ?.optJSONObject(source)
-                    ?.optBoolean("active")
-                    ?: false,
-            )
-        }
-        val foreground = state.optJSONObject("focus")
-            ?.optString("foreground")
-            ?.takeIf(String::isNotBlank)
-        RoomState(
-            id = room.optString("id", roomId),
-            name = room.optString("name", roomId),
-            armed = devices.any { it.connected && it.ready == true } &&
-                devices.any { device ->
-                    val raw = state.optJSONArray("devices").objects()
-                        .firstOrNull { it.optString("id") == device.id }
-                    raw?.optJSONObject("health")
-                        ?.optJSONObject("payload")
-                        ?.optJSONObject("audio_activation")
-                        ?.optBoolean("allowed") == true
-                },
-            foregroundSource = foreground,
-            devices = devices,
-            players = players,
-            sources = sources,
+    suspend fun mediaCommand(command: MediaCommand): JSONObject {
+        val body = JSONObject().put("action", command.action)
+        command.playerId?.let { body.put("player_id", it) }
+        command.volume?.let { body.put("volume", it) }
+        command.positionSeconds?.let { body.put("position_seconds", it) }
+        command.muted?.let { body.put("muted", it) }
+        command.targetRoomId?.let { body.put("target_room_id", it) }
+        command.targetPlayerId?.let { body.put("target_player_id", it) }
+        command.mediaUri?.let { body.put("media_uri", it) }
+        return request(
+            "/v1/devices/${connection.deviceId}/media",
+            method = "POST",
+            body = body,
         )
     }
 
-    private fun parsePlayer(
-        player: JSONObject,
-        state: JSONObject?,
-    ): PlayerState {
-        val effective = state?.optJSONObject("effective")
-        val media = effective?.optJSONObject("media")
-        return PlayerState(
-            id = player.optString("id"),
-            name = player.optString("name", player.optString("id")),
-            kind = player.optString("kind"),
-            protocol = player.optString("protocol"),
-            controlEnabled = player.optBoolean("control_enabled", true),
-            status = state?.optString("status", "unresolved") ?: "unresolved",
-            available = effective.nullableBoolean("available"),
-            powered = effective.nullableBoolean("powered"),
-            playbackState = effective.nullableString("playback_state"),
-            volumePercent = effective.nullableInt("volume_percent"),
-            muted = effective.nullableBoolean("muted"),
-            source = effective.nullableString("source"),
-            media = media?.let {
-                MediaDescription(
-                    title = it.nullableString("title"),
-                    artist = it.nullableString("artist"),
-                    album = it.nullableString("album"),
-                )
-            },
+    suspend fun rotateCredentials(): DeviceCredentials {
+        val root = request(
+            "/v1/devices/${connection.deviceId}/credentials/rotate-self",
+            method = "POST",
+            body = JSONObject(),
         )
+        val token = root.optString("device_token")
+        if (token.isBlank()) throw PilotCoreException("Credential rotation returned no token.")
+        return credentials.copy(token = token)
     }
-}
 
-private fun JSONObject?.keysList(): List<String> {
-    if (this == null) return emptyList()
-    return keys().asSequence().toList().sorted()
-}
-
-private fun JSONArray?.objects(): List<JSONObject> {
-    if (this == null) return emptyList()
-    return (0 until length()).mapNotNull { optJSONObject(it) }
-}
-
-private fun JSONArray?.strings(): List<String> {
-    if (this == null) return emptyList()
-    return (0 until length()).mapNotNull { index ->
-        optString(index).takeIf(String::isNotBlank)
+    private suspend fun optionalRequest(path: String): JSONObject? = try {
+        request(path)
+    } catch (error: PilotCoreException) {
+        if (error.statusCode in setOf(403, 404, 405, 501)) null else throw error
     }
+
+    private suspend fun request(
+        path: String,
+        method: String = "GET",
+        body: JSONObject? = null,
+    ): JSONObject = requestJson(
+        connection = connection,
+        path = path,
+        method = method,
+        body = body,
+        bearer = connection.token,
+        includeDeviceHeader = true,
+    )
 }
 
-private fun JSONObject?.nullableBoolean(key: String): Boolean? =
-    if (this == null || isNull(key)) null else optBoolean(key)
-
-private fun JSONObject?.nullableInt(key: String): Int? =
-    if (this == null || isNull(key)) null else optInt(key)
-
-private fun JSONObject?.nullableLong(key: String): Long? =
-    if (this == null || isNull(key)) null else optDouble(key).toLong()
-
-private fun JSONObject?.nullableString(key: String): String? =
-    if (this == null || isNull(key)) null else optString(key).takeIf(String::isNotBlank)
+private fun urlEncode(value: String): String =
+    java.net.URLEncoder.encode(value, Charsets.UTF_8.name())

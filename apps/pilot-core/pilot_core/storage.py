@@ -72,7 +72,9 @@ class Store:
                     token_hash TEXT NOT NULL,
                     capabilities_json TEXT NOT NULL,
                     created_at TEXT NOT NULL,
-                    last_seen_at TEXT NOT NULL
+                    last_seen_at TEXT NOT NULL,
+                    credential_revision INTEGER NOT NULL DEFAULT 1,
+                    revoked_at TEXT
                 );
                 CREATE TABLE IF NOT EXISTS bootstrap_grants (
                     id TEXT PRIMARY KEY,
@@ -104,6 +106,17 @@ class Store:
                 );
                 CREATE INDEX IF NOT EXISTS events_room_created
                     ON events(room_id, created_at DESC);
+                CREATE TABLE IF NOT EXISTS client_events (
+                    revision INTEGER PRIMARY KEY AUTOINCREMENT,
+                    event_type TEXT NOT NULL,
+                    room_id TEXT,
+                    device_id TEXT,
+                    required_capability TEXT,
+                    payload_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS client_events_room_revision
+                    ON client_events(room_id, revision);
                 CREATE TABLE IF NOT EXISTS device_commands (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     device_id TEXT NOT NULL REFERENCES devices(id),
@@ -249,6 +262,7 @@ class Store:
                     state TEXT NOT NULL,
                     attributes_json TEXT NOT NULL,
                     area_id TEXT,
+                    area_source TEXT NOT NULL DEFAULT 'unassigned',
                     device_id TEXT,
                     aliases_json TEXT NOT NULL,
                     availability TEXT NOT NULL,
@@ -266,6 +280,22 @@ class Store:
                     ON home_entities(availability, missing);
                 CREATE INDEX IF NOT EXISTS home_entities_name
                     ON home_entities(name COLLATE NOCASE);
+                CREATE TABLE IF NOT EXISTS home_entity_presentations (
+                    entity_id TEXT PRIMARY KEY REFERENCES home_entities(entity_id)
+                        ON DELETE CASCADE,
+                    exposure_policy TEXT NOT NULL DEFAULT 'automatic',
+                    reason TEXT,
+                    category TEXT,
+                    priority INTEGER,
+                    room_id TEXT,
+                    display_name TEXT,
+                    icon TEXT,
+                    section TEXT,
+                    control TEXT,
+                    canonical_id TEXT,
+                    duplicate_of TEXT,
+                    updated_at TEXT NOT NULL
+                );
                 CREATE TABLE IF NOT EXISTS home_floors (
                     id TEXT PRIMARY KEY,
                     name TEXT NOT NULL,
@@ -364,6 +394,28 @@ class Store:
             if "metadata_error" not in sync_columns:
                 self._connection.execute(
                     """ALTER TABLE home_catalog_syncs ADD COLUMN metadata_error TEXT"""
+                )
+            device_columns = {
+                row["name"]
+                for row in self._connection.execute("PRAGMA table_info(devices)")
+            }
+            if "credential_revision" not in device_columns:
+                self._connection.execute(
+                    """ALTER TABLE devices ADD COLUMN credential_revision
+                       INTEGER NOT NULL DEFAULT 1"""
+                )
+            if "revoked_at" not in device_columns:
+                self._connection.execute(
+                    "ALTER TABLE devices ADD COLUMN revoked_at TEXT"
+                )
+            entity_columns = {
+                row["name"]
+                for row in self._connection.execute("PRAGMA table_info(home_entities)")
+            }
+            if "area_source" not in entity_columns:
+                self._connection.execute(
+                    """ALTER TABLE home_entities ADD COLUMN area_source
+                       TEXT NOT NULL DEFAULT 'unassigned'"""
                 )
 
     def resolve_conversation_session(
@@ -697,14 +749,17 @@ class Store:
                 raise KeyError(room_id)
             self._connection.execute(
                 """INSERT INTO devices
-                   (id, room_id, name, token_hash, capabilities_json, created_at, last_seen_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?)
+                   (id, room_id, name, token_hash, capabilities_json, created_at,
+                    last_seen_at, credential_revision, revoked_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, 1, NULL)
                    ON CONFLICT(id) DO UPDATE SET
                      room_id=excluded.room_id,
                      name=excluded.name,
                      token_hash=excluded.token_hash,
                      capabilities_json=excluded.capabilities_json,
-                     last_seen_at=excluded.last_seen_at""",
+                     last_seen_at=excluded.last_seen_at,
+                     credential_revision=devices.credential_revision + 1,
+                     revoked_at=NULL""",
                 (
                     device_id,
                     room_id,
@@ -790,14 +845,16 @@ class Store:
             self._connection.execute(
                 """INSERT INTO devices
                    (id, room_id, name, token_hash, capabilities_json,
-                    created_at, last_seen_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?)
+                    created_at, last_seen_at, credential_revision, revoked_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, 1, NULL)
                    ON CONFLICT(id) DO UPDATE SET
                      room_id=excluded.room_id,
                      name=excluded.name,
                      token_hash=excluded.token_hash,
                      capabilities_json=excluded.capabilities_json,
-                     last_seen_at=excluded.last_seen_at""",
+                     last_seen_at=excluded.last_seen_at,
+                     credential_revision=devices.credential_revision + 1,
+                     revoked_at=NULL""",
                 (
                     grant["device_id"],
                     grant["room_id"],
@@ -816,7 +873,9 @@ class Store:
     def authenticate_device(self, device_id: str, token: str) -> bool:
         with self._lock, self._connection:
             row = self._connection.execute(
-                "SELECT token_hash FROM devices WHERE id = ?", (device_id,)
+                """SELECT token_hash FROM devices
+                   WHERE id = ? AND revoked_at IS NULL""",
+                (device_id,),
             ).fetchone()
             valid = bool(
                 row and secrets.compare_digest(row["token_hash"], _token_hash(token))
@@ -843,18 +902,63 @@ class Store:
             device for device in self.list_devices() if device["id"] == device_id
         )
 
+    def rotate_device_credentials(self, device_id: str) -> dict[str, Any]:
+        """Issue one replacement credential and immediately invalidate the old one."""
+        token = secrets.token_urlsafe(32)
+        now = _now()
+        with self._lock, self._connection:
+            cursor = self._connection.execute(
+                """UPDATE devices
+                   SET token_hash = ?, credential_revision = credential_revision + 1,
+                       revoked_at = NULL, last_seen_at = ?
+                   WHERE id = ?""",
+                (_token_hash(token), now, device_id),
+            )
+            if cursor.rowcount != 1:
+                raise KeyError(device_id)
+            row = self._connection.execute(
+                """SELECT credential_revision FROM devices WHERE id = ?""",
+                (device_id,),
+            ).fetchone()
+        assert row is not None
+        return {
+            "device_id": device_id,
+            "device_token": token,
+            "credential_revision": int(row["credential_revision"]),
+            "rotated_at": now,
+        }
+
+    def revoke_device(self, device_id: str) -> dict[str, Any]:
+        """Revoke a device credential without deleting its audit history."""
+        now = _now()
+        with self._lock, self._connection:
+            cursor = self._connection.execute(
+                """UPDATE devices SET revoked_at = ?,
+                       credential_revision = credential_revision + 1
+                   WHERE id = ? AND revoked_at IS NULL""",
+                (now, device_id),
+            )
+            if cursor.rowcount != 1:
+                row = self._connection.execute(
+                    "SELECT revoked_at FROM devices WHERE id = ?", (device_id,)
+                ).fetchone()
+                if row is None:
+                    raise KeyError(device_id)
+                return {"device_id": device_id, "revoked_at": row["revoked_at"]}
+        return {"device_id": device_id, "revoked_at": now}
+
     def list_devices(self, room_id: str | None = None) -> list[dict[str, Any]]:
         with self._lock:
             if room_id is None:
                 rows = self._connection.execute(
                     """SELECT id, room_id, name, capabilities_json,
-                              created_at, last_seen_at
+                              created_at, last_seen_at, credential_revision, revoked_at
                        FROM devices ORDER BY id"""
                 ).fetchall()
             else:
                 rows = self._connection.execute(
                     """SELECT id, room_id, name, capabilities_json,
-                              created_at, last_seen_at
+                              created_at, last_seen_at, credential_revision, revoked_at
                        FROM devices WHERE room_id = ? ORDER BY id""",
                     (room_id,),
                 ).fetchall()
@@ -866,6 +970,9 @@ class Store:
                 "capabilities": json.loads(row["capabilities_json"]),
                 "created_at": row["created_at"],
                 "last_seen_at": row["last_seen_at"],
+                "credential_revision": int(row["credential_revision"]),
+                "credential_status": "revoked" if row["revoked_at"] else "active",
+                "revoked_at": row["revoked_at"],
             }
             for row in rows
         ]
@@ -1055,6 +1162,125 @@ class Store:
             }
             for row in rows
         ]
+
+    def client_event_cursor(self) -> int:
+        with self._lock:
+            row = self._connection.execute(
+                "SELECT COALESCE(MAX(revision), 0) AS revision FROM client_events"
+            ).fetchone()
+        return int(row["revision"] if row else 0)
+
+    def record_client_event(
+        self,
+        event_type: str,
+        payload: dict[str, Any],
+        *,
+        room_id: str | None = None,
+        device_id: str | None = None,
+        required_capability: str | None = None,
+    ) -> dict[str, Any]:
+        """Persist an already-sanitized product event for resumable clients."""
+        if not event_type.startswith("pilot.") or not event_type.endswith(".v1"):
+            raise ValueError("client event type must be a versioned Pilot type")
+        now = _now()
+        encoded = json.dumps(
+            payload,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            allow_nan=False,
+        )
+        if len(encoded.encode()) > 64_000:
+            raise ValueError("client event payload is too large")
+        with self._lock, self._connection:
+            cursor = self._connection.execute(
+                """INSERT INTO client_events
+                   (event_type, room_id, device_id, required_capability,
+                    payload_json, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (
+                    event_type,
+                    room_id,
+                    device_id,
+                    required_capability,
+                    encoded,
+                    now,
+                ),
+            )
+        revision = int(cursor.lastrowid)
+        with self._lock, self._connection:
+            self._connection.execute(
+                "DELETE FROM client_events WHERE revision <= ?",
+                (max(0, revision - 10_000),),
+            )
+        return {
+            "id": f"evt_{revision}",
+            "type": event_type,
+            "revision": revision,
+            "occurred_at": now,
+            "room_id": room_id,
+            "payload": payload,
+        }
+
+    def client_events_after(
+        self,
+        cursor: int,
+        device: dict[str, Any],
+        *,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        capabilities = set(device.get("capabilities") or [])
+        portable = "portable-client" in capabilities
+        bounded_limit = min(max(int(limit), 1), 500)
+        allowed_capabilities = set(capabilities)
+        if {"home-read", "home-control"} & capabilities:
+            allowed_capabilities.add("home")
+        capability_values = sorted(allowed_capabilities)
+        capability_clause = "required_capability IS NULL"
+        if capability_values:
+            capability_clause += " OR required_capability IN ({})".format(
+                ",".join("?" for _ in capability_values)
+            )
+        with self._lock:
+            rows = self._connection.execute(
+                f"""SELECT * FROM client_events
+                   WHERE revision > ?
+                     AND (device_id IS NULL OR device_id = ?)
+                     AND (? = 1 OR room_id IS NULL OR room_id = ?)
+                     AND ({capability_clause})
+                   ORDER BY revision
+                   LIMIT ?""",
+                [
+                    max(cursor, 0),
+                    device["id"],
+                    int(portable),
+                    device["room_id"],
+                    *capability_values,
+                    bounded_limit,
+                ],
+            ).fetchall()
+        return [
+            {
+                "id": f"evt_{int(row['revision'])}",
+                "type": row["event_type"],
+                "revision": int(row["revision"]),
+                "occurred_at": row["created_at"],
+                "room_id": row["room_id"],
+                "payload": json.loads(row["payload_json"]),
+            }
+            for row in rows
+        ]
+
+    def client_event_bounds(self) -> tuple[int, int]:
+        with self._lock:
+            row = self._connection.execute(
+                """SELECT COALESCE(MIN(revision), 0) AS minimum,
+                          COALESCE(MAX(revision), 0) AS maximum
+                   FROM client_events"""
+            ).fetchone()
+        return (
+            int(row["minimum"] if row else 0),
+            int(row["maximum"] if row else 0),
+        )
 
     def create_meeting(
         self,
@@ -1506,6 +1732,11 @@ class Store:
                 metadata_updates = (
                     """stable_id=home_entities.stable_id,
                        area_id=COALESCE(home_entities.area_id, excluded.area_id),
+                       area_source=CASE
+                         WHEN home_entities.area_id IS NOT NULL
+                         THEN home_entities.area_source
+                         ELSE excluded.area_source
+                       END,
                        device_id=COALESCE(home_entities.device_id, excluded.device_id),
                        aliases_json=CASE
                          WHEN home_entities.aliases_json != '[]'
@@ -1516,16 +1747,17 @@ class Store:
                     else
                     """stable_id=excluded.stable_id,
                        area_id=excluded.area_id,
+                       area_source=excluded.area_source,
                        device_id=excluded.device_id,
                        aliases_json=excluded.aliases_json,"""
                 )
                 self._connection.execute(
                     f"""INSERT INTO home_entities
                        (entity_id, stable_id, domain, name, state,
-                        attributes_json, area_id, device_id, aliases_json,
+                        attributes_json, area_id, area_source, device_id, aliases_json,
                         availability, observed_at, synced_at, first_seen_at,
                         last_seen_at, missing)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
                        ON CONFLICT(entity_id) DO UPDATE SET
                          {metadata_updates}
                          domain=excluded.domain,
@@ -1549,6 +1781,7 @@ class Store:
                             ensure_ascii=False,
                         ),
                         record.get("area_id"),
+                        record.get("area_source", "unassigned"),
                         record.get("device_id"),
                         json.dumps(
                             record["aliases"],
@@ -1732,7 +1965,7 @@ class Store:
         if not include_missing:
             clauses.append("missing = 0")
         where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
-        bounded_limit = min(max(int(limit), 1), 500)
+        bounded_limit = min(max(int(limit), 1), 5_000)
         with self._lock:
             total = int(
                 self._connection.execute(
@@ -1961,6 +2194,126 @@ class Store:
             for row in rows
         ]
 
+    def get_home_entity_presentation(
+        self, entity_id: str
+    ) -> dict[str, Any] | None:
+        with self._lock:
+            row = self._connection.execute(
+                "SELECT * FROM home_entity_presentations WHERE entity_id = ?",
+                (entity_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        return {
+            "entity_id": row["entity_id"],
+            "exposure_policy": row["exposure_policy"],
+            "reason": row["reason"],
+            "category": row["category"],
+            "priority": row["priority"],
+            "room_id": row["room_id"],
+            "display_name": row["display_name"],
+            "icon": row["icon"],
+            "section": row["section"],
+            "control": row["control"],
+            "canonical_id": row["canonical_id"],
+            "duplicate_of": row["duplicate_of"],
+            "updated_at": row["updated_at"],
+        }
+
+    def update_home_entity_presentation(
+        self,
+        entity_id: str,
+        changes: dict[str, Any],
+    ) -> dict[str, Any]:
+        allowed = {
+            "exposure_policy",
+            "reason",
+            "category",
+            "priority",
+            "room_id",
+            "display_name",
+            "icon",
+            "section",
+            "control",
+            "canonical_id",
+            "duplicate_of",
+        }
+        unknown = set(changes) - allowed
+        if unknown:
+            raise ValueError(f"unknown presentation fields: {sorted(unknown)}")
+        with self._lock, self._connection:
+            if not self._connection.execute(
+                "SELECT 1 FROM home_entities WHERE entity_id = ?", (entity_id,)
+            ).fetchone():
+                raise KeyError(entity_id)
+            existing = self._connection.execute(
+                "SELECT * FROM home_entity_presentations WHERE entity_id = ?",
+                (entity_id,),
+            ).fetchone()
+            merged = {
+                key: existing[key] if existing is not None else None
+                for key in allowed
+            }
+            merged["exposure_policy"] = (
+                existing["exposure_policy"] if existing is not None else "automatic"
+            )
+            merged.update(changes)
+            now = _now()
+            self._connection.execute(
+                """INSERT INTO home_entity_presentations
+                   (entity_id, exposure_policy, reason, category, priority,
+                    room_id, display_name, icon, section, control, canonical_id,
+                    duplicate_of, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(entity_id) DO UPDATE SET
+                     exposure_policy=excluded.exposure_policy,
+                     reason=excluded.reason,
+                     category=excluded.category,
+                     priority=excluded.priority,
+                     room_id=excluded.room_id,
+                     display_name=excluded.display_name,
+                     icon=excluded.icon,
+                     section=excluded.section,
+                     control=excluded.control,
+                     canonical_id=excluded.canonical_id,
+                     duplicate_of=excluded.duplicate_of,
+                     updated_at=excluded.updated_at""",
+                (
+                    entity_id,
+                    merged["exposure_policy"],
+                    merged["reason"],
+                    merged["category"],
+                    merged["priority"],
+                    merged["room_id"],
+                    merged["display_name"],
+                    merged["icon"],
+                    merged["section"],
+                    merged["control"],
+                    merged["canonical_id"],
+                    merged["duplicate_of"],
+                    now,
+                ),
+            )
+        stored = self.get_home_entity_presentation(entity_id)
+        assert stored is not None
+        return stored
+
+    def home_entity_identity(
+        self, entity_id: str, stable_id: str
+    ) -> dict[str, str | None]:
+        with self._lock:
+            rows = self._connection.execute(
+                """SELECT entity_id FROM home_entities
+                   WHERE stable_id = ? AND missing = 0
+                   ORDER BY entity_id""",
+                (stable_id,),
+            ).fetchall()
+        canonical_id = str(rows[0]["entity_id"]) if rows else entity_id
+        return {
+            "canonical_id": canonical_id,
+            "duplicate_of": canonical_id if canonical_id != entity_id else None,
+        }
+
     @staticmethod
     def _home_entity_view(
         row: sqlite3.Row,
@@ -1985,6 +2338,7 @@ class Store:
             "state": row["state"],
             "attributes": json.loads(row["attributes_json"]),
             "area_id": row["area_id"],
+            "area_source": row["area_source"],
             "device_id": row["device_id"],
             "aliases": json.loads(row["aliases_json"]),
             "availability": row["availability"],

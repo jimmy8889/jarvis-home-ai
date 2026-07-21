@@ -10,7 +10,7 @@ import shutil
 import socket
 from typing import Any
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlencode, urlsplit
 from urllib.request import Request, urlopen
 
 from . import __version__
@@ -198,6 +198,7 @@ def status_payload(
     core_url: str,
     device_id: str = "",
     device_token_file: str = "",
+    mode: str = "display",
 ) -> dict[str, Any]:
     uptime_raw = _bounded_text(Path("/proc/uptime"), 64).partition(" ")[0]
     try:
@@ -211,6 +212,7 @@ def status_payload(
         load = []
     return {
         "version": __version__,
+        "mode": mode if mode in {"display", "media-console"} else "display",
         "generated_at": datetime.now(UTC).isoformat(),
         "hostname": socket.gethostname(),
         "ip_address": _local_ip(core_url),
@@ -270,7 +272,8 @@ class DisplayHandler(BaseHTTPRequestHandler):
         )
 
     def do_GET(self) -> None:  # noqa: N802
-        path = self.path.partition("?")[0]
+        parsed_path = urlsplit(self.path)
+        path = parsed_path.path
         if path == "/healthz":
             self._send(b'{"ok":true}', "application/json")
             return
@@ -279,6 +282,7 @@ class DisplayHandler(BaseHTTPRequestHandler):
                 self.server.core_url,
                 self.server.device_id,
                 self.server.device_token_file,
+                self.server.mode,
             )
             self._send(
                 json.dumps(payload, separators=(",", ":")).encode(),
@@ -291,6 +295,24 @@ class DisplayHandler(BaseHTTPRequestHandler):
                 self.server.device_id,
                 self.server.device_token_file,
                 "media",
+            )
+            self._send_json(payload, status)
+            return
+        if path == "/api/events/snapshot":
+            values = parse_qs(parsed_path.query)
+            cursor = values.get("cursor", [""])[0]
+            if cursor and (not cursor.isdigit() or len(cursor) > 20):
+                self._send_json(
+                    {"detail": "invalid event cursor"},
+                    HTTPStatus.BAD_REQUEST,
+                )
+                return
+            query = "?" + urlencode({"cursor": cursor}) if cursor else ""
+            status, payload = _core_device_request(  # type: ignore[attr-defined]
+                self.server.core_url,
+                self.server.device_id,
+                self.server.device_token_file,
+                "events/snapshot" + query,
             )
             self._send_json(payload, status)
             return
@@ -369,11 +391,13 @@ class DisplayServer(ThreadingHTTPServer):
         core_url: str,
         device_id: str,
         device_token_file: str,
+        mode: str = "display",
     ) -> None:
         super().__init__(address, DisplayHandler)
         self.core_url = core_url
         self.device_id = device_id
         self.device_token_file = device_token_file
+        self.mode = mode
 
 
 def main() -> None:
@@ -384,11 +408,13 @@ def main() -> None:
     device_token_file = os.environ.get(
         "PILOT_DEVICE_TOKEN_FILE", "/etc/pilot-display/device-token"
     )
+    mode = os.environ.get("PILOT_DISPLAY_MODE", "display")
     server = DisplayServer(
         (host, port),
         core_url,
         device_id,
         device_token_file,
+        mode,
     )
     try:
         server.serve_forever()

@@ -39,13 +39,40 @@ media-session state, command authorization, audit history, and cross-room
 orchestration. iOS clients control the room through Pilot Core and never need
 direct SSH, mpv IPC, Denon, Music Assistant, or filesystem access.
 
-## Display experience
+## Current implementation status
 
-When idle, the console shows time, room identity, energy, weather, alerts, and
-assistant state. For music it shows artwork, metadata, progress, queue, volume,
-grouping, and handoff state from Music Assistant. For video it provides a
-ten-foot library, continue watching, full-screen playback, seeking, resume,
-subtitles, audio tracks, and a clean return to the Pilot shell.
+The reusable software pieces are present, but an N150 media console has not
+yet completed native-HDMI physical acceptance:
+
+- the Linux display service supports `PILOT_DISPLAY_MODE=media-console`, opens
+  on the music surface and presents richer now-playing, progress and queue
+  information;
+- selected room/output state is retained locally without putting a Core or
+  provider credential in browser storage;
+- the loopback service proxies authenticated product snapshots and client
+  events, including assistant-completion overlays;
+- Room Agent has an allow-listed, supervised local mpv adapter for configured
+  library roots with play, pause, resume, stop, bounded seek and audio/subtitle
+  track selection;
+- the Core video route resolves a room-bound video-capable endpoint and queues
+  an expiring typed device command.
+
+Those statements are source/test status, not proof of Intel video decode,
+HDMI audio, CEC, HDR10, Denon switching or couch-distance usability on the
+target hardware.
+
+## Target display experience
+
+The complete target shows time, room identity, energy, weather, alerts and
+assistant state when idle. For music it shows artwork, metadata, progress,
+queue, volume, grouping and handoff state from Music Assistant. For video it
+provides a ten-foot library, continue watching, full-screen playback, seeking,
+resume, subtitles, audio tracks and a clean return to the Pilot shell.
+
+The current reusable shell implements the music-first, energy, system,
+stale/offline and assistant-overlay subset. Weather/alert composition, a
+ten-foot Jellyfin library and unified video-session presentation remain target
+work.
 
 The shell returns automatically after playback exits or crashes. A failure
 cannot leave a desktop, terminal, or administrator interface visible.
@@ -62,6 +89,12 @@ The target is native Debian with direct Intel graphics and HDMI access:
 - PipeWire/WirePlumber for music, assistant, announcements, Bluetooth,
   AirPlay, and HDMI audio;
 - systemd supervision, immutable releases, health checks, and rollback.
+
+For this role the display-node Ansible variable is:
+
+```yaml
+display_node_mode: media-console
+```
 
 A local media-agent service validates Pilot commands and translates them into
 mpv, display, CEC, and launcher operations. The browser never receives a Pilot
@@ -82,21 +115,23 @@ Music / AirPlay / Bluetooth           -> N150 audio stack
 
 ## Pilot Core interfaces
 
-The milestone adds device-bound interfaces for:
+The implemented foundation exposes:
 
 - media-console capabilities and health;
-- current room media session and selected playback engine;
-- open, play, pause, stop, seek, skip, resume, and queue selection;
-- subtitle and audio-track selection;
-- display wake/sleep and visual-surface selection;
-- assistant overlays and notifications;
-- playback progress and terminal-state events;
-- room handoff and N150/Shield engine handoff.
+- room media state and typed Music Assistant controls;
+- room-bound, expiring local-video commands for play, pause, resume, stop,
+  bounded seek, subtitle track and audio track;
+- local video process status through Room Agent;
+- product/event snapshots for music progress, queue and assistant overlays.
+
+Still required are a first-class selected playback-engine session, display
+wake/sleep, richer video progress/terminal events, queue selection and
+N150/Shield engine handoff.
 
 Commands are allow-listed, expire, and remain room-bound. Arbitrary URLs,
 filesystem paths, shell commands, and unvalidated mpv properties are rejected.
 
-## iOS control
+## Target iOS control
 
 The iOS Pilot client will provide:
 
@@ -115,17 +150,20 @@ administrator token or communicate directly with the N150.
 ## Delivery order
 
 1. Build the media-console agent, capability, health model, and authenticated
-   command contract. **Complete in Room Agent 0.6 / Core 0.22.**
-2. Build the fullscreen shell with idle, music, assistant-overlay, offline, and
-   recovery states.
-3. Add Sendspin now-playing and queue presentation.
+   command contract. **Source complete.**
+2. Build the fullscreen shell with music, assistant-overlay, stale/offline, and
+   recovery states. **Source complete in the reusable Linux display shell.**
+3. Add Music Assistant now-playing, progress and queue presentation.
+   **Source complete; target display acceptance pending.**
 4. Add supervised mpv playback for a known-good local test library.
    **Software complete:** configured-root containment, extension allowlist,
    fixed mpv arguments, private JSON IPC, bounded seeking/track selection,
    process supervision and status are implemented. Hardware acceptance on a
    native-HDMI N150 remains pending.
 5. Add Jellyfin browse, direct play, resume, subtitles, and audio tracks.
-6. Add the iOS room remote using the same Pilot Core session APIs.
+6. Add the iOS room remote using the same Pilot Core product and media APIs.
+   **Core and client control paths are implemented; physical iOS acceptance is
+   pending.**
 7. Add HDMI/CEC/Denon source and power coordination.
 8. Test HDR10, HD-audio passthrough, suspend, reboot recovery, and rollback.
 9. Add N150/Shield engine selection and handoff while retaining Shield for
@@ -143,3 +181,8 @@ The milestone is complete when:
 - Denon/display power and input recover after reboot;
 - invalid, expired, cross-room, and arbitrary-path commands fail closed;
 - the current and previous immutable releases can be selected remotely.
+
+Until all of these checks pass on the selected N150, this role must be reported
+as **built but awaiting hardware acceptance**, not deployed or operational.
+Intel GPU/HDMI passthrough is not part of this design: the media-console target
+is native Debian with direct hardware access.

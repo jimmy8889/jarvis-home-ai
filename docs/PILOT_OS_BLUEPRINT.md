@@ -1,8 +1,8 @@
 # Pilot OS Blueprint
 
-Version 3.6
+Version 4.0
 
-Last updated: 2026-07-20
+Last updated: 2026-07-22
 
 Status: Canonical architecture reference
 
@@ -85,6 +85,20 @@ Supporting services:
 - Whisper-family speech recognition
 - Local text-to-speech
 
+### Capability evidence
+
+This blueprint uses three distinct maturity labels:
+
+- **source tested**: implementation plus automated contract/build evidence;
+- **deployed healthy**: the promoted immutable release passed host health,
+  persistence and rollback checks;
+- **physically accepted**: the real microphones, speakers, displays, touch or
+  D-pad controls and media equipment were observed in operation.
+
+Later source work does not silently upgrade the maturity of an earlier deployed
+release. Hardware-facing capabilities remain awaiting physical acceptance until
+their explicit receipt is recorded.
+
 ## 4. Current deployed topology
 
 ### Central services
@@ -99,6 +113,14 @@ Pilot Core: 10.0.1.64:8770
 Pilot Core host: debian-docker / Debian 12
 Pilot Core target image: jarvis-home-ai/pilot-core:core-0.24.1-20260721.1
 ```
+
+That image is the deployed production baseline. The current source release adds
+the device manifest and recoverable product snapshot contracts, authenticated
+resumable client events, persistent entity presentation/trust policy,
+single-use client pairing profiles, credential rotation/revocation, richer
+media commands and structured assistant output. Those additions are source
+tested and must pass the normal cold-backup, deploy, readiness and persistence
+procedure before this section records them as production.
 
 The Home Assistant add-on is the preferred initial Music Assistant deployment.
 It provides simple lifecycle management and close HA integration. A standalone
@@ -368,14 +390,25 @@ Implemented foundation:
 - Authenticated operations snapshot and responsive central dashboard
 - Provider-neutral Music Assistant/Home Assistant player state
 - Per-player read-only discovery and fail-closed control policy
+- Device-scoped `pilot.client.v1` manifest with feature and endpoint discovery
+- Device-scoped `pilot.snapshot.v1` recovery snapshot plus cursor-based long
+  polling and WebSocket client events
+- Persistent entity presentation with explicit/automatic exposure, product
+  metadata, canonical/duplicate identity and authoritative room trust
+- Typed, capability- and room-bounded home actions; inferred room mappings are
+  readable but cannot authorize a mutation
+- Device-authenticated energy, media, home, assistant and meeting projections
+- Media queue/progress/artwork normalization plus previous, next, seek, mute,
+  group, ungroup and transfer actions where the player contract permits them
+- Structured `pilot.assistant.v1` replies with cards, citations and action
+  results
+- Administrator pairing profiles that issue short-lived, room-bound,
+  single-use grants and local scan-to-pair QR codes without exposing
+  administrator or provider credentials
+- Device credential self-rotation and administrator rotation/revocation
 
-Planned responsibilities:
-
-- Command routing and tool execution
-- Conversation and session state
-- Media and display orchestration
-- Memory and meeting search
-- REST and realtime APIs
+Remaining planned responsibilities include semantic long-term memory, richer
+meeting search, push delivery and the versioned 3D house geometry contract.
 
 New 0.10 foundations:
 
@@ -424,11 +457,23 @@ Planned responsibilities:
 The shared digital-twin design, model contract, security boundary, and ordered
 delivery plan are documented in `docs/HOME_DIGITAL_TWIN.md`.
 
-Pilot TV 0.1 now exists as a buildable Kotlin/Compose for TV application. It
-reads the authenticated operations snapshot, renders rooms, integrations,
-safety, endpoints, players, and now-playing state, and stores its administrator
-credential only in process memory. Media and Home Assistant mutations remain
-absent until in-person acceptance.
+The current iOS/iPadOS source consumes the manifest, snapshot/events, curated
+home, energy, media, assistant and meeting contracts. It supports one-time
+pairing, Keychain device credentials, typed home confirmations, rich media
+control and a retained meeting-upload queue. Physical iPhone/iPad and long
+recording acceptance remains separate.
+
+The Android wall source consumes the same bounded Core contracts, keeps its
+device token encrypted by Android Keystore, adds curated room controls,
+resumable events, push-to-talk/reply audio and an ambient wall mode. CI build
+evidence does not replace acceptance on the mounted tablet.
+
+Pilot TV is now a device-paired Kotlin/Compose for TV media-room client. It
+renders now playing, progress, queue, room outputs, energy and curated room
+state; sends only permissioned typed media controls; and launches installed
+Jellyfin/Kodi applications. It stores a scoped device token in Android
+Keystore, never an administrator token. Shield installation, D-pad/overscan and
+Denon audiovisual acceptance remain pending.
 
 ### N150 Media Console
 
@@ -443,6 +488,12 @@ tested Linux path uses mpv. The Shield remains the engine for Dolby Vision,
 DRM, and commercial services. iOS controls both through device/user-bound
 Pilot Core APIs instead of connecting directly to the N150, Denon, Shield, or
 mpv socket. The full plan is in `docs/N150_MEDIA_CONSOLE.md`.
+
+The reusable Linux display source now supports a `media-console` mode with a
+music-first layout, retained output selection, progress/queue information,
+stale-state handling, a touch search keyboard and assistant event overlays.
+Room Agent's local mpv adapter is source tested. No native-HDMI N150 has yet
+completed display, decode, HDMI audio, CEC or HDR10 physical acceptance.
 
 ### Embedded display nodes
 
@@ -462,6 +513,11 @@ Large-format Linux displays use the same thin-client principle at a different
 scale. The Raspberry Pi owns only local presentation, touch, offline status,
 and kiosk recovery; Pilot Core remains authoritative for rooms, home state,
 assistant context, and future control authorization.
+
+The current display source adds device-authenticated product/event polling,
+stale indication, persistent output selection, progress/queue presentation, a
+touch search keyboard and assistant completion overlays. These additions await
+promotion and repeat physical touch/rollback acceptance on the deployed Pi.
 
 ## 7. Voice and AI pipeline
 
@@ -534,16 +590,37 @@ listener/playback, and Music Assistant Sendspin connectivity.
 
 Target Pilot Core APIs not yet implemented:
 
-- `/meetings`
-- `/memory`
-- WebSockets for streaming meeting transcripts
+- a general long-term `/memory` product API;
+- streaming partial meeting transcripts;
+- the versioned 3D house geometry and mapping contract.
 
-Pilot Core 0.9 implements authenticated `/v1/rooms`, `/v1/players`,
+Pilot Core implements authenticated `/v1/rooms`, `/v1/players`,
 `/v1/devices`, `/v1/media`, `/v1/assistant`, `/v1/operations`, event
 ingestion/history, provider-neutral media state, a realtime event WebSocket,
 and the operations dashboard. It also persists device commands and delivers
-them over authenticated outbound room-agent WebSockets. Meeting and memory APIs
-remain future phases.
+them over authenticated outbound room-agent WebSockets. Device-scoped meeting
+create/list/detail/recording/process APIs and deterministic meeting retrieval
+are implemented; semantic long-term memory remains a future phase.
+
+The current shared client contract is:
+
+```text
+GET  /v1/devices/{id}/manifest
+GET  /v1/devices/{id}/events/snapshot?cursor=...
+GET  /v1/devices/{id}/events?cursor=...&timeout_seconds=...
+WS   /v1/devices/{id}/events/ws?cursor=...
+GET  /v1/devices/{id}/home?room_id=...
+GET  /v1/devices/{id}/energy
+GET  /v1/devices/{id}/media
+POST /v1/devices/{id}/media
+POST /v1/devices/{id}/assistant
+POST /v1/devices/{id}/credentials/rotate-self
+```
+
+The manifest is authoritative for available features and paths. The product
+snapshot is the recovery boundary after a missed/expired cursor; individual
+events are versioned `pilot.*.v1` envelopes. Administrator-only presentation
+and pairing-grant APIs stay outside the device contract.
 
 Pilot Core 0.5 added `/v1/rooms/{room_id}/audio-assets`,
 `/v1/rooms/{room_id}/audio`, and the device-authenticated audio download path.
@@ -582,6 +659,13 @@ Security principles:
 - No credentials committed to source control
 - Offline operation for essential functions
 - Private GitHub repository for infrastructure source by default
+- Short-lived, room/profile-bound, single-use pairing grants
+- Capability-scoped per-device credentials encrypted by native clients
+- Credential revision, self-rotation where supported, administrator rotation
+  and revocation
+- Curated home presentation separated from mutation authority
+- Registry/explicit room trust required before a Home Assistant mutation;
+  inference remains read-only
 
 ## 11. Deployment and recovery
 
@@ -593,7 +677,13 @@ release pointer. `pilot-rollback` atomically returns to the prior room-agent
 release. Configuration archives are retained separately.
 
 GPU, HDMI, VFIO, IOMMU, and Proxmox host configuration remain outside the first
-office endpoint milestone.
+office endpoint milestone. A future N150 Media Console uses native Debian and
+direct HDMI rather than adding Intel GPU passthrough to the office baseline.
+
+Production Whisper on the planned RTX 3080 remains deferred until that GPU is
+installed. Existing configured local speech services may be tested through the
+fixed-phrase acceptance route, but meeting transcription must fail closed when
+no verified private Whisper-compatible endpoint is reachable.
 
 ## 12. Repository layout
 
@@ -672,15 +762,18 @@ deployed integration, hardware boundary, or milestone status changes.
 - [x] In-person Denon audible music playback
 - [ ] In-person Denon source-switch and restart-recovery acceptance
 - [x] Shield application foundation
-- [ ] Shield device pairing and physical deployment
+- [x] Shield one-time device pairing and scoped credential source path
+- [ ] Shield physical deployment and D-pad/Denon acceptance
 - [x] N150 Media Console architecture and native-HDMI boundary
-- [ ] Media-console agent and authenticated session commands
-- [ ] Fullscreen N150 idle/music/assistant shell
-- [ ] Supervised mpv local-video playback
+- [x] Media-console agent and authenticated session commands in source
+- [x] Fullscreen N150 music/assistant/offline shell in source
+- [x] Supervised mpv local-video playback in source
+- [ ] N150 native-HDMI physical deployment and acceptance
 - [ ] Jellyfin browse, resume, subtitle, and audio-track integration
 - [x] iOS room/media remote foundation
-- [ ] iOS physical-device deployment and secure QR pairing
-- [ ] Music Assistant library, artwork, queue, and playback-transfer UX
+- [x] iOS one-time pairing, scoped product contract and rich media controls in source
+- [ ] iOS physical-device deployment and secure pairing acceptance
+- [x] Music Assistant search, artwork/queue/progress and playback-transfer UX in source
 - [x] Bounded Home Assistant Denon power and source commands
 - [ ] HDMI/CEC source coordination for a future media-room N150
 - [ ] N150 HDR10 and HD-audio acceptance
@@ -696,14 +789,19 @@ deployed integration, hardware boundary, or milestone status changes.
 - [x] Semantic entity search and ambiguity-safe read tools
 - [x] Pilot Core coverage, catalogue, area, device, floor, and energy APIs
 - [x] Administrator catalogue coverage, search, sync, and energy dashboard
+- [x] Persistent automatic/include/exclude entity presentation policy
+- [x] Explainable exposure reasons, product sections/priorities and canonical duplicates
+- [x] Registry/explicit room trust and fail-closed inferred-room mutations
+- [x] Administrator entity presentation editor
 - [ ] Optimized house GLB asset and versioned room/entity manifest
-- [ ] Pilot Core typed home-action, permission, confirmation, and audit APIs
+- [x] Pilot Core typed home-action, permission, confirmation, and audit APIs
 - [x] Shared client-ready 2D room/home presentation foundation
 - [ ] iOS/iPadOS interactive 3D house surface
 - [ ] Live lighting representation and room/device interaction
 - [x] Polished adaptive iOS/iPadOS home, media, and assistant client
 - [x] Native Android wall-tablet application foundation
 - [x] Android immersive display, night mode, cached offline state, and reconnect behavior
+- [x] Android one-time pairing, resumable events, curated controls and push-to-talk in source
 - [ ] Android boot launch, device-owner kiosk, watchdog, and physical-tablet acceptance
 - [ ] Climate, blinds, media, occupancy, environmental, and energy overlays
 - [ ] Confirmation-gated locks, garage, alarm, and security actions
@@ -718,6 +816,8 @@ deployed integration, hardware boundary, or milestone status changes.
 - [x] iOS meeting capture and status client foundation
 - [x] iOS timestamped transcript, decision, action, and evidence review surface
 - [x] Dedicated stronger Ollama model selection for meeting analysis
+- [ ] Dedicated production Whisper deployment on the RTX 3080
+- [ ] End-to-end long meeting acceptance against the production Whisper endpoint
 
 ### Phase 6 — Memory and advanced workflows
 
@@ -732,6 +832,9 @@ deployed integration, hardware boundary, or milestone status changes.
 - [x] Validated Pilot Core room/player registry
 - [x] Authenticated room-agent event transport
 - [x] Device registration and registry persistence
+- [x] Versioned client manifest, product snapshot and resumable event contracts
+- [x] Device credential revision, rotation and revocation
+- [x] Dashboard pairing profiles and single-use client enrolment
 - [x] Music Assistant and Home Assistant API adapters
 - [x] Durable authenticated Core-to-room command delivery
 - [x] Reconnect-safe local command result journal
@@ -761,23 +864,27 @@ deployed integration, hardware boundary, or milestone status changes.
 
 ## 14. Immediate next steps
 
-1. Review and deploy Pilot Core 0.20's additive read-only catalogue migration,
-   then verify a complete Home Assistant synchronization and coverage report.
-2. Enrol the Android wall tablet with fixed-room `display`, `media-control`, and
-   `voice` capabilities; install it and complete reboot/network/night-mode tests.
-3. Install the polished iOS client on the physical phone and iPad and validate
-   media, assistant, rotation, Dynamic Type, and offline behavior.
-4. Add scoped device-authenticated home projections to the clients after the
-   read-only catalogue coverage is reviewed.
-5. Build typed Home Assistant actions only after principal, permission,
-   confirmation, reconciliation, and immutable audit policy is accepted.
-6. Obtain or create accurate house geometry, then publish the validated GLB and
-   stable room/object manifest for the 3D twin.
-7. Validate a local lossless Music Assistant track.
-8. Complete Bluetooth A2DP arbitration and source-switch recovery.
-9. Train and deploy the **Hey Pilot** wake model.
-10. Complete Denon source-switch/restart recovery and Android physical-tablet
-    acceptance.
+1. Finish the full release validation matrix, create a verified cold Core
+   backup, promote the product-contract release and test snapshot/event and
+   pairing persistence across a container restart.
+2. Review the production Home Assistant catalogue in the presentation editor:
+   explicitly include useful omissions, hide duplicates and promote only
+   trustworthy room mappings before enabling their controls.
+3. Pair and physically accept iPhone/iPad, the mounted Android wall tablet and
+   the Shield using separate scoped identities; test rotation, revocation,
+   offline recovery, accessibility/touch/focus and real media/home actions.
+4. Promote the updated Raspberry Pi display release and repeat touch,
+   event-overlay, stale-state and two-way rollback acceptance.
+5. Deploy the N150 Media Console role on a native-HDMI target and accept its
+   shell, mpv, HDMI audio, Denon source recovery and HDR10 boundary while
+   retaining Shield for Dolby Vision/DRM.
+6. Install and validate the dedicated production Whisper service when the RTX
+   3080 is installed, then run one long meeting from recording through
+   evidence-linked review. Do not enable a speculative transcription fallback.
+7. Validate a local lossless Music Assistant track, complete Bluetooth A2DP
+   arbitration and source-switch recovery, and train/accept **Hey Pilot**.
+8. Only then calibrate the real house geometry and publish the accessible,
+   versioned 3D model/mapping contract shared by iOS and Android.
 
 ## 15. Decision log
 
@@ -795,6 +902,12 @@ deployed integration, hardware boundary, or milestone status changes.
 - Keep the Shield as the licensed Dolby Vision playback engine.
 - Separate player discovery from mutation; new room players start with
   `control_enabled = false`.
+- Pair clients with room/profile-bound single-use grants. Native clients keep
+  only their scoped device token in Keychain/Keystore; administrator and
+  provider credentials remain server-side.
+- Curate Home Assistant centrally. Automatic relevance may make an entity
+  readable, but only registry-backed or explicit room mappings may authorize a
+  typed mutation.
 - Treat ESP32 displays as thin room surfaces; keep audio, orchestration, and
   durable state on the N150 endpoints and Pilot Core.
 - Inject display-node Wi-Fi credentials only during local builds and keep the
@@ -944,3 +1057,12 @@ deployed integration, hardware boundary, or milestone status changes.
   on-demand versus realtime endpoint health semantics, an independent stronger
   Ollama model for meeting analysis, and Pilot iOS review of timestamped
   transcripts, evidence-linked decisions, and actions.
+- **4.0** — Added the shared device manifest, recoverable product snapshot and
+  resumable client-event contracts; persistent explainable entity
+  presentation and authoritative room trust; dashboard pairing profiles;
+  credential rotation/revocation; richer typed media and assistant payloads;
+  device-paired iOS, Android and Shield client source; and the reusable Linux
+  media-console presentation mode. Production promotion and physical client,
+  Pi, Shield and N150 acceptance remain explicitly separate. Dedicated
+  production Whisper on the RTX 3080 remains deferred until that GPU is
+  installed.

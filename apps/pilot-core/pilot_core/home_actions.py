@@ -74,20 +74,24 @@ class HomeActions:
             raise KeyError(room_id)
         entities: list[dict[str, Any]] = []
         seen: set[str] = set()
-        for area_id in self._area_ids(room):
-            page = self.intelligence.catalog(
-                area_id=area_id,
-                include_missing=False,
-                limit=1000,
+        page = self.intelligence.catalog(include_missing=False, limit=5_000)
+        for entity in page["entities"]:
+            presentation = self.intelligence.presentation(entity)
+            if not presentation["included"]:
+                continue
+            if presentation["room"]["id"] != room.id:
+                continue
+            if entity["entity_id"] in seen:
+                continue
+            seen.add(entity["entity_id"])
+            entities.append(self._project_entity(entity))
+        entities.sort(
+            key=lambda item: (
+                -item["presentation"]["priority"],
+                item["presentation"]["section"],
+                item["name"].casefold(),
             )
-            for entity in page["entities"]:
-                if not self.intelligence.is_relevant(entity):
-                    continue
-                if entity["entity_id"] in seen:
-                    continue
-                seen.add(entity["entity_id"])
-                entities.append(self._project_entity(entity))
-        entities.sort(key=lambda item: (item["domain"], item["name"].casefold()))
+        )
         return {
             "room": {
                 "id": room.id,
@@ -154,8 +158,15 @@ class HomeActions:
         if entity["unavailable"] or entity["stale"]:
             raise HomeActionConflict("entity is unavailable or stale")
         room = self.rooms[room_id]
-        if entity.get("area_id") not in self._area_ids(room):
+        presentation = self.intelligence.presentation(entity)
+        if presentation["room"]["id"] != room.id:
             raise HomeActionForbidden("entity is not mapped to the selected room")
+        if not presentation["room"]["authoritative"]:
+            raise HomeActionForbidden(
+                "entity room mapping is inferred and cannot authorize an action"
+            )
+        if not presentation["included"]:
+            raise HomeActionForbidden("entity is excluded from Pilot")
         plan = self._plan(entity, action, parameters)
         request = self.store.create_home_action(
             request_id=str(uuid4()),
@@ -402,6 +413,9 @@ class HomeActions:
         return None
 
     def _project_entity(self, entity: dict[str, Any]) -> dict[str, Any]:
+        presentation = self.intelligence.presentation(entity)
+        actions = self.available_actions(entity)
+        presentation["supported_actions"] = actions
         entity = self.intelligence.public_entity(entity)
         return {
             "entity_id": entity["entity_id"],
@@ -414,7 +428,8 @@ class HomeActions:
             "unavailable": entity["unavailable"],
             "stale": entity["stale"],
             "observed_at": entity["observed_at"],
-            "actions": self.available_actions(entity),
+            "actions": actions,
+            "presentation": presentation,
         }
 
     @staticmethod

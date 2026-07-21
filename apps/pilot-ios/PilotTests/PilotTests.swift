@@ -57,6 +57,74 @@ final class PilotTests: XCTestCase {
         XCTAssertNotNil(EnergySnapshot.awaitingBackend.detail)
     }
 
+    func testPortableEnergyContractMapsPartialSnapshot() throws {
+        let data = Data(
+            """
+            {
+              "schema_version":"pilot.energy.v1","status":"partial",
+              "solar":{"value":8420,"unit":"W","observed_at":"2026-07-22T00:00:00Z"},
+              "grid":{"value":-4910,"unit":"W","observed_at":"2026-07-22T00:00:00Z","direction":"exporting"},
+              "battery":{"value":-2080,"unit":"W","observed_at":"2026-07-22T00:00:00Z","direction":"charging"},
+              "battery_soc":{"value":76,"unit":"%","observed_at":"2026-07-22T00:00:00Z"},
+              "home_load":{"value":3510,"unit":"W","observed_at":"2026-07-22T00:00:00Z"}
+            }
+            """.utf8
+        )
+        let value = try JSONDecoder().decode(EnergyEnvelope.self, from: data).snapshot
+        XCTAssertEqual(value.status, .stale)
+        XCTAssertEqual(value.solarWatts, 8420)
+        XCTAssertEqual(value.gridWatts, -4910)
+        XCTAssertEqual(value.batteryStateOfCharge, 76)
+    }
+
+    @MainActor
+    func testPairingCodeParsesJSONAndBareGrant() throws {
+        let json = """
+        {"core_url":"http://pilot.local:8770","bootstrap_token":"one-use-token"}
+        """
+        let payload = try XCTUnwrap(
+            PilotModel.parsePairingCode(json, defaultCoreURL: "")
+        )
+        XCTAssertEqual(payload.coreURL.absoluteString, "http://pilot.local:8770")
+        XCTAssertEqual(payload.token, "one-use-token")
+
+        let bare = try XCTUnwrap(
+            PilotModel.parsePairingCode(
+                "grant-token",
+                defaultCoreURL: "http://10.0.1.64:8770/"
+            )
+        )
+        XCTAssertEqual(bare.coreURL.absoluteString, "http://10.0.1.64:8770")
+        XCTAssertEqual(bare.token, "grant-token")
+    }
+
+    func testClientManifestAndResumableEventsDecode() throws {
+        let manifest = Data(
+            """
+            {"schema_version":"pilot.client.v1","core_version":"0.25.0",
+             "features":{"home":true,"realtime":true},
+             "endpoints":{"events":"/v1/devices/phone/events"}}
+            """.utf8
+        )
+        let decoded = try JSONDecoder().decode(PilotClientManifest.self, from: manifest)
+        XCTAssertEqual(decoded.schemaVersion, "pilot.client.v1")
+        XCTAssertEqual(decoded.features["realtime"], true)
+
+        let events = Data(
+            """
+            {"schema_version":"pilot.events.v1","cursor":"7","revision":7,
+             "reset_required":false,"events":[{
+               "id":"evt_7","type":"pilot.media.changed.v1","revision":7,
+               "occurred_at":"2026-07-22T00:00:00Z","room_id":"office",
+               "payload":{"player_id":"office-music"}
+             }]}
+            """.utf8
+        )
+        let batch = try JSONDecoder().decode(ClientEventSnapshot.self, from: events)
+        XCTAssertEqual(batch.cursor, "7")
+        XCTAssertEqual(batch.events.first?.revision, 7)
+    }
+
     func testHomeProjectionDecodesBoundedControls() throws {
         let data = Data(
             """
@@ -75,7 +143,15 @@ final class PilotTests: XCTestCase {
                 "area_id": "james_office", "availability": "available",
                 "unavailable": false, "stale": false,
                 "observed_at": "2026-07-21T00:00:00Z",
-                "actions": ["turn_on", "turn_off", "set_brightness"]
+                "actions": ["turn_on", "turn_off", "set_brightness"],
+                "presentation": {
+                  "exposure_policy":"automatic","included":true,
+                  "reason":"user_facing_domain","category":"control","priority":85,
+                  "room":{"trust":"registry","authoritative":true},
+                  "supported_actions":["turn_on","turn_off","set_brightness"],
+                  "canonical_id":"light.office_lamp","duplicate_of":null,
+                  "display_name":"Desk Lamp","icon":"lightbulb.fill","section":"Controls"
+                }
               }]
             }
             """.utf8
@@ -83,7 +159,64 @@ final class PilotTests: XCTestCase {
         let projection = try JSONDecoder().decode(HomeProjection.self, from: data)
         XCTAssertEqual(projection.room.name, "Office")
         XCTAssertTrue(projection.entities[0].isOn)
+        XCTAssertEqual(projection.entities[0].displayName, "Desk Lamp")
+        XCTAssertTrue(projection.entities[0].shouldDisplay)
         XCTAssertEqual(try XCTUnwrap(projection.entities[0].brightnessPercent), 50.2, accuracy: 0.2)
+    }
+
+    func testRichMediaQueueAndArtworkDecode() throws {
+        let data = Data(
+            """
+            {
+              "device_id":"phone","room_id":"office","rooms":[],
+              "media":{"observed_at":"2026-07-22T00:00:00Z","players":{
+                "office-music":{
+                  "player":{"id":"office-music","room_id":"office","name":"Office Music",
+                    "kind":"music","protocol":"sendspin","enabled":true,"control_enabled":true},
+                  "status":"ok",
+                  "effective":{"available":true,"powered":true,"playback_state":"playing",
+                    "volume_percent":35,"muted":false,"source":"music_assistant",
+                    "media":{"title":"Teardrop","artist":"Massive Attack","album":"Mezzanine"},
+                    "position_seconds":12.5,"duration_seconds":180,
+                    "artwork_url":"https://pilot.local/artwork/1",
+                    "queue":{"status":"ok","index":0,"truncated":false,"items":[{
+                      "id":"track-1","title":"Teardrop","artist":"Massive Attack",
+                      "album":"Mezzanine","artwork":{"available":true,
+                        "source_url":"https://example.test/cover.jpg","proxy_url":null}
+                    }]}
+                  },
+                  "capabilities":{"actions":["play","pause","next","seek"],
+                    "transport":true,"volume":true,"seek":true,"transfer":true,"grouping":false}
+                }
+              }}
+            }
+            """.utf8
+        )
+        let envelope = try JSONDecoder().decode(DeviceMediaEnvelope.self, from: data)
+        let player = try XCTUnwrap(envelope.media.players["office-music"])
+        XCTAssertEqual(player.effective.positionSeconds, 12.5)
+        XCTAssertEqual(player.effective.queue?.items.first?.title, "Teardrop")
+        XCTAssertEqual(player.capabilities?.seek, true)
+    }
+
+    func testPendingMeetingRecordingPersistsFailureMetadata() throws {
+        let pending = PendingMeetingRecording(
+            id: "meeting-1",
+            meetingID: "meeting-1",
+            title: "Planning",
+            recordingPath: "/private/var/mobile/meeting-1.m4a",
+            state: .failed,
+            uploadComplete: true,
+            failureMessage: "Processing service unavailable",
+            updatedAt: Date(timeIntervalSince1970: 1)
+        )
+        let roundTrip = try JSONDecoder().decode(
+            PendingMeetingRecording.self,
+            from: JSONEncoder().encode(pending)
+        )
+        XCTAssertEqual(roundTrip.state, .failed)
+        XCTAssertTrue(roundTrip.uploadComplete)
+        XCTAssertEqual(roundTrip.recordingPath, pending.recordingPath)
     }
 
     func testMeetingListDecodesProcessingAndEvidenceCounts() throws {

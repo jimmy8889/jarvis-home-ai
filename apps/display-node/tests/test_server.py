@@ -134,6 +134,12 @@ class CoreStatusTests(unittest.TestCase):
         self.assertIn("@keyframes energy-flow-reverse", styles)
         self.assertIn("cursor: none !important", styles)
         self.assertIn(".flow-particles.reverse .particles-reverse", styles)
+        self.assertIn('id="onscreen-keyboard"', html)
+        self.assertIn("pilot-display-selected-output", script)
+        self.assertIn("lastSuccessfulUpdate", script)
+        self.assertIn("effective.position_seconds", script)
+        self.assertIn(".onscreen-keyboard", styles)
+        self.assertIn("Showing the last known state", styles)
 
 
 if __name__ == "__main__":

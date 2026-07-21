@@ -48,7 +48,13 @@ class AssistantResponse:
     tool_calls: tuple[dict[str, Any], ...] = ()
 
     def as_dict(self) -> dict[str, Any]:
+        cards = [self._card(call) for call in self.tool_calls]
+        citations: list[dict[str, Any]] = []
+        for call in self.tool_calls:
+            citations.extend(self._citations(call.get("output"), call.get("name")))
         return {
+            "schema_version": "pilot.assistant.v1",
+            "status": "completed",
             "conversation_id": self.session_id,
             "room_id": self.room_id,
             "response_text": self.response_text,
@@ -56,7 +62,88 @@ class AssistantResponse:
             "continue_conversation": self.continue_conversation,
             "result": self.result,
             "tool_calls": list(self.tool_calls),
+            "cards": cards,
+            "citations": citations[:20],
+            "sources": citations[:20],
+            "actions": [self._action(call) for call in self.tool_calls],
+            "events": [
+                {
+                    "type": "pilot.assistant.completed.v1",
+                    "status": "completed",
+                    "provider": self.provider,
+                }
+            ],
         }
+
+    @staticmethod
+    def _action(call: dict[str, Any]) -> dict[str, Any]:
+        output = call.get("output")
+        failed = isinstance(output, dict) and (
+            output.get("success") is False or bool(output.get("error"))
+        )
+        return {
+            "id": str(call.get("id") or "")[:200],
+            "name": str(call.get("name") or "unknown")[:100],
+            "status": "failed" if failed else "succeeded",
+            "arguments": _bounded(call.get("arguments") or {}),
+        }
+
+    @staticmethod
+    def _card(call: dict[str, Any]) -> dict[str, Any]:
+        name = str(call.get("name") or "result")
+        kind = (
+            "meeting"
+            if "meeting" in name
+            else "media"
+            if name in {"get_room_status", "search_music", "play_music", "control_media"}
+            else "energy"
+            if name == "get_energy_snapshot"
+            else "weather"
+            if name in {"get_weather", "get_temperature"}
+            else "home"
+            if "home" in name or name in {"read_home_entity", "control_home"}
+            else "result"
+        )
+        title = name.replace("_", " ").title()
+        return {
+            "id": str(call.get("id") or name)[:200],
+            "kind": kind,
+            "title": title,
+            "payload": _bounded(call.get("output") or {}),
+        }
+
+    @classmethod
+    def _citations(
+        cls, value: Any, tool_name: Any, depth: int = 0
+    ) -> list[dict[str, Any]]:
+        if depth > 6:
+            return []
+        results: list[dict[str, Any]] = []
+        if isinstance(value, dict):
+            segment_id = value.get("segment_id") or value.get("id")
+            meeting_id = value.get("meeting_id")
+            start_ms = value.get("start_ms")
+            if (
+                isinstance(meeting_id, str)
+                and isinstance(segment_id, str)
+                and isinstance(start_ms, int)
+            ):
+                results.append(
+                    {
+                        "kind": "meeting_segment",
+                        "meeting_id": meeting_id[:64],
+                        "segment_id": segment_id[:64],
+                        "start_ms": max(start_ms, 0),
+                        "label": str(value.get("text") or "Meeting evidence")[:240],
+                        "tool": str(tool_name or "")[:100],
+                    }
+                )
+            for item in list(value.values())[:30]:
+                results.extend(cls._citations(item, tool_name, depth + 1))
+        elif isinstance(value, list):
+            for item in value[:20]:
+                results.extend(cls._citations(item, tool_name, depth + 1))
+        return results
 
 
 def _speech_text(result: Any) -> str:

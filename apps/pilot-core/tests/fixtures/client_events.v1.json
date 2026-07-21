@@ -1,0 +1,20 @@
+{
+  "schema_version": "pilot.events.v1",
+  "cursor": "1",
+  "revision": 1,
+  "reset_required": false,
+  "events": [
+    {
+      "id": "evt_1",
+      "type": "pilot.audio.source.changed.v1",
+      "revision": 1,
+      "occurred_at": "2026-07-22T00:00:00+00:00",
+      "room_id": "office",
+      "payload": {
+        "source": "music",
+        "active": true,
+        "focus": {"foreground": "music"}
+      }
+    }
+  ]
+}

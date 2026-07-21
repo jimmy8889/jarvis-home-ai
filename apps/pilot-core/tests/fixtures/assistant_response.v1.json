@@ -1,0 +1,22 @@
+{
+  "schema_version": "pilot.assistant.v1",
+  "status": "completed",
+  "conversation_id": "conversation-1",
+  "room_id": "office",
+  "response_text": "The office is 22 degrees.",
+  "provider": "pilot_llm",
+  "continue_conversation": false,
+  "result": {},
+  "tool_calls": [],
+  "cards": [],
+  "citations": [],
+  "sources": [],
+  "actions": [],
+  "events": [
+    {
+      "type": "pilot.assistant.completed.v1",
+      "status": "completed",
+      "provider": "pilot_llm"
+    }
+  ]
+}

@@ -29,6 +29,8 @@
 	<string>Pilot connects to your local Pilot Core server and room audio devices.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Pilot records meetings you explicitly start and uploads them to your private Pilot Core for local transcription.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Pilot uses the camera only when you choose to scan a single-use Pilot Core pairing code.</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>audio</string>

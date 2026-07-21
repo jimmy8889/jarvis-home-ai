@@ -54,10 +54,25 @@ jobs:
         run: python -m unittest discover -s apps/pilot-core/tests -v
       - name: Test Pilot Core backup archive
         run: python -m unittest discover -s infra/pilot-core/tests -v
+      - name: Test Raspberry Pi display node
+        env:
+          PYTHONPATH: apps/display-node
+        run: python -m unittest discover -s apps/display-node/tests -v
+      - name: Validate display JavaScript
+        run: |
+          node --check apps/display-node/pilot_display_node/static/app.js
+          node --check apps/pilot-core/pilot_core/dashboard/app.js
       - name: Compile services
-        run: python -m compileall -q apps/pilot-core/pilot_core apps/room-agent/pilot_room_agent
-      - name: Validate event schema JSON
-        run: python -m json.tool packages/event-schema/pilot-event-v1.schema.json >/dev/null
+        run: >-
+          python -m compileall -q
+          apps/pilot-core/pilot_core
+          apps/room-agent/pilot_room_agent
+          apps/display-node/pilot_display_node
+      - name: Validate product schema JSON
+        run: |
+          for schema in packages/event-schema/*.json; do
+            python -m json.tool "$schema" >/dev/null
+          done
 
   deployment:
     name: Deployment definitions
@@ -191,13 +206,19 @@ jobs:
         working-directory: apps/pilot-ios
     steps:
       - uses: actions/checkout@v7
-      - name: Build Pilot for iPhone and iPad
-        run: >-
-          xcodebuild
-          -project Pilot.xcodeproj
-          -scheme Pilot
-          -sdk iphonesimulator
-          -destination 'generic/platform=iOS Simulator'
-          -derivedDataPath "$RUNNER_TEMP/PilotDerivedData"
-          CODE_SIGNING_ALLOWED=NO
-          build
+      - name: Build and test Pilot for iPhone and iPad
+        shell: bash
+        run: |
+          destination_id="$(
+            xcrun simctl list devices available -j |
+              python3 -c 'import json,sys; data=json.load(sys.stdin); print(next(item["udid"] for rows in data["devices"].values() for item in rows if item["name"].startswith("iPhone")))'
+          )"
+          xcodebuild \
+            -project Pilot.xcodeproj \
+            -scheme Pilot \
+            -sdk iphonesimulator \
+            -destination "platform=iOS Simulator,id=${destination_id}" \
+            -derivedDataPath "$RUNNER_TEMP/PilotDerivedData" \
+            GENERATE_INFOPLIST_FILE=YES \
+            CODE_SIGNING_ALLOWED=NO \
+            test

@@ -202,5 +202,26 @@
         <span id="updated">Waiting for status</span>
       </footer>
     </main>
+    <section id="onscreen-keyboard" class="onscreen-keyboard" aria-label="Music search keyboard" hidden>
+      <div class="keyboard-heading">
+        <span>Type a music search</span>
+        <button id="keyboard-close" type="button" aria-label="Close keyboard">Close</button>
+      </div>
+      <div id="keyboard-keys" class="keyboard-keys"></div>
+      <div class="keyboard-actions">
+        <button id="keyboard-space" type="button">Space</button>
+        <button id="keyboard-delete" type="button">Delete</button>
+        <button id="keyboard-clear" type="button">Clear</button>
+        <button id="keyboard-search" class="keyboard-primary" type="button">Search</button>
+      </div>
+    </section>
+    <aside id="assistant-overlay" class="assistant-overlay" aria-live="polite" hidden>
+      <span class="assistant-orb" aria-hidden="true"></span>
+      <div>
+        <small id="assistant-room">Pilot</small>
+        <strong id="assistant-response"></strong>
+        <span id="assistant-provider"></span>
+      </div>
+    </aside>
   </body>
 </html>

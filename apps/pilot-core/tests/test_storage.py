@@ -266,6 +266,74 @@ class StorageTests(unittest.TestCase):
         self.assertIn("control_endpoint", columns)
         self.assertEqual(policies["office-music"], 1)
 
+    def test_legacy_product_tables_gain_credential_and_room_trust_columns(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "pilot.db"
+            connection = sqlite3.connect(path)
+            connection.executescript(
+                """CREATE TABLE rooms (
+                       id TEXT PRIMARY KEY,
+                       name TEXT NOT NULL,
+                       response_player_id TEXT NOT NULL,
+                       default_music_player_id TEXT NOT NULL,
+                       default_device_id TEXT NOT NULL DEFAULT '',
+                       agent_url TEXT NOT NULL DEFAULT ''
+                   );
+                   CREATE TABLE devices (
+                       id TEXT PRIMARY KEY,
+                       room_id TEXT NOT NULL REFERENCES rooms(id),
+                       name TEXT NOT NULL,
+                       token_hash TEXT NOT NULL,
+                       capabilities_json TEXT NOT NULL,
+                       created_at TEXT NOT NULL,
+                       last_seen_at TEXT NOT NULL
+                   );
+                   CREATE TABLE home_entities (
+                       entity_id TEXT PRIMARY KEY,
+                       stable_id TEXT NOT NULL,
+                       domain TEXT NOT NULL,
+                       name TEXT NOT NULL,
+                       state TEXT NOT NULL,
+                       attributes_json TEXT NOT NULL,
+                       area_id TEXT,
+                       device_id TEXT,
+                       aliases_json TEXT NOT NULL,
+                       availability TEXT NOT NULL,
+                       observed_at TEXT,
+                       synced_at TEXT NOT NULL,
+                       first_seen_at TEXT NOT NULL,
+                       last_seen_at TEXT NOT NULL,
+                       missing INTEGER NOT NULL DEFAULT 0
+                   );"""
+            )
+            connection.commit()
+            connection.close()
+
+            migrated = Store(str(path), settings())
+            migrated.close()
+            connection = sqlite3.connect(path)
+            device_columns = {
+                row[1] for row in connection.execute("PRAGMA table_info(devices)")
+            }
+            entity_columns = {
+                row[1]
+                for row in connection.execute("PRAGMA table_info(home_entities)")
+            }
+            tables = {
+                row[0]
+                for row in connection.execute(
+                    "SELECT name FROM sqlite_master WHERE type = 'table'"
+                )
+            }
+            connection.close()
+        self.assertIn("credential_revision", device_columns)
+        self.assertIn("revoked_at", device_columns)
+        self.assertIn("area_source", entity_columns)
+        self.assertIn("client_events", tables)
+        self.assertIn("home_entity_presentations", tables)
+
 
 if __name__ == "__main__":
     unittest.main()

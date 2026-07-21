@@ -350,7 +350,7 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.headers["cache-control"], "no-store")
         payload = response.json()
-        self.assertEqual(payload["deployment"]["version"], "0.24.1")
+        self.assertEqual(payload["deployment"]["version"], "0.25.0")
         self.assertEqual(payload["summary"]["room_count"], 2)
         self.assertEqual(payload["summary"]["device_count"], 0)
         self.assertEqual(payload["summary"]["armed_room_count"], 0)
@@ -517,6 +517,12 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(grant_response.headers["cache-control"], "no-store")
         grant = grant_response.json()
         self.assertEqual(grant["device_id"], "grant-office")
+        self.assertTrue(
+            grant["pairing_qr_svg"].startswith(
+                "data:image/svg+xml;charset=utf-8,"
+            )
+        )
+        self.assertNotIn("admin-test", grant["pairing_qr_svg"])
 
         registered = self.client.post(
             "/v1/devices/bootstrap",

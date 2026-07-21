@@ -10,12 +10,21 @@ const elements = Object.fromEntries(
     "node-solar", "node-grid", "node-home", "node-battery",
     "music-state", "now-playing-list", "music-query", "music-search-button",
     "music-output", "music-message", "music-results",
+    "onscreen-keyboard", "keyboard-keys", "keyboard-space", "keyboard-delete",
+    "keyboard-clear", "keyboard-search", "keyboard-close",
+    "assistant-overlay", "assistant-room", "assistant-response", "assistant-provider",
   ].map((id) => [id.replaceAll("-", "_"), document.querySelector(`#${id}`)]),
 );
 
 const pageNames = ["home", "energy", "music", "system"];
 const number = new Intl.NumberFormat("en-AU", { maximumFractionDigits: 1 });
 let mediaModel = null;
+let lastSuccessfulUpdate = 0;
+const selectedOutputKey = "pilot-display-selected-output";
+let eventCursor = null;
+let liveSnapshotsSupported = true;
+let lastAssistantEvent = null;
+let assistantOverlayTimer = null;
 
 function updateClock() {
   const now = new Date();
@@ -165,7 +174,7 @@ function musicPlayerEntries(value) {
 
 function renderMusicControls(value) {
   mediaModel = value;
-  const previous = elements.music_output.value;
+  const previous = elements.music_output.value || localStorage.getItem(selectedOutputKey);
   const rooms = Array.isArray(value?.rooms) ? value.rooms : [];
   elements.music_output.replaceChildren();
   for (const room of rooms) {
@@ -180,6 +189,12 @@ function renderMusicControls(value) {
   }
   if ([...elements.music_output.options].some((option) => option.value === previous)) {
     elements.music_output.value = previous;
+  }
+  if (!elements.music_output.value && elements.music_output.options.length) {
+    elements.music_output.selectedIndex = 0;
+  }
+  if (elements.music_output.value) {
+    localStorage.setItem(selectedOutputKey, elements.music_output.value);
   }
 
   const entries = musicPlayerEntries(value);
@@ -200,6 +215,35 @@ function renderMusicControls(value) {
       textNode("strong", "", media.title || player.name),
       textNode("span", "", media.artist || `${player.name} · ${effective.playback_state || "unknown"}`),
     );
+    if (
+      typeof effective.position_seconds === "number" &&
+      typeof effective.duration_seconds === "number" &&
+      effective.duration_seconds > 0
+    ) {
+      const progress = textNode("div", "track-progress", "");
+      const fill = textNode("i", "", "");
+      const percent = Math.max(
+        0,
+        Math.min(100, (effective.position_seconds / effective.duration_seconds) * 100),
+      );
+      fill.style.width = percent + "%";
+      progress.append(fill);
+      copy.append(progress);
+    }
+    const queueItems = effective.queue?.items || entry.queue?.items || [];
+    if (Array.isArray(queueItems) && queueItems.length > 1) {
+      const currentIndex = effective.queue?.index ?? entry.queue?.index ?? 0;
+      const next = queueItems.find((_item, index) => index > currentIndex);
+      if (next) {
+        copy.append(
+          textNode(
+            "small",
+            "up-next",
+            "Up next · " + (next.title || next.name || "Untitled"),
+          ),
+        );
+      }
+    }
     const controls = textNode("div", "track-controls", "");
     for (const [action, label] of [["play", "▶"], ["pause", "Ⅱ"], ["stop", "■"]]) {
       const button = textNode("button", "", label);
@@ -225,6 +269,12 @@ function renderMusicControls(value) {
   }
 }
 
+elements.music_output.addEventListener("change", () => {
+  if (elements.music_output.value) {
+    localStorage.setItem(selectedOutputKey, elements.music_output.value);
+  }
+});
+
 async function postJSON(path, payload) {
   const response = await fetch(path, {
     method: "POST",
@@ -240,6 +290,15 @@ async function updateMedia() {
   try {
     const response = await fetch("/api/media", { cache: "no-store" });
     const value = await response.json();
+    const firstModeRead = !document.body.dataset.mode;
+    document.body.dataset.mode = value.mode || "display";
+    if (
+      firstModeRead &&
+      value.mode === "media-console" &&
+      !window.location.hash
+    ) {
+      showPage("music");
+    }
     if (!response.ok) throw new Error(value.detail || `HTTP ${response.status}`);
     renderMusicControls(value);
     elements.music_message.textContent = "";
@@ -308,6 +367,7 @@ async function searchMusic() {
     elements.music_message.textContent = results.length
       ? `${results.length} results`
       : "No results";
+    closeKeyboard();
   } catch (error) {
     elements.music_message.textContent = String(error);
   }
@@ -317,6 +377,63 @@ elements.music_search_button.addEventListener("click", searchMusic);
 elements.music_query.addEventListener("keydown", (event) => {
   if (event.key === "Enter") searchMusic();
 });
+
+function openKeyboard() {
+  elements.onscreen_keyboard.hidden = false;
+  document.body.classList.add("keyboard-open");
+}
+
+function closeKeyboard() {
+  elements.onscreen_keyboard.hidden = true;
+  document.body.classList.remove("keyboard-open");
+  elements.music_query.blur();
+}
+
+function renderAssistantEvents(events = []) {
+  const latest = [...events].reverse().find((event) => (
+    event?.type === "pilot.assistant.completed.v1"
+  ));
+  if (!latest || latest.id === lastAssistantEvent || latest.revision === lastAssistantEvent) {
+    return;
+  }
+  lastAssistantEvent = latest.id || latest.revision;
+  const payload = latest.payload || {};
+  const response = payload.response_text || payload.text;
+  if (!response) return;
+  elements.assistant_room.textContent = payload.room_id
+    ? "Pilot · " + payload.room_id.replaceAll("-", " ")
+    : "Pilot";
+  elements.assistant_response.textContent = response;
+  elements.assistant_provider.textContent = payload.provider
+    ? "Answered locally by " + payload.provider
+    : "Local assistant";
+  elements.assistant_overlay.hidden = false;
+  window.clearTimeout(assistantOverlayTimer);
+  assistantOverlayTimer = window.setTimeout(() => {
+    elements.assistant_overlay.hidden = true;
+  }, 10000);
+}
+
+for (const key of "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789") {
+  const button = textNode("button", "", key);
+  button.type = "button";
+  button.addEventListener("click", () => {
+    elements.music_query.value += key;
+  });
+  elements.keyboard_keys.append(button);
+}
+elements.music_query.addEventListener("focus", openKeyboard);
+elements.keyboard_space.addEventListener("click", () => {
+  elements.music_query.value += " ";
+});
+elements.keyboard_delete.addEventListener("click", () => {
+  elements.music_query.value = elements.music_query.value.slice(0, -1);
+});
+elements.keyboard_clear.addEventListener("click", () => {
+  elements.music_query.value = "";
+});
+elements.keyboard_search.addEventListener("click", searchMusic);
+elements.keyboard_close.addEventListener("click", closeKeyboard);
 
 function showPage(name) {
   if (!pageNames.includes(name)) return;
@@ -353,6 +470,51 @@ pages.addEventListener("pointerup", (event) => {
 });
 pages.addEventListener("pointercancel", () => { swipeStart = null; });
 
+async function updateLiveSnapshot() {
+  if (!liveSnapshotsSupported) return;
+  const query = eventCursor ? "?cursor=" + encodeURIComponent(eventCursor) : "";
+  try {
+    const response = await fetch("/api/events/snapshot" + query, { cache: "no-store" });
+    if ([404, 405, 501].includes(response.status)) {
+      liveSnapshotsSupported = false;
+      return;
+    }
+    const value = await response.json();
+    if (!response.ok) throw new Error(value.detail || "Live state unavailable");
+    eventCursor = value.cursor || eventCursor;
+    renderAssistantEvents(value.events || []);
+    if (value.energy) {
+      renderEnergy(value.energy);
+    }
+    if (value.media) {
+      const merged = {
+        rooms: mediaModel?.rooms || [],
+        media: value.media,
+      };
+      renderMusicControls(merged);
+      const entries = musicPlayerEntries(merged);
+      const active = entries.find((entry) => entry.effective?.playback_state === "playing") ||
+        entries.find((entry) => entry.effective?.media?.title);
+      const current = active?.effective || {};
+      elements.home_track.textContent = current.media?.title || "Nothing playing";
+      elements.home_artist.textContent = current.media?.artist || "Pilot network is quiet";
+      elements.home_player.textContent = active
+        ? (active.player?.name || "Pilot player") + " · " + (current.playback_state || "idle")
+        : "—";
+      elements.music_state.textContent = entries.length
+        ? entries.length + " available"
+        : "No players";
+      elements.music_state.className = "data-state " + (entries.length ? "online" : "offline");
+    }
+    lastSuccessfulUpdate = Date.now();
+    document.body.classList.remove("stale");
+  } catch (_error) {
+    if (Date.now() - lastSuccessfulUpdate > 20000) {
+      document.body.classList.add("stale");
+    }
+  }
+}
+
 async function updateStatus() {
   try {
     const response = await fetch("/api/status", { cache: "no-store" });
@@ -381,6 +543,8 @@ async function updateStatus() {
     elements.storage.textContent = `Storage ${gigabytes(value.disk?.free_bytes)} free`;
     renderEnergy(value.surface?.energy || {});
     renderNowPlaying(value.surface?.now_playing || {});
+    lastSuccessfulUpdate = Date.now();
+    document.body.classList.remove("stale");
     elements.updated.textContent = `Updated ${new Date().toLocaleTimeString("en-AU", {
       hour: "2-digit",
       minute: "2-digit",
@@ -392,6 +556,10 @@ async function updateStatus() {
     elements.core_state.className = "state offline";
     elements.core_detail.textContent = "Retrying";
     elements.updated.textContent = String(error);
+    if (Date.now() - lastSuccessfulUpdate > 20000) {
+      document.body.classList.add("stale");
+      elements.core_state.textContent = "State stale";
+    }
   }
 }
 
@@ -399,6 +567,8 @@ updateClock();
 showPage(window.location.hash.slice(1) || "home");
 updateStatus();
 updateMedia();
+updateLiveSnapshot();
 setInterval(updateClock, 1000);
-setInterval(updateStatus, 10000);
-setInterval(updateMedia, 10000);
+setInterval(updateStatus, 5000);
+setInterval(updateMedia, 5000);
+setInterval(updateLiveSnapshot, 2500);

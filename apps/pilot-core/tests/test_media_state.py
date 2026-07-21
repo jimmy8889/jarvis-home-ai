@@ -206,6 +206,75 @@ class MediaStateTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("uri", json.dumps(result))
         self.assertNotIn("custom_data", json.dumps(result))
 
+    async def test_typed_state_bounds_artwork_queue_and_transport_capabilities(
+        self,
+    ) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            if request.url.host == "ma.local":
+                return httpx.Response(
+                    200,
+                    json=[
+                        {
+                            "player_id": "1174905188",
+                            "name": "Media Room",
+                            "provider": "heos",
+                            "available": True,
+                            "powered": True,
+                            "state": "playing",
+                            "volume_level": 35,
+                            "elapsed_time": 42.25,
+                            "current_index": 1,
+                            "current_media": {
+                                "uri": "tidal://private-provider-id",
+                                "media_type": "track",
+                                "title": "Time",
+                                "artist": "Pink Floyd",
+                                "duration": 413,
+                                "image_url": (
+                                    "https://images.local/time.jpg?access_token=secret"
+                                ),
+                            },
+                            "queue_items": [
+                                {
+                                    "uri": "tidal://another-private-id",
+                                    "media_type": "track",
+                                    "title": "Money",
+                                    "duration": 382,
+                                }
+                            ],
+                        }
+                    ],
+                )
+            return httpx.Response(
+                200,
+                json={
+                    "entity_id": "media_player.media_room",
+                    "state": "playing",
+                    "attributes": {"volume_level": 0.35},
+                },
+            )
+
+        config = self.settings()
+        reader = MediaStateReader(
+            Registry.from_settings(config),
+            Integrations(config.integrations, httpx.MockTransport(handler)),
+        )
+        snapshot = await reader.snapshot("media-room")
+        self.assertEqual(snapshot["schema_version"], "pilot.media.v1")
+        state = snapshot["players"]["media-heos"]
+        self.assertEqual(state["effective"]["position_seconds"], 42.25)
+        self.assertEqual(state["effective"]["duration_seconds"], 413.0)
+        self.assertEqual(state["effective"]["queue"]["index"], 1)
+        self.assertEqual(state["capabilities"]["actions"], [])
+        self.assertFalse(state["capabilities"]["transport"])
+        self.assertEqual(
+            state["effective"]["artwork_url"], "https://images.local/time.jpg"
+        )
+        encoded = json.dumps(state)
+        self.assertNotIn("access_token", encoded)
+        self.assertNotIn("private-provider-id", encoded)
+        self.assertNotIn("another-private-id", encoded)
+
 
 if __name__ == "__main__":
     unittest.main()

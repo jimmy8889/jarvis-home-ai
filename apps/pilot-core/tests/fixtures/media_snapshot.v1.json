@@ -1,0 +1,49 @@
+{
+  "schema_version": "pilot.media.v1",
+  "observed_at": "2026-07-22T00:00:00+00:00",
+  "room_id": "office",
+  "providers": {
+    "music_assistant": {"status": "ok", "player_count": 1},
+    "home_assistant": {"status": "not_required", "entity_count": 0}
+  },
+  "players": {
+    "office-music": {
+      "player": {
+        "id": "office-music",
+        "room_id": "office",
+        "name": "Office Music",
+        "protocol": "sendspin",
+        "kind": "music",
+        "endpoint": "",
+        "control_endpoint": "",
+        "external_id": "pilot-office",
+        "enabled": true,
+        "control_enabled": true
+      },
+      "status": "ok",
+      "effective": {
+        "available": true,
+        "powered": true,
+        "playback_state": "playing",
+        "volume_percent": 35,
+        "muted": false,
+        "source": "music_assistant",
+        "media": null,
+        "position_seconds": 12.5,
+        "duration_seconds": 180.0,
+        "artwork_url": null,
+        "queue": {"status": "not_loaded", "index": null, "items": [], "truncated": false}
+      },
+      "capabilities": {
+        "actions": ["play", "pause", "stop", "set_volume", "play_media", "transfer", "next", "previous", "seek", "mute"],
+        "transport": true,
+        "volume": true,
+        "seek": true,
+        "transfer": true,
+        "grouping": false
+      },
+      "music_assistant": null,
+      "home_assistant": null
+    }
+  }
+}

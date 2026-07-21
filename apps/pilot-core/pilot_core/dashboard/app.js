@@ -4,6 +4,7 @@ const state = {
   token: sessionStorage.getItem("pilot-core-admin-token") || "",
   refreshTimer: null,
   loading: false,
+  rooms: [],
 };
 
 const elements = {
@@ -19,6 +20,30 @@ const elements = {
   homeSyncButton: document.querySelector("#home-sync-button"),
   catalogueSearchForm: document.querySelector("#catalogue-search-form"),
   catalogueSearchInput: document.querySelector("#catalogue-search-input"),
+  pairingForm: document.querySelector("#pairing-form"),
+  pairingName: document.querySelector("#pairing-name"),
+  pairingDeviceId: document.querySelector("#pairing-device-id"),
+  pairingRoom: document.querySelector("#pairing-room"),
+  pairingProfile: document.querySelector("#pairing-profile"),
+  pairingResult: document.querySelector("#pairing-result"),
+  pairingQr: document.querySelector("#pairing-qr"),
+  pairingCode: document.querySelector("#pairing-code"),
+  pairingExpiry: document.querySelector("#pairing-expiry"),
+  pairingCopy: document.querySelector("#pairing-copy"),
+};
+
+const capabilityProfiles = {
+  tv: ["display", "media-control", "home-read", "voice"],
+  wall: ["display", "media-control", "home-read", "home-control", "voice"],
+  personal: [
+    "portable-client",
+    "media-control",
+    "home-read",
+    "home-control",
+    "voice",
+    "meetings",
+  ],
+  display: ["display", "home-read"],
 };
 
 const text = (selector, value) => {
@@ -415,6 +440,26 @@ const renderRooms = (payload) => {
   });
 };
 
+const renderPairingRooms = (payload) => {
+  const rooms = Object.values(payload.rooms || {}).map((entry) => entry.room);
+  state.rooms = rooms;
+  const selected = elements.pairingRoom.value;
+  clear(elements.pairingRoom);
+  rooms.forEach((room) => {
+    const option = node("option", "", room.name);
+    option.value = room.id;
+    elements.pairingRoom.append(option);
+  });
+  if (rooms.some((room) => room.id === selected)) {
+    elements.pairingRoom.value = selected;
+  } else {
+    const mediaRoom = rooms.find((room) => room.id === "media-room");
+    if (mediaRoom) {
+      elements.pairingRoom.value = mediaRoom.id;
+    }
+  }
+};
+
 const renderIntegrations = (payload) => {
   const list = document.querySelector("#integration-list");
   clear(list);
@@ -691,6 +736,7 @@ const renderHomeSearch = (payload) => {
   matches.slice(0, 12).forEach((entity) => {
     const row = node("div", "entity-result");
     const copy = node("div");
+    const presentation = entity.presentation || {};
     copy.append(node("strong", "", entity.name || entity.entity_id));
     copy.append(
       node(
@@ -701,13 +747,73 @@ const renderHomeSearch = (payload) => {
           .join(" · "),
       ),
     );
+    copy.append(
+      node(
+        "small",
+        "entity-explanation",
+        [
+          presentation.category && titleCase(presentation.category),
+          presentation.section && "section " + titleCase(presentation.section),
+          presentation.room?.trust && "room " + titleCase(presentation.room.trust),
+          presentation.reason,
+        ]
+          .filter(Boolean)
+          .join(" · "),
+      ),
+    );
     row.append(copy);
-    row.append(
+    const stateColumn = node("div", "entity-state-column");
+    stateColumn.append(
       badge(
         entity.unavailable ? "Unavailable" : entity.stale ? "Stale" : String(entity.state || "Available"),
         entity.unavailable ? "bad" : entity.stale ? "warning" : "good",
       ),
     );
+    stateColumn.append(
+      badge(
+        presentation.included ? "Exposed" : "Hidden",
+        presentation.included ? "good" : "neutral",
+      ),
+    );
+    const actions = node("div", "entity-policy-actions");
+    [
+      ["automatic", "Auto"],
+      ["include", "Show"],
+      ["exclude", "Hide"],
+    ].forEach(([policy, label]) => {
+      const button = node("button", "button button-quiet button-tiny", label);
+      button.type = "button";
+      button.disabled = presentation.exposure_policy === policy;
+      button.addEventListener("click", async () => {
+        actions.querySelectorAll("button").forEach((item) => {
+          item.disabled = true;
+        });
+        try {
+          const updated = await api(
+            "/v1/home/presentation/" + encodeURIComponent(entity.entity_id),
+            {
+              method: "PATCH",
+              body: JSON.stringify({ exposure_policy: policy }),
+            },
+          );
+          entity.presentation = updated.presentation;
+          renderHomeSearch(payload);
+          showToast(
+            (updated.presentation.included ? "Exposed " : "Hidden ") +
+              (entity.name || entity.entity_id) +
+              ".",
+          );
+        } catch (error) {
+          showToast(error.message);
+          actions.querySelectorAll("button").forEach((item) => {
+            item.disabled = false;
+          });
+        }
+      });
+      actions.append(button);
+    });
+    stateColumn.append(actions);
+    row.append(stateColumn);
     list.append(row);
   });
 };
@@ -726,6 +832,7 @@ const loadHomeIntelligence = async () => {
 const render = (payload) => {
   renderSummary(payload);
   renderRooms(payload);
+  renderPairingRooms(payload);
   renderIntegrations(payload);
   renderSafety(payload);
   renderAssistant(payload);
@@ -851,6 +958,55 @@ elements.catalogueSearchForm.addEventListener("submit", async (event) => {
     );
   } catch (error) {
     showToast(error.message);
+  }
+});
+
+elements.pairingForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const submit = elements.pairingForm.querySelector('button[type="submit"]');
+  submit.disabled = true;
+  elements.pairingResult.hidden = true;
+  try {
+    const profile = elements.pairingProfile.value;
+    const payload = await api("/v1/bootstrap-grants", {
+      method: "POST",
+      body: JSON.stringify({
+        device_id: elements.pairingDeviceId.value.trim(),
+        room_id: elements.pairingRoom.value,
+        name: elements.pairingName.value.trim(),
+        capabilities: capabilityProfiles[profile] || capabilityProfiles.display,
+        expires_in_seconds: 600,
+      }),
+    });
+    elements.pairingCode.textContent = payload.bootstrap_token;
+    elements.pairingQr.src = payload.pairing_qr_svg || "";
+    elements.pairingExpiry.textContent = payload.expires_at
+      ? "Expires " + formatRelative(payload.expires_at) + "."
+      : "Expires in 10 minutes.";
+    elements.pairingResult.hidden = false;
+    showToast("One-time pairing code created.");
+  } catch (error) {
+    showToast(error.message);
+  } finally {
+    submit.disabled = false;
+  }
+});
+
+elements.pairingCopy.addEventListener("click", async () => {
+  const code = elements.pairingCode.textContent;
+  if (!code) {
+    return;
+  }
+  try {
+    await navigator.clipboard.writeText(code);
+    showToast("Pairing code copied.");
+  } catch {
+    const range = document.createRange();
+    range.selectNodeContents(elements.pairingCode);
+    const selection = window.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+    showToast("Pairing code selected. Copy it from the browser.");
   }
 });
 

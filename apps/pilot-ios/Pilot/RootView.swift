@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import VisionKit
 
 enum PilotSection: String, CaseIterable, Identifiable {
     case home
@@ -59,7 +60,7 @@ struct RootView: View {
 
     var body: some View {
         Group {
-            if model.isConfigured {
+            if model.hasActiveConfiguration {
                 configuredContent
             } else {
                 OnboardingView()
@@ -385,7 +386,7 @@ private struct EnergyOverviewCard: View {
             SectionTitle(
                 eyebrow: "LIVE ENERGY",
                 title: "Power flow",
-                trailing: snapshot.status == .live ? "Now" : "API ready"
+                trailing: statusLabel
             )
             if snapshot.isPopulated {
                 energyContent
@@ -448,7 +449,33 @@ private struct EnergyOverviewCard: View {
                         .font(.subheadline.monospacedDigit().weight(.semibold))
                 }
             }
+            if let battery = snapshot.batteryWatts {
+                Label(
+                    "Battery \(battery >= 25 ? "supplying" : battery <= -25 ? "charging" : "idle") · \(Self.power(battery))",
+                    systemImage: battery >= 25 ? "battery.75percent" : "bolt.fill"
+                )
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(PilotTheme.mint)
+            }
         }
+    }
+
+    private var statusLabel: String {
+        if let observed = snapshot.observedAt {
+            return snapshot.status == .live
+                ? observed.formatted(date: .omitted, time: .shortened)
+                : "Last update \(observed.formatted(date: .omitted, time: .shortened))"
+        }
+        return switch snapshot.status {
+        case .live: "Live"
+        case .stale: "Partial"
+        case .unavailable: "Unavailable"
+        }
+    }
+
+    private static func power(_ watts: Double) -> String {
+        if abs(watts) >= 1_000 { return String(format: "%.1f kW", abs(watts) / 1_000) }
+        return String(format: "%.0f W", abs(watts))
     }
 }
 
@@ -506,9 +533,22 @@ private struct HomeControlsPanel: View {
     @Environment(PilotModel.self) private var model
 
     private var grouped: [(String, [HomeEntity])] {
-        Dictionary(grouping: model.home?.entities ?? [], by: \.domain)
-            .map { ($0.key, $0.value.sorted { $0.name < $1.name }) }
-            .sorted { $0.0 < $1.0 }
+        Dictionary(
+            grouping: (model.home?.entities ?? []).filter(\.shouldDisplay),
+            by: \.displaySection
+        )
+        .map {
+            (
+                $0.key,
+                $0.value.sorted {
+                    ($0.displayPriority, $0.displayName) < ($1.displayPriority, $1.displayName)
+                }
+            )
+        }
+        .sorted { left, right in
+            (left.1.first?.displayPriority ?? 100, left.0)
+                < (right.1.first?.displayPriority ?? 100, right.0)
+        }
     }
 
     var body: some View {
@@ -574,7 +614,7 @@ private struct HomeEntityRow: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 12) {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(entity.name)
+                    Text(entity.displayName)
                         .font(.headline)
                     Text(entity.stale ? "Stale" : entity.state.replacingOccurrences(of: "_", with: " ").capitalized)
                         .font(.caption)
@@ -583,7 +623,7 @@ private struct HomeEntityRow: View {
                 Spacer()
                 if model.activeHomeEntityID == entity.id {
                     ProgressView()
-                } else if entity.actions.contains("turn_on") {
+                } else if entity.displayActions.contains("turn_on") {
                     Toggle(
                         "Power",
                         isOn: Binding(
@@ -599,7 +639,7 @@ private struct HomeEntityRow: View {
                     actionButtons
                 }
             }
-            if entity.actions.contains("set_brightness"),
+            if entity.displayActions.contains("set_brightness"),
                let brightness = entity.brightnessPercent {
                 HStack {
                     Image(systemName: "sun.min")
@@ -626,14 +666,14 @@ private struct HomeEntityRow: View {
     @ViewBuilder
     private var actionButtons: some View {
         HStack(spacing: 8) {
-            if entity.actions.contains("activate") {
+            if entity.displayActions.contains("activate") {
                 Button("Activate") { Task { await model.control(entity, action: "activate") } }
             }
-            if entity.actions.contains("open") {
+            if entity.displayActions.contains("open") {
                 Button("Open") { Task { await model.control(entity, action: "open") } }
                 Button("Close") { Task { await model.control(entity, action: "close") } }
             }
-            if entity.actions.contains("lock") {
+            if entity.displayActions.contains("lock") {
                 Button(entity.state == "locked" ? "Unlock" : "Lock") {
                     Task {
                         await model.control(
@@ -643,7 +683,7 @@ private struct HomeEntityRow: View {
                     }
                 }
             }
-            if entity.actions.contains("arm_home") {
+            if entity.displayActions.contains("arm_home") {
                 Button(entity.state == "disarmed" ? "Arm home" : "Disarm") {
                     Task {
                         await model.control(
@@ -780,7 +820,11 @@ private struct NowPlayingHero: View {
     var body: some View {
         VStack(spacing: 22) {
             HStack(spacing: 18) {
-                ArtworkTile(media: state?.effective.media, size: 92)
+                ArtworkTile(
+                    media: state?.effective.media,
+                    size: 92,
+                    artworkURL: state?.effective.artworkURL.flatMap(URL.init(string:))
+                )
                 VStack(alignment: .leading, spacing: 5) {
                     Text(state?.effective.media?.title ?? "Ready to play")
                         .font(.title2.weight(.bold))
@@ -793,6 +837,23 @@ private struct NowPlayingHero: View {
                         .foregroundStyle(PilotTheme.cyan)
                 }
                 Spacer(minLength: 0)
+            }
+
+            if let duration = state?.effective.durationSeconds, duration > 0 {
+                VStack(spacing: 5) {
+                    ProgressView(
+                        value: min(state?.effective.positionSeconds ?? 0, duration),
+                        total: duration
+                    )
+                    .tint(PilotTheme.cyan)
+                    HStack {
+                        Text(Self.duration(state?.effective.positionSeconds ?? 0))
+                        Spacer()
+                        Text(Self.duration(duration))
+                    }
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                }
             }
 
             HStack(spacing: 26) {
@@ -818,6 +879,11 @@ private struct NowPlayingHero: View {
             }
         }
         .pilotCard()
+    }
+
+    private static func duration(_ seconds: Double) -> String {
+        let value = max(0, Int(seconds))
+        return String(format: "%d:%02d", value / 60, value % 60)
     }
 }
 
@@ -866,7 +932,13 @@ private struct SearchResultRow: View {
     var body: some View {
         Button {
             PilotHaptics.impact()
-            Task { await model.command("play_media", mediaURI: result.uri) }
+            Task {
+                await model.command(
+                    "play_media",
+                    mediaURI: result.uri,
+                    operationID: result.id
+                )
+            }
         } label: {
             HStack(spacing: 13) {
                 AsyncArtwork(url: result.artworkURL, symbol: result.kind.symbol)
@@ -882,7 +954,7 @@ private struct SearchResultRow: View {
                         .lineLimit(1)
                 }
                 Spacer()
-                if model.activeMediaAction == "play_media" {
+                if model.activeMediaResultID == result.id {
                     ProgressView().controlSize(.small)
                 } else {
                     Image(systemName: "play.circle.fill")
@@ -908,6 +980,9 @@ private struct MeetingsView: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 20) {
                     recordingCard
+                    if !model.pendingMeetingRecordings.isEmpty {
+                        pendingRecordings
+                    }
                     if let error = model.meetingError {
                         Label(error, systemImage: "exclamationmark.triangle.fill")
                             .font(.footnote)
@@ -1017,6 +1092,61 @@ private struct MeetingsView: View {
         .background(PilotTheme.card, in: RoundedRectangle(cornerRadius: 24))
         .overlay { RoundedRectangle(cornerRadius: 24).stroke(PilotTheme.border) }
     }
+
+    private var pendingRecordings: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            SectionTitle(
+                eyebrow: "SAFE ON THIS DEVICE",
+                title: "Pending recordings",
+                trailing: "\(model.pendingMeetingRecordings.count) retained"
+            )
+            ForEach(model.pendingMeetingRecordings) { pending in
+                HStack(spacing: 13) {
+                    Image(systemName: pending.state == .failed
+                          ? "exclamationmark.arrow.triangle.2.circlepath"
+                          : "arrow.up.circle.fill")
+                        .font(.title2)
+                        .foregroundStyle(pending.state == .failed ? PilotTheme.amber : PilotTheme.cyan)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(pending.title)
+                            .font(.headline)
+                        Text(pending.failureMessage ?? pendingState(pending))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                    }
+                    Spacer()
+                    if [.ready, .failed].contains(pending.state) {
+                        Button("Retry") {
+                            Task { await model.retryPendingMeeting(pending.meetingID) }
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(model.isSubmittingMeeting)
+                    } else {
+                        ProgressView()
+                    }
+                }
+                .padding(14)
+                .background(Color.white.opacity(0.045), in: RoundedRectangle(cornerRadius: 16))
+            }
+            Label(
+                "Pilot never removes local audio until Core accepts both its upload and processing job.",
+                systemImage: "lock.shield.fill"
+            )
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
+        .pilotCard()
+    }
+
+    private func pendingState(_ pending: PendingMeetingRecording) -> String {
+        switch pending.state {
+        case .ready: "Ready to upload"
+        case .uploading: "Uploading securely to Pilot Core"
+        case .processing: "Core accepted the audio; starting local processing"
+        case .failed: "Retry when Pilot Core is reachable"
+        }
+    }
 }
 
 private struct MeetingDetailView: View {
@@ -1029,8 +1159,9 @@ private struct MeetingDetailView: View {
             if model.isLoadingMeetingDetail && model.selectedMeeting?.id != meetingID {
                 ProgressView("Loading private meeting record…")
             } else if let meeting = model.selectedMeeting, meeting.id == meetingID {
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 22) {
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 22) {
                         header(meeting)
                         if let summary = meeting.summary, !summary.isEmpty {
                             detailSection("Summary", symbol: "sparkles") {
@@ -1049,7 +1180,11 @@ private struct MeetingDetailView: View {
                                             if let due = action.dueAt {
                                                 Label(Self.date(due), systemImage: "calendar")
                                             }
-                                            evidenceLabel(action.segmentIDs.count)
+                                            evidenceButton(action.segmentIDs) { segmentID in
+                                                withAnimation(.snappy) {
+                                                    proxy.scrollTo(segmentID, anchor: .center)
+                                                }
+                                            }
                                         }
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
@@ -1063,9 +1198,11 @@ private struct MeetingDetailView: View {
                                 ForEach(meeting.decisions) { decision in
                                     VStack(alignment: .leading, spacing: 6) {
                                         Text(decision.summary)
-                                        evidenceLabel(decision.segmentIDs.count)
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
+                                        evidenceButton(decision.segmentIDs) { segmentID in
+                                            withAnimation(.snappy) {
+                                                proxy.scrollTo(segmentID, anchor: .center)
+                                            }
+                                        }
                                     }
                                     .padding(.vertical, 4)
                                 }
@@ -1090,16 +1227,18 @@ private struct MeetingDetailView: View {
                                         }
                                     }
                                     .padding(.vertical, 5)
+                                    .id(segment.id)
                                 }
                             }
                         }
                     }
-                    .frame(maxWidth: 900)
-                    .padding(18)
-                    .padding(.bottom, 60)
-                    .frame(maxWidth: .infinity)
+                        .frame(maxWidth: 900)
+                        .padding(18)
+                        .padding(.bottom, 60)
+                        .frame(maxWidth: .infinity)
+                    }
+                    .refreshable { await model.loadMeeting(meetingID) }
                 }
-                .refreshable { await model.loadMeeting(meetingID) }
             } else {
                 ContentUnavailableView(
                     "Meeting unavailable",
@@ -1153,8 +1292,22 @@ private struct MeetingDetailView: View {
         .overlay { RoundedRectangle(cornerRadius: 22).stroke(PilotTheme.border) }
     }
 
-    private func evidenceLabel(_ count: Int) -> some View {
-        Label("\(count) source\(count == 1 ? "" : "s")", systemImage: "link")
+    private func evidenceButton(
+        _ segmentIDs: [String],
+        open: @escaping (String) -> Void
+    ) -> some View {
+        Button {
+            if let first = segmentIDs.first { open(first) }
+        } label: {
+            Label(
+                "\(segmentIDs.count) source\(segmentIDs.count == 1 ? "" : "s")",
+                systemImage: "link"
+            )
+        }
+        .buttonStyle(.plain)
+        .font(.caption)
+        .foregroundStyle(PilotTheme.cyan)
+        .disabled(segmentIDs.isEmpty)
     }
 
     private static func duration(_ milliseconds: Int) -> String {
@@ -1347,7 +1500,7 @@ private struct AssistantHeader: View {
         HStack(spacing: 14) {
             ListeningOrb(isActive: model.isSendingMessage, size: 48)
             VStack(alignment: .leading, spacing: 2) {
-                Text(model.isSendingMessage ? "Pilot is thinking" : "Pilot is ready")
+                Text(statusTitle)
                     .font(.headline)
                 Text("Context: \(model.selectedRoom?.name ?? "choose a room")")
                     .font(.caption)
@@ -1375,6 +1528,15 @@ private struct AssistantHeader: View {
         .padding(.horizontal, 18)
         .padding(.vertical, 12)
         .background(.ultraThinMaterial)
+    }
+
+    private var statusTitle: String {
+        if model.isSendingMessage { return "Pilot is reasoning" }
+        let status = model.assistantStatus.lowercased()
+        if status.contains("listen") { return "Pilot is listening" }
+        if status.contains("act") || status.contains("tool") { return "Pilot is acting" }
+        if status.contains("speak") { return "Pilot is speaking" }
+        return "Pilot is ready"
     }
 }
 
@@ -1407,6 +1569,53 @@ private struct ChatBubble: View {
             VStack(alignment: .leading, spacing: 5) {
                 Text(message.text)
                     .textSelection(.enabled)
+                if !message.cards.isEmpty {
+                    VStack(spacing: 8) {
+                        ForEach(message.cards) { card in
+                            AssistantResultCard(card: card)
+                        }
+                    }
+                    .padding(.top, 5)
+                }
+                if !message.toolCalls.isEmpty {
+                    VStack(alignment: .leading, spacing: 5) {
+                        ForEach(message.toolCalls, id: \.stableID) { tool in
+                            Label(
+                                tool.name.replacingOccurrences(of: "_", with: " ").capitalized,
+                                systemImage: tool.status == "failed"
+                                    ? "exclamationmark.circle" : "checkmark.circle.fill"
+                            )
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(tool.status == "failed" ? .orange : PilotTheme.mint)
+                        }
+                    }
+                    .padding(.top, 4)
+                }
+                if !message.sources.isEmpty {
+                    VStack(alignment: .leading, spacing: 4) {
+                        ForEach(message.sources) { source in
+                            if let value = source.url, let url = URL(string: value) {
+                                Link(destination: url) {
+                                    Label(source.title, systemImage: "link")
+                                }
+                            } else {
+                                Label(source.title, systemImage: "doc.text")
+                            }
+                        }
+                    }
+                    .font(.caption)
+                    .padding(.top, 4)
+                }
+                if !message.actions.isEmpty {
+                    HStack(spacing: 8) {
+                        ForEach(message.actions) { action in
+                            Label(action.title, systemImage: action.status == "failed"
+                                  ? "xmark.circle" : "checkmark.circle")
+                                .font(.caption.weight(.semibold))
+                        }
+                    }
+                    .padding(.top, 4)
+                }
                 Text(message.createdAt, format: .dateTime.hour().minute())
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
@@ -1431,6 +1640,41 @@ private struct ChatBubble: View {
         return message.role == .user
             ? PilotTheme.blue.opacity(0.28)
             : Color.white.opacity(0.08)
+    }
+}
+
+private struct AssistantResultCard: View {
+    let card: AssistantCard
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: card.symbol ?? symbol)
+                .foregroundStyle(PilotTheme.cyan)
+                .frame(width: 26)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(card.title)
+                    .font(.subheadline.weight(.semibold))
+                if let subtitle = card.subtitle {
+                    Text(subtitle)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(10)
+        .background(Color.black.opacity(0.16), in: RoundedRectangle(cornerRadius: 13))
+        .accessibilityElement(children: .combine)
+    }
+
+    private var symbol: String {
+        switch card.kind {
+        case "energy": "bolt.fill"
+        case "media": "music.note"
+        case "home": "house.fill"
+        case "weather": "cloud.sun.fill"
+        default: "sparkles"
+        }
     }
 }
 
@@ -1507,6 +1751,7 @@ private struct NowPlayingView: View {
     @Environment(PilotModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @State private var volume = 30.0
+    @State private var position = 0.0
 
     private var state: PilotPlayerState? { model.selectedPlayer }
 
@@ -1516,7 +1761,11 @@ private struct NowPlayingView: View {
                 PilotTheme.background.ignoresSafeArea()
                 ScrollView {
                     VStack(spacing: 24) {
-                        ArtworkTile(media: state?.effective.media, size: 250)
+                        ArtworkTile(
+                            media: state?.effective.media,
+                            size: 250,
+                            artworkURL: state?.effective.artworkURL.flatMap(URL.init(string:))
+                        )
                             .shadow(color: PilotTheme.cyan.opacity(0.15), radius: 35)
                         VStack(spacing: 7) {
                             Text(state?.effective.media?.title ?? "Nothing playing")
@@ -1532,9 +1781,32 @@ private struct NowPlayingView: View {
                             }
                         }
 
+
+                        if let duration = state?.effective.durationSeconds, duration > 0 {
+                            VStack(spacing: 7) {
+                                Slider(value: $position, in: 0...duration, step: 1) { editing in
+                                    if !editing {
+                                        Task {
+                                            await model.command(
+                                                "seek",
+                                                positionSeconds: position
+                                            )
+                                        }
+                                    }
+                                }
+                                HStack {
+                                    Text(Self.duration(position))
+                                    Spacer()
+                                    Text("-\(Self.duration(max(0, duration - position)))")
+                                }
+                                .font(.caption.monospacedDigit())
+                                .foregroundStyle(.secondary)
+                            }
+                        }
+
                         HStack(spacing: 38) {
-                            MediaButton(symbol: "stop.fill", label: "Stop", size: 48) {
-                                Task { await model.command("stop") }
+                            MediaButton(symbol: "backward.fill", label: "Previous", size: 48) {
+                                Task { await model.command("previous") }
                             }
                             MediaButton(
                                 symbol: state?.effective.playbackState == "playing"
@@ -1548,23 +1820,25 @@ private struct NowPlayingView: View {
                                     ? "pause" : "play"
                                 Task { await model.command(action) }
                             }
-                            Menu {
-                                ForEach(model.rooms.filter { $0.id != model.selectedRoomID }) { room in
-                                    Button(room.name) {
-                                        Task { await model.transfer(to: room.id) }
-                                    }
-                                }
-                            } label: {
-                                Image(systemName: "airplayaudio")
-                                    .frame(width: 48, height: 48)
-                                    .background(Color.white.opacity(0.08), in: Circle())
+                            MediaButton(symbol: "forward.fill", label: "Next", size: 48) {
+                                Task { await model.command("next") }
                             }
-                            .accessibilityLabel("Move music to another room")
                         }
 
                         VStack(spacing: 12) {
                             HStack {
-                                Image(systemName: "speaker.fill")
+                                Button {
+                                    Task {
+                                        await model.command(
+                                            "set_mute",
+                                            muted: !(state?.effective.muted ?? false)
+                                        )
+                                    }
+                                } label: {
+                                    Image(systemName: state?.effective.muted == true
+                                          ? "speaker.slash.fill" : "speaker.fill")
+                                }
+                                .accessibilityLabel(state?.effective.muted == true ? "Unmute" : "Mute")
                                 Slider(value: $volume, in: 0...100, step: 1) { editing in
                                     if !editing {
                                         PilotHaptics.selection()
@@ -1580,6 +1854,47 @@ private struct NowPlayingView: View {
                                 .foregroundStyle(.secondary)
                         }
                         .pilotCard()
+
+                        Menu {
+                            ForEach(model.rooms.filter { $0.id != model.selectedRoomID }) { room in
+                                Button("Move to \(room.name)") {
+                                    Task { await model.transfer(to: room.id) }
+                                }
+                            }
+                        } label: {
+                            Label("Choose room or group", systemImage: "airplayaudio")
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 12)
+                                .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 15))
+                        }
+                        .accessibilityLabel("Move music to another room")
+
+                        if let queue = state?.effective.queue, !queue.items.isEmpty {
+                            VStack(alignment: .leading, spacing: 10) {
+                                SectionTitle(eyebrow: "UP NEXT", title: "Queue", trailing: "\(queue.items.count)")
+                                ForEach(queue.items.prefix(20)) { item in
+                                    HStack(spacing: 12) {
+                                        AsyncArtwork(
+                                            url: item.resolvedArtworkURL,
+                                            symbol: item.isCurrent == true ? "waveform" : "music.note"
+                                        )
+                                        .frame(width: 44, height: 44)
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            Text(item.title).font(.subheadline.weight(.semibold))
+                                            Text(item.artist ?? item.album ?? "")
+                                                .font(.caption)
+                                                .foregroundStyle(.secondary)
+                                        }
+                                        Spacer()
+                                        if item.isCurrent == true {
+                                            Image(systemName: "speaker.wave.2.fill")
+                                                .foregroundStyle(PilotTheme.cyan)
+                                        }
+                                    }
+                                }
+                            }
+                            .pilotCard()
+                        }
                     }
                     .frame(maxWidth: 560)
                     .padding(24)
@@ -1595,11 +1910,21 @@ private struct NowPlayingView: View {
             }
             .onAppear {
                 volume = Double(state?.effective.volumePercent ?? 30)
+                position = state?.effective.positionSeconds ?? 0
             }
             .onChange(of: model.selectedRoomID) {
                 volume = Double(state?.effective.volumePercent ?? 30)
+                position = state?.effective.positionSeconds ?? 0
+            }
+            .onChange(of: state?.effective.positionSeconds) { _, value in
+                position = value ?? 0
             }
         }
+    }
+
+    private static func duration(_ seconds: Double) -> String {
+        let value = max(0, Int(seconds))
+        return String(format: "%d:%02d", value / 60, value % 60)
     }
 }
 
@@ -1616,7 +1941,11 @@ private struct MiniPlayerBar: View {
                     showingNowPlaying = true
                 } label: {
                     HStack(spacing: 11) {
-                        ArtworkTile(media: state.effective.media, size: 42)
+                        ArtworkTile(
+                            media: state.effective.media,
+                            size: 42,
+                            artworkURL: state.effective.artworkURL.flatMap(URL.init(string:))
+                        )
                         VStack(alignment: .leading, spacing: 2) {
                             Text(state.effective.media?.title ?? state.player.name)
                                 .font(.subheadline.weight(.semibold))
@@ -1775,6 +2104,9 @@ private struct SettingsView: View {
 
 private struct OnboardingView: View {
     @Environment(PilotModel.self) private var model
+    @State private var pairingCode = ""
+    @State private var showingScanner = false
+    @State private var pairingFailed = false
 
     var body: some View {
         NavigationStack {
@@ -1801,6 +2133,61 @@ private struct OnboardingView: View {
                             OnboardingFeature(symbol: "waveform", title: "Contextual")
                         }
 
+                        VStack(alignment: .leading, spacing: 14) {
+                            SectionTitle(
+                                eyebrow: "RECOMMENDED",
+                                title: "Pair this device",
+                                trailing: "Single-use and revocable"
+                            )
+                            Text("Scan the QR code from Pilot Core, or paste its one-time pairing code. Your device credential is only saved after Core authenticates it.")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                            TextField("Pairing code", text: $pairingCode)
+                                .textInputAutocapitalization(.never)
+                                .autocorrectionDisabled()
+                                .textContentType(.oneTimeCode)
+                                .padding(14)
+                                .background(Color.black.opacity(0.20), in: RoundedRectangle(cornerRadius: 14))
+                            HStack(spacing: 10) {
+                                Button {
+                                    showingScanner = true
+                                } label: {
+                                    Label("Scan QR code", systemImage: "qrcode.viewfinder")
+                                        .frame(maxWidth: .infinity)
+                                }
+                                .buttonStyle(.bordered)
+                                .disabled(!DataScannerViewController.isSupported)
+
+                                Button {
+                                    Task {
+                                        pairingFailed = !(await model.pair(using: pairingCode))
+                                    }
+                                } label: {
+                                    HStack {
+                                        if model.isRefreshing { ProgressView().controlSize(.small) }
+                                        Text("Pair securely")
+                                    }
+                                    .frame(maxWidth: .infinity)
+                                }
+                                .buttonStyle(.borderedProminent)
+                                .disabled(pairingCode.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || model.isRefreshing)
+                            }
+                            if pairingFailed {
+                                Label(model.status, systemImage: "exclamationmark.triangle.fill")
+                                    .font(.caption)
+                                    .foregroundStyle(PilotTheme.amber)
+                            }
+                        }
+                        .pilotCard()
+
+                        HStack {
+                            Rectangle().fill(PilotTheme.border).frame(height: 1)
+                            Text("OR ENTER EXISTING CREDENTIALS")
+                                .font(.caption2.weight(.bold))
+                                .foregroundStyle(.secondary)
+                            Rectangle().fill(PilotTheme.border).frame(height: 1)
+                        }
+
                         SettingsView(isInitialSetup: true)
                             .frame(minHeight: 430)
                             .background(Color.clear)
@@ -1809,6 +2196,82 @@ private struct OnboardingView: View {
                     .padding(20)
                     .frame(maxWidth: .infinity)
                 }
+            }
+        }
+        .sheet(isPresented: $showingScanner) {
+            NavigationStack {
+                PairingScanner { code in
+                    pairingCode = code
+                    showingScanner = false
+                    Task {
+                        pairingFailed = !(await model.pair(using: code))
+                    }
+                }
+                .ignoresSafeArea(edges: .bottom)
+                .navigationTitle("Scan Pilot pairing code")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button("Cancel") { showingScanner = false }
+                    }
+                }
+            }
+        }
+    }
+}
+
+private struct PairingScanner: UIViewControllerRepresentable {
+    let onCode: (String) -> Void
+
+    func makeCoordinator() -> Coordinator { Coordinator(onCode: onCode) }
+
+    func makeUIViewController(context: Context) -> DataScannerViewController {
+        let scanner = DataScannerViewController(
+            recognizedDataTypes: [.barcode(symbologies: [.qr])],
+            qualityLevel: .balanced,
+            recognizesMultipleItems: false,
+            isHighFrameRateTrackingEnabled: false,
+            isPinchToZoomEnabled: true,
+            isGuidanceEnabled: true,
+            isHighlightingEnabled: true
+        )
+        scanner.delegate = context.coordinator
+        return scanner
+    }
+
+    func updateUIViewController(_ scanner: DataScannerViewController, context: Context) {
+        guard !scanner.isScanning else { return }
+        try? scanner.startScanning()
+    }
+
+    static func dismantleUIViewController(
+        _ scanner: DataScannerViewController,
+        coordinator: Coordinator
+    ) {
+        scanner.stopScanning()
+    }
+
+    final class Coordinator: NSObject, DataScannerViewControllerDelegate {
+        let onCode: (String) -> Void
+        private var accepted = false
+
+        init(onCode: @escaping (String) -> Void) {
+            self.onCode = onCode
+        }
+
+        func dataScanner(
+            _ dataScanner: DataScannerViewController,
+            didAdd addedItems: [RecognizedItem],
+            allItems: [RecognizedItem]
+        ) {
+            guard !accepted else { return }
+            for item in addedItems {
+                guard case let .barcode(code) = item, let value = code.payloadStringValue else {
+                    continue
+                }
+                accepted = true
+                onCode(value)
+                return
             }
         }
     }
@@ -2015,6 +2478,7 @@ private struct ListeningOrb: View {
 private struct ArtworkTile: View {
     let media: CurrentMedia?
     let size: CGFloat
+    var artworkURL: URL? = nil
 
     var body: some View {
         ZStack {
@@ -2036,6 +2500,14 @@ private struct ArtworkTile: View {
             Image(systemName: media == nil ? "music.note" : "waveform")
                 .font(.system(size: size * 0.26, weight: .bold))
                 .foregroundStyle(.white.opacity(0.92))
+            if let url = artworkURL ?? media?.artworkURL.flatMap(URL.init(string:)) {
+                AsyncImage(url: url) { phase in
+                    if case let .success(image) = phase {
+                        image.resizable().scaledToFill()
+                    }
+                }
+                .clipShape(RoundedRectangle(cornerRadius: size * 0.20, style: .continuous))
+            }
         }
         .frame(width: size, height: size)
         .accessibilityHidden(true)

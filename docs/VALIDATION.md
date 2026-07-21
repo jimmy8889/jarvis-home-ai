@@ -1,5 +1,43 @@
 # Validation and acceptance tests
 
+Validation is intentionally split into three evidence classes:
+
+- **source tested**: automated contract, unit, lint and build checks pass;
+- **deployed healthy**: the promoted release passes backup, readiness,
+  authentication, persistence and rollback checks on its target host;
+- **physically accepted**: a person has observed the actual microphone,
+  speakers, touch/focus surfaces, display and media equipment.
+
+A source build must not be reported as a deployed or physically accepted
+capability.
+
+## Stage 0: product-contract validation
+
+Before deployment, run the same service checks as CI:
+
+```bash
+python -m unittest discover -s apps/pilot-core/tests -v
+PYTHONPATH=apps/display-node \
+  python -m unittest discover -s apps/display-node/tests -v
+python -m unittest discover -s apps/room-agent/tests -v
+node --check apps/display-node/pilot_display_node/static/app.js
+for schema in packages/event-schema/*.json; do
+  python -m json.tool "$schema" >/dev/null
+done
+```
+
+The Core product-contract suite must cover:
+
+- device-scoped manifest, snapshot, energy and feature gates;
+- persistent presentation policy and inferred-room mutation rejection;
+- resumable events and snapshot recovery;
+- single-use pairing, credential rotation and revocation;
+- typed media commands and structured assistant output.
+
+Android wall, Shield TV and iOS test/build gates are defined in
+`.github/workflows/ci.yml`. A successful simulator/emulator build proves source
+compatibility only; it does not replace phone, tablet or Shield acceptance.
+
 ## Stage 1: device visibility
 
 Run `sudo pilot-hardware-inventory`. Confirm that the microphone and output
@@ -57,6 +95,11 @@ Faster Whisper transcript, 16 kHz mono 16-bit PCM, and at least 0.8 word
 coverage. It is silent and does not test the room microphone, speaker, wake
 word, or acoustics.
 
+This validates whichever private speech pipeline is currently configured. The
+planned dedicated production Whisper deployment on the RTX 3080 remains
+deferred until that GPU is installed. Do not point meeting processing at an
+unverified endpoint and do not treat an Ollama text-model endpoint as Whisper.
+
 For the supervised production acceptance, create the one-hour arming receipt:
 
 ```bash
@@ -101,6 +144,35 @@ Confirm it succeeds, then send `cancel`. Defer pause, playback, volume, and
 announcement commands until someone can observe the physical room. Repeating a
 completed command ID through reconnect testing must return the journaled result
 without executing the action twice.
+
+## Stage 6: client pairing and product acceptance
+
+For each iOS, Android, Shield or Linux display identity:
+
+1. create a room- and profile-bound single-use grant in the dashboard and
+   verify its QR and copyable code are present;
+2. redeem it once and confirm that a second redemption fails;
+3. confirm the manifest exposes only the intended capabilities and endpoints;
+4. restart the client and verify encrypted credential persistence;
+5. exercise event reconnect, cursor recovery and stale-state presentation;
+6. rotate the credential where the client supports self-rotation, then verify
+   the old token fails;
+7. revoke the device in Core and verify further requests fail;
+8. repeat with the real input/output hardware and record physical acceptance.
+
+Home controls require an additional check: an entity with an inferred room may
+be displayed read-only, but its mutation must return `403`. Promote the mapping
+through the Home Assistant registry or an explicit administrator presentation
+override, then verify only its returned typed actions become usable.
+
+## Stage 7: deployment promotion
+
+Before promoting Core, create and verify the documented cold backup. After
+deployment, check LAN readiness, authenticated manifest/snapshot access,
+invalid-token rejection, event persistence across container restart, pairing
+grant expiry/single use and the entity-presentation editor. Retain the previous
+immutable image and restore procedure until the release has completed its
+physical acceptance window.
 
 ## Troubleshooting evidence
 

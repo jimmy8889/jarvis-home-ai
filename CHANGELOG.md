@@ -1,5 +1,50 @@
 # Changelog
 
+## 0.25.0 — 2026-07-22
+
+- Added the versioned Pilot client product contract: the device-scoped
+  `pilot.client.v1` manifest, recoverable `pilot.snapshot.v1` product snapshot,
+  `pilot.*.v1` client events, cursor-based long polling and an authenticated
+  resumable WebSocket stream. Added JSON Schemas and representative fixtures.
+- Added persistent, explainable Home Assistant presentation policy. Automatic,
+  include and exclude decisions now carry reasons, category, priority, section,
+  semantic control, supported actions, canonical/duplicate identity and room
+  trust. Registry and explicit room mappings may authorize typed actions;
+  inferred mappings remain read-only and fail closed for mutations.
+- Added administrator presentation review/editing and pairing profiles to the
+  Core dashboard. Pairing grants are short-lived, room/profile-bound and
+  single-use, with a locally generated scan-to-pair QR; the dashboard never
+  reveals an existing device or provider credential.
+- Added device credential revision, self-rotation, administrator rotation and
+  revocation. Rotation invalidates the old token and closes the corresponding
+  live device channel.
+- Expanded device-scoped media with normalized artwork, progress, queue and
+  grouping state plus permissioned previous, next, seek, mute, group, ungroup
+  and transfer commands. Expanded assistant responses with a stable
+  `pilot.assistant.v1` envelope, cards, citations and action results.
+- Reworked Pilot TV from an administrator operations viewer into a scoped
+  media-room client with Android-Keystore credentials, one-time pairing,
+  now-playing/progress/queue, room outputs, energy, curated home glance, typed
+  media controls, credential rotation and Jellyfin/Kodi launch actions.
+- Polished the iOS/iPadOS client around one-time pairing, manifest/snapshot and
+  resumable events, curated home and energy state, richer media control,
+  structured assistant results, durable last-known state and retained meeting
+  upload retry behavior.
+- Polished the Android wall client with one-time pairing, Keystore credentials,
+  resumable event refresh, curated typed room controls, push-to-talk and local
+  response-audio playback, richer media controls, ambient mode, previews and a
+  screenshot-test scaffold.
+- Added a reusable Linux `media-console` display mode, selected-output
+  persistence, stale-state presentation, progress/queue hints, a touch search
+  keyboard and assistant-completion overlays through the loopback event proxy.
+- Extended CI to test the display service, validate display JavaScript and all
+  product schema JSON, and run the iOS test target on an available simulator.
+- Updated product and operations documentation to separate source-tested,
+  deployed-healthy and physically accepted capabilities. This source release
+  still requires normal Core promotion and real phone/tablet/Shield/Pi/N150
+  acceptance. Dedicated production Whisper deployment remains deferred until
+  the RTX 3080 is installed.
+
 ## 2026-07-20
 
 - Added Pilot Core 0.20's persistent Home Assistant intelligence catalogue.

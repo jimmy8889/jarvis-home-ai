@@ -38,7 +38,8 @@ body {
 }
 
 button,
-input {
+input,
+select {
   font: inherit;
 }
 
@@ -144,6 +145,11 @@ a {
 
 .button:focus-visible,
 input:focus-visible {
+  outline: 2px solid var(--mint);
+  outline-offset: 3px;
+}
+
+select:focus-visible {
   outline: 2px solid var(--mint);
   outline-offset: 3px;
 }
@@ -361,6 +367,91 @@ h2 {
 
 .dashboard {
   animation: reveal 360ms ease both;
+}
+
+.pairing-panel {
+  display: grid;
+  gap: 20px;
+}
+
+.pairing-form {
+  align-items: end;
+  display: grid;
+  gap: 14px;
+  grid-template-columns: minmax(180px, 1.2fr) minmax(180px, 1fr) minmax(150px, .8fr) minmax(170px, .9fr) auto;
+}
+
+.pairing-form label {
+  display: grid;
+  gap: 8px;
+}
+
+.pairing-form label > span {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.pairing-form input,
+.pairing-form select {
+  min-height: 44px;
+  padding: 0 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: 11px;
+  color: var(--text);
+  background: #07110f;
+}
+
+.pairing-result {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 18px;
+  border: 1px solid rgba(134, 241, 196, .27);
+  border-radius: 15px;
+  background: rgba(134, 241, 196, .055);
+}
+
+.pairing-result img {
+  width: 168px;
+  height: 168px;
+  padding: 8px;
+  border-radius: 18px;
+  background: #fff;
+  image-rendering: pixelated;
+}
+
+.pairing-result code {
+  display: block;
+  max-width: min(860px, 70vw);
+  overflow-wrap: anywhere;
+  color: var(--mint);
+  font-family: var(--mono);
+  font-size: 16px;
+  line-height: 1.5;
+  user-select: all;
+}
+
+.pairing-result .eyebrow {
+  margin-bottom: 7px;
+}
+
+.pairing-result .panel-copy {
+  margin: 7px 0 0;
+}
+
+.pairing-note {
+  margin: 0;
+}
+
+@media (max-width: 1180px) {
+  .pairing-form {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 @keyframes reveal {
@@ -615,7 +706,7 @@ h2 {
 }
 
 .entity-result {
-  align-items: center;
+  align-items: start;
   border-top: 1px solid var(--line);
   display: flex;
   gap: 12px;
@@ -626,6 +717,39 @@ h2 {
 .entity-result strong,
 .entity-result small {
   display: block;
+}
+
+.entity-result > div:first-child {
+  min-width: 0;
+}
+
+.entity-explanation {
+  max-width: 520px;
+  white-space: normal;
+}
+
+.entity-state-column {
+  align-items: flex-end;
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+  max-width: 270px;
+}
+
+.entity-policy-actions {
+  display: flex;
+  gap: 5px;
+  width: 100%;
+  justify-content: flex-end;
+}
+
+.button-tiny {
+  min-height: 27px;
+  padding: 0 9px;
+  border-radius: 9px;
+  font-size: 10px;
 }
 
 .entity-result strong {

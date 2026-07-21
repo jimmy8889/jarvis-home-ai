@@ -1,6 +1,6 @@
 import Foundation
 
-struct PilotRoom: Codable, Identifiable, Hashable {
+struct PilotRoom: Codable, Identifiable, Hashable, Sendable {
     let id: String
     let name: String
     let responsePlayerID: String
@@ -14,7 +14,7 @@ struct PilotRoom: Codable, Identifiable, Hashable {
     }
 }
 
-struct PilotPlayer: Codable, Identifiable, Hashable {
+struct PilotPlayer: Codable, Identifiable, Hashable, Sendable {
     let id: String
     let roomID: String
     let name: String
@@ -31,7 +31,7 @@ struct PilotPlayer: Codable, Identifiable, Hashable {
     }
 }
 
-struct DeviceMediaEnvelope: Codable {
+struct DeviceMediaEnvelope: Codable, Sendable {
     let deviceID: String
     let roomID: String
     let rooms: [PilotRoom]
@@ -44,7 +44,7 @@ struct DeviceMediaEnvelope: Codable {
     }
 }
 
-struct MediaSnapshot: Codable {
+struct MediaSnapshot: Codable, Sendable {
     let observedAt: String
     let players: [String: PilotPlayerState]
 
@@ -54,15 +54,16 @@ struct MediaSnapshot: Codable {
     }
 }
 
-struct PilotPlayerState: Codable, Identifiable {
+struct PilotPlayerState: Codable, Identifiable, Hashable, Sendable {
     let player: PilotPlayer
     let status: String
     let effective: EffectiveMediaState
+    let capabilities: MediaCapabilities?
 
     var id: String { player.id }
 }
 
-struct EffectiveMediaState: Codable {
+struct EffectiveMediaState: Codable, Hashable, Sendable {
     let available: Bool?
     let powered: Bool?
     let playbackState: String?
@@ -70,34 +71,217 @@ struct EffectiveMediaState: Codable {
     let muted: Bool?
     let source: String?
     let media: CurrentMedia?
+    let positionSeconds: Double?
+    let durationSeconds: Double?
+    let capabilities: [String]?
+    let artworkURL: String?
+    let queue: MediaQueue?
+    let group: MediaGroup?
 
     enum CodingKeys: String, CodingKey {
         case available, powered, muted, source, media
         case playbackState = "playback_state"
         case volumePercent = "volume_percent"
+        case positionSeconds = "position_seconds"
+        case durationSeconds = "duration_seconds"
+        case artworkURL = "artwork_url"
+        case capabilities, queue, group
+    }
+
+    init(
+        available: Bool?,
+        powered: Bool?,
+        playbackState: String?,
+        volumePercent: Int?,
+        muted: Bool?,
+        source: String?,
+        media: CurrentMedia?,
+        positionSeconds: Double? = nil,
+        durationSeconds: Double? = nil,
+        capabilities: [String]? = nil,
+        artworkURL: String? = nil,
+        queue: MediaQueue? = nil,
+        group: MediaGroup? = nil
+    ) {
+        self.available = available
+        self.powered = powered
+        self.playbackState = playbackState
+        self.volumePercent = volumePercent
+        self.muted = muted
+        self.source = source
+        self.media = media
+        self.positionSeconds = positionSeconds
+        self.durationSeconds = durationSeconds
+        self.capabilities = capabilities
+        self.artworkURL = artworkURL
+        self.queue = queue
+        self.group = group
     }
 }
 
-struct CurrentMedia: Codable, Hashable {
+struct MediaCapabilities: Codable, Hashable, Sendable {
+    let actions: [String]
+    let transport: Bool?
+    let volume: Bool?
+    let seek: Bool?
+    let transfer: Bool?
+    let grouping: Bool?
+}
+
+struct MediaQueue: Codable, Hashable, Sendable {
+    let status: String?
+    let index: Int?
+    let items: [MediaQueueItem]
+    let truncated: Bool?
+}
+
+struct CurrentMedia: Codable, Hashable, Sendable {
     let title: String?
     let artist: String?
     let album: String?
+    let uri: String?
+    let artworkURL: String?
+
+    enum CodingKeys: String, CodingKey {
+        case title, artist, album, uri
+        case artworkURL = "artwork_url"
+    }
+
+    init(
+        title: String?,
+        artist: String?,
+        album: String?,
+        uri: String? = nil,
+        artworkURL: String? = nil
+    ) {
+        self.title = title
+        self.artist = artist
+        self.album = album
+        self.uri = uri
+        self.artworkURL = artworkURL
+    }
 }
 
-struct AssistantReply: Codable {
+struct MediaQueueItem: Codable, Identifiable, Hashable, Sendable {
+    let id: String
+    let title: String
+    let artist: String?
+    let album: String?
+    let uri: String?
+    let artworkURL: String?
+    let artwork: MediaArtwork?
+    let isCurrent: Bool?
+
+    enum CodingKeys: String, CodingKey {
+        case id, title, artist, album, uri, artwork
+        case artworkURL = "artwork_url"
+        case isCurrent = "is_current"
+    }
+
+    var resolvedArtworkURL: URL? {
+        (artworkURL ?? artwork?.proxyURL ?? artwork?.sourceURL).flatMap(URL.init(string:))
+    }
+}
+
+struct MediaArtwork: Codable, Hashable, Sendable {
+    let available: Bool?
+    let sourceURL: String?
+    let proxyURL: String?
+
+    enum CodingKeys: String, CodingKey {
+        case available
+        case sourceURL = "source_url"
+        case proxyURL = "proxy_url"
+    }
+}
+
+struct MediaGroup: Codable, Hashable, Sendable {
+    let id: String?
+    let name: String?
+    let playerIDs: [String]
+
+    enum CodingKeys: String, CodingKey {
+        case id, name
+        case playerIDs = "player_ids"
+    }
+}
+
+struct AssistantReply: Codable, Sendable {
     let responseText: String
     let conversationID: String
     let provider: String
     let continueConversation: Bool
     let roomID: String
+    let status: String?
+    let result: JSONValue?
+    let toolCalls: [AssistantToolCall]?
+    let cards: [AssistantCard]?
+    let sources: [AssistantSource]?
+    let actions: [AssistantAction]?
 
     enum CodingKeys: String, CodingKey {
-        case provider
+        case provider, status, result, cards, sources, actions
         case responseText = "response_text"
         case conversationID = "conversation_id"
         case continueConversation = "continue_conversation"
         case roomID = "room_id"
+        case toolCalls = "tool_calls"
     }
+}
+
+struct AssistantToolCall: Codable, Identifiable, Hashable, Sendable {
+    let id: String?
+    let name: String
+    let status: String?
+    let arguments: JSONValue?
+    let result: JSONValue?
+
+    var stableID: String { id ?? "\(name)-\(status ?? "complete")" }
+
+    enum CodingKeys: String, CodingKey {
+        case id, name, status, arguments
+        case result = "output"
+    }
+}
+
+struct AssistantCard: Codable, Identifiable, Hashable, Sendable {
+    let id: String
+    let kind: String
+    let title: String
+    let subtitle: String?
+    let symbol: String?
+    let values: [String: JSONValue]?
+}
+
+struct AssistantSource: Codable, Identifiable, Hashable, Sendable {
+    let kind: String?
+    let meetingID: String?
+    let segmentID: String?
+    let startMS: Int?
+    let label: String?
+    let tool: String?
+    let url: String?
+
+    var id: String {
+        [meetingID, segmentID, tool, label].compactMap { $0 }.joined(separator: ":")
+    }
+    var title: String { label ?? tool?.replacingOccurrences(of: "_", with: " ").capitalized ?? "Source" }
+
+    enum CodingKeys: String, CodingKey {
+        case kind, label, tool, url
+        case meetingID = "meeting_id"
+        case segmentID = "segment_id"
+        case startMS = "start_ms"
+    }
+}
+
+struct AssistantAction: Codable, Identifiable, Hashable, Sendable {
+    let id: String
+    let name: String
+    let status: String?
+    let arguments: JSONValue?
+
+    var title: String { name.replacingOccurrences(of: "_", with: " ").capitalized }
 }
 
 struct ChatMessage: Identifiable, Hashable {
@@ -106,19 +290,34 @@ struct ChatMessage: Identifiable, Hashable {
     let text: String
     let createdAt: Date
     let isError: Bool
+    let provider: String?
+    let cards: [AssistantCard]
+    let sources: [AssistantSource]
+    let actions: [AssistantAction]
+    let toolCalls: [AssistantToolCall]
 
     init(
         id: UUID = UUID(),
         role: Role,
         text: String,
         createdAt: Date = .now,
-        isError: Bool = false
+        isError: Bool = false,
+        provider: String? = nil,
+        cards: [AssistantCard] = [],
+        sources: [AssistantSource] = [],
+        actions: [AssistantAction] = [],
+        toolCalls: [AssistantToolCall] = []
     ) {
         self.id = id
         self.role = role
         self.text = text
         self.createdAt = createdAt
         self.isError = isError
+        self.provider = provider
+        self.cards = cards
+        self.sources = sources
+        self.actions = actions
+        self.toolCalls = toolCalls
     }
 
     enum Role: Hashable {
@@ -167,7 +366,7 @@ enum MusicResultKind: String, Hashable, CaseIterable {
     }
 }
 
-struct EnergySnapshot: Equatable {
+struct EnergySnapshot: Codable, Equatable, Sendable {
     let status: Status
     let solarWatts: Double?
     let gridWatts: Double?
@@ -177,7 +376,7 @@ struct EnergySnapshot: Equatable {
     let observedAt: Date?
     let detail: String?
 
-    enum Status: Equatable {
+    enum Status: String, Codable, Equatable, Sendable {
         case live
         case stale
         case unavailable
@@ -197,6 +396,60 @@ struct EnergySnapshot: Equatable {
     var isPopulated: Bool {
         [solarWatts, gridWatts, batteryWatts, batteryStateOfCharge, homeLoadWatts]
             .contains { $0 != nil }
+    }
+}
+
+struct EnergyEnvelope: Codable, Sendable {
+    let status: String
+    let solar: EnergyMeasurement?
+    let grid: EnergyMeasurement?
+    let battery: EnergyMeasurement?
+    let batterySOC: EnergyMeasurement?
+    let homeLoad: EnergyMeasurement?
+    let detail: String?
+
+    enum CodingKeys: String, CodingKey {
+        case status, solar, grid, battery, detail
+        case batterySOC = "battery_soc"
+        case homeLoad = "home_load"
+    }
+
+    var snapshot: EnergySnapshot {
+        let dates = [solar, grid, battery, batterySOC, homeLoad]
+            .compactMap { $0?.observedDate }
+        let mappedStatus: EnergySnapshot.Status
+        switch status.lowercased() {
+        case "ok", "live": mappedStatus = .live
+        case "partial", "stale": mappedStatus = .stale
+        default: mappedStatus = .unavailable
+        }
+        return EnergySnapshot(
+            status: mappedStatus,
+            solarWatts: solar?.value,
+            gridWatts: grid?.value,
+            batteryWatts: battery?.value,
+            batteryStateOfCharge: batterySOC?.value,
+            homeLoadWatts: homeLoad?.value,
+            observedAt: dates.max(),
+            detail: detail
+        )
+    }
+}
+
+struct EnergyMeasurement: Codable, Sendable {
+    let value: Double?
+    let unit: String?
+    let observedAt: String?
+    let direction: String?
+
+    enum CodingKeys: String, CodingKey {
+        case value, unit, direction
+        case observedAt = "observed_at"
+    }
+
+    var observedDate: Date? {
+        guard let observedAt else { return nil }
+        return ISO8601DateFormatter().date(from: observedAt)
     }
 }
 
@@ -228,6 +481,10 @@ struct MediaCommand: Encodable {
     var targetPlayerID: String?
     var volume: Int?
     var source: String?
+    var positionSeconds: Double? = nil
+    var muted: Bool? = nil
+    var shuffle: Bool? = nil
+    var repeatMode: String? = nil
 
     enum CodingKeys: String, CodingKey {
         case action, volume, source
@@ -235,6 +492,9 @@ struct MediaCommand: Encodable {
         case mediaURI = "media_uri"
         case targetRoomID = "target_room_id"
         case targetPlayerID = "target_player_id"
+        case positionSeconds = "position_seconds"
+        case repeatMode = "repeat_mode"
+        case muted, shuffle
     }
 }
 
@@ -271,6 +531,10 @@ enum JSONValue: Codable, Hashable, Sendable {
     var number: Double? {
         if case let .number(value) = self { value } else { nil }
     }
+
+    var string: String? {
+        if case let .string(value) = self { value } else { nil }
+    }
 }
 
 struct HomeRoom: Codable, Hashable, Sendable {
@@ -297,9 +561,10 @@ struct HomeEntity: Codable, Identifiable, Hashable, Sendable {
     let stale: Bool
     let observedAt: String?
     let actions: [String]
+    let presentation: HomeEntityPresentation?
 
     enum CodingKeys: String, CodingKey {
-        case domain, name, state, attributes, availability, unavailable, stale, actions
+        case domain, name, state, attributes, availability, unavailable, stale, actions, presentation
         case entityID = "entity_id"
         case areaID = "area_id"
         case observedAt = "observed_at"
@@ -313,6 +578,41 @@ struct HomeEntity: Codable, Identifiable, Hashable, Sendable {
     var brightnessPercent: Double? {
         attributes["brightness"]?.number.map { min(max($0 / 255 * 100, 0), 100) }
     }
+
+    var displayName: String { presentation?.displayName ?? name }
+    var displayActions: [String] { presentation?.supportedActions ?? actions }
+    var displayPriority: Int { presentation?.priority ?? 100 }
+    var displaySection: String { presentation?.section ?? domain }
+    var shouldDisplay: Bool { presentation?.included ?? true }
+}
+
+struct HomeEntityPresentation: Codable, Hashable, Sendable {
+    let exposurePolicy: String?
+    let included: Bool?
+    let reason: String?
+    let category: String?
+    let priority: Int?
+    let room: HomeRoomTrust?
+    let supportedActions: [String]?
+    let canonicalID: String?
+    let duplicateOf: String?
+    let displayName: String?
+    let icon: String?
+    let section: String?
+
+    enum CodingKeys: String, CodingKey {
+        case included, reason, category, priority, room, icon, section
+        case exposurePolicy = "exposure_policy"
+        case supportedActions = "supported_actions"
+        case canonicalID = "canonical_id"
+        case duplicateOf = "duplicate_of"
+        case displayName = "display_name"
+    }
+}
+
+struct HomeRoomTrust: Codable, Hashable, Sendable {
+    let trust: String?
+    let authoritative: Bool?
 }
 
 struct HomeProjection: Codable, Sendable {
@@ -501,5 +801,63 @@ struct MeetingActionItem: Codable, Identifiable, Hashable, Sendable {
         case id, task, owner, status, confidence
         case dueAt = "due_at"
         case segmentIDs = "segment_ids"
+    }
+}
+
+struct PendingMeetingRecording: Codable, Identifiable, Hashable, Sendable {
+    let id: String
+    let meetingID: String
+    let title: String
+    let recordingPath: String
+    var state: State
+    var uploadComplete: Bool
+    var failureMessage: String?
+    var updatedAt: Date
+
+    enum State: String, Codable, Sendable {
+        case ready
+        case uploading
+        case processing
+        case failed
+    }
+
+    var recordingURL: URL { URL(fileURLWithPath: recordingPath) }
+}
+
+struct BootstrapCredentials: Codable, Sendable {
+    let deviceID: String
+    let deviceToken: String
+
+    enum CodingKeys: String, CodingKey {
+        case deviceID = "device_id"
+        case deviceToken = "device_token"
+    }
+}
+
+struct PilotClientManifest: Codable, Sendable {
+    let schemaVersion: String
+    let coreVersion: String?
+    let features: [String: Bool]
+    let endpoints: [String: String]
+
+    enum CodingKeys: String, CodingKey {
+        case features, endpoints
+        case schemaVersion = "schema_version"
+        case coreVersion = "core_version"
+    }
+}
+
+struct PilotClientEvent: Codable, Sendable {
+    let id: String?
+    let type: String
+    let revision: Int?
+    let roomID: String?
+    let payload: JSONValue?
+    let occurredAt: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, type, revision, payload
+        case roomID = "room_id"
+        case occurredAt = "occurred_at"
     }
 }

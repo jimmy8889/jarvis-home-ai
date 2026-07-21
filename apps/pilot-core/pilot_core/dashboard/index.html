@@ -115,6 +115,57 @@
           </article>
         </section>
 
+        <section class="section-block" aria-labelledby="pairing-title">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Device trust</p>
+              <h2 id="pairing-title">Pair a Pilot surface</h2>
+            </div>
+            <span class="status-pill status-good">
+              <span class="status-dot"></span>
+              Single use
+            </span>
+          </div>
+          <article class="panel pairing-panel">
+            <form id="pairing-form" class="pairing-form">
+              <label>
+                <span>Device name</span>
+                <input id="pairing-name" type="text" value="Media Room Pilot TV" maxlength="200" required>
+              </label>
+              <label>
+                <span>Device ID</span>
+                <input id="pairing-device-id" type="text" value="pilot-tv-media-room" pattern="[a-z0-9-]+" maxlength="128" required>
+              </label>
+              <label>
+                <span>Room</span>
+                <select id="pairing-room" required></select>
+              </label>
+              <label>
+                <span>Capability profile</span>
+                <select id="pairing-profile">
+                  <option value="tv">Media-room TV</option>
+                  <option value="wall">Wall tablet</option>
+                  <option value="personal">Personal phone</option>
+                  <option value="display">Read-only display</option>
+                </select>
+              </label>
+              <button class="button button-primary" type="submit">Create pairing code</button>
+            </form>
+            <div id="pairing-result" class="pairing-result" hidden>
+              <img id="pairing-qr" alt="Scan this one-time Pilot pairing code">
+              <div>
+                <span class="eyebrow">One-time code</span>
+                <code id="pairing-code"></code>
+                <p id="pairing-expiry" class="panel-copy"></p>
+              </div>
+              <button id="pairing-copy" class="button button-quiet" type="button">Copy code</button>
+            </div>
+            <p class="panel-copy pairing-note">
+              The code expires quickly and can be redeemed once. The resulting device credential is narrowly scoped, independently revocable, and never exposes Home Assistant, Music Assistant, or administrator secrets.
+            </p>
+          </article>
+        </section>
+
         <section class="section-block" aria-labelledby="home-intelligence-title">
           <div class="section-heading">
             <div>

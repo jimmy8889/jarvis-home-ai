@@ -10,6 +10,7 @@ import secrets
 import time
 from typing import Any, Literal
 
+import segno
 from fastapi import (
     BackgroundTasks,
     Depends,
@@ -80,6 +81,40 @@ class DeviceCapabilitiesUpdate(BaseModel):
     capabilities: list[str] = Field(max_length=100)
 
 
+class HomeEntityPresentationUpdate(BaseModel):
+    exposure_policy: Literal["automatic", "include", "exclude"] | None = None
+    reason: str | None = Field(default=None, max_length=300)
+    category: str | None = Field(default=None, max_length=64)
+    priority: int | None = Field(default=None, ge=0, le=100)
+    room_id: str | None = Field(default=None, max_length=128)
+    display_name: str | None = Field(default=None, max_length=200)
+    icon: str | None = Field(default=None, max_length=100)
+    section: str | None = Field(default=None, max_length=100)
+    control: str | None = Field(default=None, max_length=64)
+    canonical_id: str | None = Field(default=None, max_length=255)
+    duplicate_of: str | None = Field(default=None, max_length=255)
+
+    @model_validator(mode="after")
+    def normalize_empty_strings(self) -> "HomeEntityPresentationUpdate":
+        for field in (
+            "reason",
+            "category",
+            "room_id",
+            "display_name",
+            "icon",
+            "section",
+            "control",
+            "canonical_id",
+            "duplicate_of",
+        ):
+            value = getattr(self, field)
+            if isinstance(value, str) and not value.strip():
+                setattr(self, field, None)
+            elif isinstance(value, str):
+                setattr(self, field, value.strip())
+        return self
+
+
 class EventInput(BaseModel):
     room_id: str
     type: str = Field(min_length=1, max_length=100)
@@ -93,6 +128,18 @@ class MediaCommand(BaseModel):
     target_player_id: str | None = None
     volume: int | None = Field(default=None, ge=0, le=100)
     source: str | None = Field(default=None, min_length=1, max_length=200)
+    position_seconds: float | None = Field(default=None, ge=0, le=604_800)
+    muted: bool | None = None
+
+    @model_validator(mode="after")
+    def validate_typed_media_fields(self) -> "MediaCommand":
+        if self.action == "seek" and self.position_seconds is None:
+            raise ValueError("position_seconds is required for seek")
+        if self.action == "mute" and self.muted is None:
+            raise ValueError("muted is required for mute")
+        if self.action == "group" and not self.target_player_id:
+            raise ValueError("target_player_id is required for group")
+        return self
 
 
 class AssistantRequest(BaseModel):
@@ -253,6 +300,12 @@ class RoomMediaCommand(BaseModel):
         "play",
         "pause",
         "stop",
+        "next",
+        "previous",
+        "seek",
+        "mute",
+        "group",
+        "ungroup",
         "set_volume",
         "play_media",
         "transfer",
@@ -266,6 +319,8 @@ class RoomMediaCommand(BaseModel):
     target_player_id: str | None = None
     volume: int | None = Field(default=None, ge=0, le=100)
     source: str | None = Field(default=None, min_length=1, max_length=200)
+    position_seconds: float | None = Field(default=None, ge=0, le=604_800)
+    muted: bool | None = None
 
     @model_validator(mode="after")
     def validate_action_fields(self) -> "RoomMediaCommand":
@@ -275,8 +330,14 @@ class RoomMediaCommand(BaseModel):
             raise ValueError("media_uri is required for play_media")
         if self.action == "transfer" and not self.target_room_id:
             raise ValueError("target_room_id is required for transfer")
+        if self.action == "group" and not self.target_room_id:
+            raise ValueError("target_room_id is required for group")
         if self.action == "select_source" and not self.source:
             raise ValueError("source is required for select_source")
+        if self.action == "seek" and self.position_seconds is None:
+            raise ValueError("position_seconds is required for seek")
+        if self.action == "mute" and self.muted is None:
+            raise ValueError("muted is required for mute")
         return self
 
 
@@ -427,6 +488,15 @@ class DeviceHub:
         async with self.lock:
             return set(self.connections)
 
+    async def close(self, device_id: str, reason: str) -> None:
+        async with self.lock:
+            connection = self.connections.pop(device_id, None)
+        if connection is not None:
+            try:
+                await connection.socket.close(code=1008, reason=reason)
+            except Exception:
+                pass
+
 
 def _bearer(authorization: str | None) -> str:
     if not authorization or not authorization.startswith("Bearer "):
@@ -572,6 +642,149 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
         if device is None:
             raise HTTPException(status_code=404, detail="device not found")
         return device
+
+    def device_features(device: dict[str, Any]) -> dict[str, bool]:
+        capabilities = set(device["capabilities"])
+        return {
+            "home": bool({"home-read", "home-control"} & capabilities),
+            "home_control": "home-control" in capabilities,
+            "energy": bool(
+                {"home-read", "home-control", "display"} & capabilities
+            ),
+            "media": "media-control" in capabilities,
+            "assistant": "voice" in capabilities,
+            "meetings": "meetings" in capabilities,
+            "display": "display" in capabilities,
+            "portable": "portable-client" in capabilities,
+            "realtime": True,
+            "credential_rotation": True,
+        }
+
+    def device_manifest_payload(device: dict[str, Any]) -> dict[str, Any]:
+        device_id = str(device["id"])
+        base = f"/v1/devices/{device_id}"
+        return {
+            "schema_version": "pilot.client.v1",
+            "core_version": __version__,
+            "registry_revision": registry.revision,
+            "device": {
+                "id": device_id,
+                "name": device["name"],
+                "room_id": device["room_id"],
+                "capabilities": device["capabilities"],
+                "credential_revision": device.get("credential_revision", 1),
+                "credential_status": device.get("credential_status", "active"),
+            },
+            "features": device_features(device),
+            "endpoints": {
+                "manifest": f"{base}/manifest",
+                "snapshot": f"{base}/events/snapshot",
+                "events": f"{base}/events",
+                "events_websocket": f"{base}/events/ws",
+                "home": f"{base}/home",
+                "energy": f"{base}/energy",
+                "media": f"{base}/media",
+                "assistant": f"{base}/assistant",
+                "meetings": f"{base}/meetings",
+                "rotate_credentials": f"{base}/credentials/rotate-self",
+            },
+            "realtime": {
+                "transport": ["long-poll", "websocket"],
+                "cursor": str(database.client_event_cursor()),
+                "resume_supported": True,
+                "snapshot_recovery": True,
+            },
+        }
+
+    def assistant_client_payload(result: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "conversation_id": result["conversation_id"],
+            "response_text": result["response_text"],
+            "status": result["status"],
+            "provider": result["provider"],
+            "cards": [
+                {
+                    "id": card.get("id"),
+                    "kind": card.get("kind"),
+                    "title": card.get("title"),
+                }
+                for card in result["cards"][:12]
+            ],
+            "citations": result["citations"][:20],
+            "actions": result["actions"][:20],
+        }
+
+    def parse_event_cursor(value: str | None) -> int:
+        if value in {None, ""}:
+            return database.client_event_cursor()
+        try:
+            cursor = int(value)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=422, detail="invalid event cursor") from None
+        if cursor < 0:
+            raise HTTPException(status_code=422, detail="invalid event cursor")
+        return cursor
+
+    async def device_product_snapshot(
+        device: dict[str, Any], cursor: int | None = None
+    ) -> dict[str, Any]:
+        features = device_features(device)
+        portable = features["portable"]
+        room_ids = (
+            sorted(registry.rooms)
+            if portable
+            else [str(device["room_id"])]
+        )
+        current_revision = database.client_event_cursor()
+        payload: dict[str, Any] = {
+            "schema_version": "pilot.snapshot.v1",
+            "generated_at": datetime.now(UTC).isoformat(),
+            "registry_revision": registry.revision,
+            "revision": current_revision,
+            "cursor": str(current_revision),
+            "device": device_manifest_payload(device)["device"],
+            "features": features,
+            "assistant": {
+                "available": features["assistant"],
+                "status": "ready" if features["assistant"] else "not_authorized",
+                "schema_version": "pilot.assistant.v1",
+            },
+        }
+        if features["home"]:
+            payload["home"] = {
+                "schema_version": "pilot.home.v1",
+                "rooms": {
+                    room_id: home_actions.room_projection(room_id)
+                    for room_id in room_ids
+                },
+            }
+        if features["energy"]:
+            payload["energy"] = {
+                "schema_version": "pilot.energy.v1",
+                **home_intelligence.energy_snapshot(),
+            }
+        if features["media"]:
+            payload["media"] = await media_states.snapshot(
+                None if portable else str(device["room_id"])
+            )
+        if features["meetings"]:
+            meetings = database.list_meetings(
+                25, source_device_id=str(device["id"])
+            )
+            payload["meetings"] = {
+                "schema_version": "pilot.meetings.v1",
+                "items": meetings,
+                "count": len(meetings),
+            }
+        selected_cursor = cursor if cursor is not None else payload["revision"]
+        payload["events"] = database.client_events_after(
+            selected_cursor, device, limit=200
+        )
+        minimum, maximum = database.client_event_bounds()
+        payload["resync_required"] = selected_cursor > maximum or (
+            minimum > 0 and selected_cursor < minimum - 1
+        )
+        return payload
 
     def safe_weather(raw: dict[str, Any]) -> dict[str, Any]:
         current = raw.get("current") or {}
@@ -869,6 +1082,8 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
         media_uri: str | None = None,
         target_player_id: str | None = None,
         source: str | None = None,
+        position_seconds: float | None = None,
+        muted: bool | None = None,
     ) -> Any:
         player = registry.players.get(player_id)
         if not player:
@@ -919,6 +1134,27 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
             "play": ("players/cmd/play", {"player_id": external_id}),
             "pause": ("players/cmd/pause", {"player_id": external_id}),
             "stop": ("players/cmd/stop", {"player_id": external_id}),
+            "next": ("players/cmd/next", {"player_id": external_id}),
+            "previous": ("players/cmd/previous", {"player_id": external_id}),
+            "seek": (
+                "players/cmd/seek",
+                {"player_id": external_id, "position": position_seconds},
+            ),
+            "mute": (
+                "players/cmd/volume_mute",
+                {"player_id": external_id, "muted": muted},
+            ),
+            "group": (
+                "players/cmd/group",
+                {
+                    "player_id": external_id,
+                    "target_player": target_external_id,
+                },
+            ),
+            "ungroup": (
+                "players/cmd/ungroup",
+                {"player_id": external_id},
+            ),
             "set_volume": (
                 "players/cmd/volume_set",
                 {"player_id": external_id, "volume_level": volume},
@@ -943,6 +1179,12 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
         if action == "play_media" and not media_uri:
             raise HTTPException(status_code=422, detail="media_uri is required")
         if action == "transfer" and not target_player_id:
+            raise HTTPException(status_code=422, detail="target_player_id is required")
+        if action == "seek" and position_seconds is None:
+            raise HTTPException(status_code=422, detail="position_seconds is required")
+        if action == "mute" and muted is None:
+            raise HTTPException(status_code=422, detail="muted is required")
+        if action == "group" and not target_player_id:
             raise HTTPException(status_code=422, detail="target_player_id is required")
         rpc_command, args = command_map[action]
         try:
@@ -1161,12 +1403,37 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
                 status_code=403, detail="device does not have meetings capability"
             )
 
+    def record_meeting_client_event(meeting: dict[str, Any]) -> dict[str, Any]:
+        source_device_id = meeting.get("source_device_id")
+        source_device = next(
+            (
+                item
+                for item in database.list_devices()
+                if item["id"] == source_device_id
+            ),
+            None,
+        )
+        return database.record_client_event(
+            "pilot.meeting.status.changed.v1",
+            {
+                "meeting_id": meeting["id"],
+                "title": meeting["title"],
+                "status": meeting["status"],
+                "updated_at": meeting["updated_at"],
+            },
+            room_id=source_device["room_id"] if source_device else None,
+            device_id=source_device_id,
+            required_capability="meetings",
+        )
+
     async def process_meeting_background(meeting_id: str) -> None:
         try:
-            await meeting_processor.process(meeting_id)
+            meeting = await meeting_processor.process(meeting_id)
         except (KeyError, MeetingProcessingError):
             # MeetingProcessor records a bounded failure reason for operational review.
-            return
+            meeting = database.get_meeting(meeting_id)
+        if meeting is not None:
+            record_meeting_client_event(meeting)
 
     @app.get("/v1/state", dependencies=[Depends(require_admin)])
     async def whole_home_state() -> dict[str, Any]:
@@ -1242,6 +1509,104 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
     async def home_catalog_coverage(response: Response) -> dict[str, Any]:
         response.headers["Cache-Control"] = "no-store"
         return home_intelligence.coverage()
+
+    @app.get("/v1/home/presentation", dependencies=[Depends(require_admin)])
+    async def home_presentations(
+        response: Response,
+        q: str | None = Query(default=None, min_length=1, max_length=200),
+        included: bool | None = None,
+        limit: int = Query(default=500, ge=1, le=500),
+    ) -> dict[str, Any]:
+        response.headers["Cache-Control"] = "no-store"
+        catalog = home_intelligence.catalog(query=q, limit=limit)
+        entities = [
+            {
+                "entity_id": entity["entity_id"],
+                "domain": entity["domain"],
+                "name": entity["name"],
+                "state": entity["state"],
+                "area_id": entity["area_id"],
+                "presentation": entity["presentation"],
+            }
+            for entity in catalog["entities"]
+            if included is None
+            or bool(entity["presentation"]["included"]) is included
+        ]
+        return {
+            "schema_version": "pilot.home-presentation.v1",
+            "entities": entities,
+            "count": len(entities),
+            "total": catalog["total"],
+        }
+
+    @app.get(
+        "/v1/home/presentation/{entity_id}",
+        dependencies=[Depends(require_admin)],
+    )
+    async def home_presentation(
+        entity_id: str, response: Response
+    ) -> dict[str, Any]:
+        response.headers["Cache-Control"] = "no-store"
+        entity = home_intelligence.entity(entity_id.casefold())
+        if entity is None:
+            raise HTTPException(status_code=404, detail="entity not found")
+        return {
+            "schema_version": "pilot.home-presentation.v1",
+            "entity_id": entity["entity_id"],
+            "presentation": entity["presentation"],
+            "override": database.get_home_entity_presentation(entity["entity_id"]),
+        }
+
+    @app.patch(
+        "/v1/home/presentation/{entity_id}",
+        dependencies=[Depends(require_admin)],
+    )
+    async def update_home_presentation(
+        entity_id: str,
+        request: HomeEntityPresentationUpdate,
+        response: Response,
+    ) -> dict[str, Any]:
+        response.headers["Cache-Control"] = "no-store"
+        changes = request.model_dump(exclude_unset=True)
+        if (
+            "exposure_policy" in changes
+            and changes.get("exposure_policy") is None
+        ):
+            changes["exposure_policy"] = "automatic"
+        selected_room = changes.get("room_id")
+        if selected_room is not None and selected_room not in registry.rooms:
+            raise HTTPException(status_code=404, detail="room not found")
+        for field in ("canonical_id", "duplicate_of"):
+            referenced = changes.get(field)
+            if referenced and home_intelligence.entity(referenced.casefold()) is None:
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"{field} must reference a known entity",
+                )
+        try:
+            override = database.update_home_entity_presentation(
+                entity_id.casefold(), changes
+            )
+        except KeyError:
+            raise HTTPException(status_code=404, detail="entity not found") from None
+        entity = home_intelligence.entity(entity_id.casefold())
+        assert entity is not None
+        event = database.record_client_event(
+            "pilot.home.presentation.changed.v1",
+            {
+                "entity_id": entity["entity_id"],
+                "presentation": entity["presentation"],
+            },
+            room_id=entity["presentation"]["room"]["id"],
+            required_capability="home",
+        )
+        return {
+            "schema_version": "pilot.home-presentation.v1",
+            "entity_id": entity["entity_id"],
+            "presentation": entity["presentation"],
+            "override": override,
+            "event": event,
+        }
 
     @app.get("/v1/home/areas", dependencies=[Depends(require_admin)])
     async def home_catalog_areas(response: Response) -> dict[str, Any]:
@@ -1512,7 +1877,7 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
                 orchestrator.music_player(
                     request.target_room_id, request.target_player_id
                 )
-                if request.action == "transfer" and request.target_room_id
+                if request.action in {"transfer", "group"} and request.target_room_id
                 else None
             )
         except ResolutionError as error:
@@ -1524,6 +1889,18 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
             request.media_uri,
             target_player.id if target_player else None,
             request.source,
+            request.position_seconds,
+            request.muted,
+        )
+        event = database.record_client_event(
+            "pilot.media.commanded.v1",
+            {
+                "action": request.action,
+                "player_id": player.id,
+                "target_player_id": target_player.id if target_player else None,
+            },
+            room_id=room_id,
+            required_capability="media-control",
         )
         return {
             "room_id": room_id,
@@ -1531,6 +1908,7 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
             "target_room_id": request.target_room_id,
             "target_player": target_player.as_dict() if target_player else None,
             "result": result,
+            "event": event,
         }
 
     @app.post(
@@ -1742,6 +2120,172 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
             device["connected"] = device["id"] in connected
         return {"devices": result}
 
+    @app.get("/v1/devices/{device_id}/manifest")
+    async def device_manifest(
+        device_id: str,
+        response: Response,
+        x_pilot_device_id: str = Header(),
+        authorization: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        device = authenticated_device(device_id, x_pilot_device_id, authorization)
+        response.headers["Cache-Control"] = "no-store"
+        return device_manifest_payload(device)
+
+    @app.get("/v1/devices/{device_id}/events/snapshot")
+    async def device_events_snapshot(
+        device_id: str,
+        response: Response,
+        cursor: str | None = Query(default=None, max_length=40),
+        x_pilot_device_id: str = Header(),
+        authorization: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        device = authenticated_device(device_id, x_pilot_device_id, authorization)
+        selected_cursor = parse_event_cursor(cursor) if cursor is not None else None
+        response.headers["Cache-Control"] = "no-store"
+        return await device_product_snapshot(device, selected_cursor)
+
+    @app.get("/v1/devices/{device_id}/events")
+    async def device_events(
+        device_id: str,
+        response: Response,
+        cursor: str | None = Query(default=None, max_length=40),
+        timeout_seconds: float = Query(default=0, ge=0, le=25),
+        limit: int = Query(default=100, ge=1, le=500),
+        x_pilot_device_id: str = Header(),
+        authorization: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        device = authenticated_device(device_id, x_pilot_device_id, authorization)
+        selected_cursor = parse_event_cursor(cursor)
+        deadline = time.monotonic() + timeout_seconds
+        events = database.client_events_after(selected_cursor, device, limit=limit)
+        while not events and time.monotonic() < deadline:
+            await asyncio.sleep(min(0.2, max(0, deadline - time.monotonic())))
+            events = database.client_events_after(selected_cursor, device, limit=limit)
+        current = database.client_event_cursor()
+        minimum, maximum = database.client_event_bounds()
+        response.headers["Cache-Control"] = "no-store"
+        return {
+            "schema_version": "pilot.events.v1",
+            "cursor": str(current),
+            "revision": current,
+            "reset_required": selected_cursor > maximum
+            or (minimum > 0 and selected_cursor < minimum - 1),
+            "events": events,
+        }
+
+    @app.websocket("/v1/devices/{device_id}/events/ws")
+    async def device_events_socket(
+        socket: WebSocket,
+        device_id: str,
+        cursor: str | None = None,
+    ) -> None:
+        authorization = socket.headers.get("authorization", "")
+        token = (
+            authorization.removeprefix("Bearer ").strip()
+            if authorization.startswith("Bearer ")
+            else ""
+        )
+        if not token or not database.authenticate_device(device_id, token):
+            await socket.close(code=1008, reason="invalid device credentials")
+            return
+        device = next(
+            (item for item in database.list_devices() if item["id"] == device_id),
+            None,
+        )
+        if device is None:
+            await socket.close(code=1008, reason="device not found")
+            return
+        try:
+            selected_cursor = parse_event_cursor(cursor)
+        except HTTPException:
+            await socket.close(code=1008, reason="invalid event cursor")
+            return
+        await socket.accept()
+        await socket.send_json(
+            {
+                "schema_version": "pilot.events.v1",
+                "type": "pilot.stream.ready.v1",
+                "cursor": str(database.client_event_cursor()),
+                "manifest": device_manifest_payload(device),
+            }
+        )
+        try:
+            while True:
+                if not database.authenticate_device(device_id, token):
+                    await socket.close(code=1008, reason="credentials revoked")
+                    return
+                events = database.client_events_after(
+                    selected_cursor, device, limit=200
+                )
+                if events:
+                    selected_cursor = events[-1]["revision"]
+                    await socket.send_json(
+                        {
+                            "schema_version": "pilot.events.v1",
+                            "type": "pilot.stream.events.v1",
+                            "cursor": str(database.client_event_cursor()),
+                            "events": events,
+                        }
+                    )
+                else:
+                    try:
+                        message = await asyncio.wait_for(
+                            socket.receive_text(), timeout=0.25
+                        )
+                        if message == "ping":
+                            await socket.send_json(
+                                {
+                                    "schema_version": "pilot.events.v1",
+                                    "type": "pilot.stream.pong.v1",
+                                    "cursor": str(database.client_event_cursor()),
+                                }
+                            )
+                    except TimeoutError:
+                        pass
+        except WebSocketDisconnect:
+            return
+
+    @app.post(
+        "/v1/devices/{device_id}/credentials/rotate",
+        dependencies=[Depends(require_admin)],
+    )
+    async def rotate_device_credentials_admin(
+        device_id: str, response: Response
+    ) -> dict[str, Any]:
+        response.headers["Cache-Control"] = "no-store"
+        try:
+            rotated = database.rotate_device_credentials(device_id)
+        except KeyError:
+            raise HTTPException(status_code=404, detail="device not found") from None
+        await device_hub.close(device_id, "device credentials rotated")
+        return rotated
+
+    @app.post("/v1/devices/{device_id}/credentials/rotate-self")
+    async def rotate_device_credentials_self(
+        device_id: str,
+        response: Response,
+        x_pilot_device_id: str = Header(),
+        authorization: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        authenticated_device(device_id, x_pilot_device_id, authorization)
+        response.headers["Cache-Control"] = "no-store"
+        rotated = database.rotate_device_credentials(device_id)
+        await device_hub.close(device_id, "device credentials rotated")
+        return rotated
+
+    @app.post(
+        "/v1/devices/{device_id}/revoke",
+        dependencies=[Depends(require_admin)],
+    )
+    async def revoke_device(device_id: str, response: Response) -> dict[str, Any]:
+        response.headers["Cache-Control"] = "no-store"
+        try:
+            revoked = database.revoke_device(device_id)
+        except KeyError:
+            raise HTTPException(status_code=404, detail="device not found") from None
+        await device_hub.close(device_id, "device credentials revoked")
+        return revoked
+
     @app.patch(
         "/v1/devices/{device_id}/capabilities",
         dependencies=[Depends(require_admin)],
@@ -1771,7 +2315,7 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
     ) -> dict[str, Any]:
         response.headers["Cache-Control"] = "no-store"
         try:
-            return database.create_bootstrap_grant(
+            grant = database.create_bootstrap_grant(
                 request.device_id,
                 request.room_id,
                 request.name,
@@ -1780,6 +2324,17 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
             )
         except KeyError:
             raise HTTPException(status_code=404, detail="room not found") from None
+        # The QR contains only this short-lived, single-use grant. Permanent
+        # device, provider, and administrator credentials never enter it.
+        grant["pairing_qr_svg"] = segno.make_qr(
+            grant["bootstrap_token"], error="m"
+        ).svg_data_uri(
+            scale=6,
+            border=3,
+            dark="#07110e",
+            light="#ffffff",
+        )
+        return grant
 
     @app.post("/v1/devices/bootstrap", status_code=201)
     async def bootstrap_device(
@@ -1828,12 +2383,14 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
         if started_at.tzinfo is None:
             started_at = started_at.replace(tzinfo=UTC)
         response.headers["Cache-Control"] = "no-store"
-        return database.create_meeting(
+        meeting = database.create_meeting(
             request.title.strip(),
             request.language,
             started_at.astimezone(UTC).isoformat(),
             device_id,
         )
+        event = record_meeting_client_event(meeting)
+        return {**meeting, "event": event}
 
     @app.get("/v1/devices/{device_id}/meetings")
     async def list_device_meetings(
@@ -1898,7 +2455,12 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
         except MeetingRecordingError as error:
             raise HTTPException(status_code=422, detail=str(error)) from None
         response.headers["Cache-Control"] = "no-store"
-        return {key: value for key, value in recording.items() if key != "path"}
+        meeting = database.get_meeting(meeting_id)
+        assert meeting is not None
+        return {
+            **{key: value for key, value in recording.items() if key != "path"},
+            "event": record_meeting_client_event(meeting),
+        }
 
     @app.post(
         "/v1/devices/{device_id}/meetings/{meeting_id}/process",
@@ -1920,8 +2482,9 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
         except ValueError as error:
             raise HTTPException(status_code=409, detail=str(error)) from None
         background_tasks.add_task(process_meeting_background, meeting_id)
+        event = record_meeting_client_event(meeting)
         response.headers["Cache-Control"] = "no-store"
-        return {"device_id": device_id, "meeting": meeting}
+        return {"device_id": device_id, "meeting": meeting, "event": event}
 
     @app.get("/v1/devices/{device_id}/snapshot")
     async def display_node_snapshot(
@@ -2040,11 +2603,20 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
             )
         except AssistantUnavailable as error:
             raise HTTPException(status_code=503, detail=str(error)) from None
+        structured = result.as_dict()
+        event = database.record_client_event(
+            "pilot.assistant.completed.v1",
+            assistant_client_payload(structured),
+            room_id=room_id,
+            device_id=device_id,
+            required_capability="voice",
+        )
         response.headers["Cache-Control"] = "no-store"
         return {
             "device_id": device_id,
             "room_id": room_id,
-            **result.as_dict(),
+            **structured,
+            "event": event,
         }
 
     @app.get("/v1/devices/{device_id}/home")
@@ -2093,6 +2665,24 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
             **home_actions.model_manifest(),
         }
 
+    @app.get("/v1/devices/{device_id}/energy")
+    async def device_energy_snapshot(
+        device_id: str,
+        response: Response,
+        x_pilot_device_id: str = Header(),
+        authorization: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        device = authenticated_device(device_id, x_pilot_device_id, authorization)
+        if not device_features(device)["energy"]:
+            raise HTTPException(
+                status_code=403, detail="device does not have energy-read capability"
+            )
+        response.headers["Cache-Control"] = "no-store"
+        return {
+            "schema_version": "pilot.energy.v1",
+            **home_intelligence.energy_snapshot(),
+        }
+
     @app.post("/v1/devices/{device_id}/home/actions")
     async def device_home_action(
         device_id: str,
@@ -2134,8 +2724,20 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
             raise HTTPException(status_code=409, detail=str(error)) from None
         except HomeActionError as error:
             raise HTTPException(status_code=502, detail=str(error)) from None
+        event = database.record_client_event(
+            "pilot.home.action.changed.v1",
+            {
+                "id": result["id"],
+                "entity_id": result["entity_id"],
+                "action": result["action"],
+                "status": result["status"],
+                "confirmation_required": result["confirmation_required"],
+            },
+            room_id=room_id,
+            required_capability="home",
+        )
         response.headers["Cache-Control"] = "no-store"
-        return {"device_id": device_id, "action": result}
+        return {"device_id": device_id, "action": result, "event": event}
 
     @app.post("/v1/devices/{device_id}/video", status_code=201)
     async def device_video_command(
@@ -2195,8 +2797,20 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
             raise HTTPException(status_code=409, detail=str(error)) from None
         except HomeActionError as error:
             raise HTTPException(status_code=502, detail=str(error)) from None
+        event = database.record_client_event(
+            "pilot.home.action.changed.v1",
+            {
+                "id": result["id"],
+                "entity_id": result["entity_id"],
+                "action": result["action"],
+                "status": result["status"],
+                "confirmation_required": result["confirmation_required"],
+            },
+            room_id=result["room_id"],
+            required_capability="home",
+        )
         response.headers["Cache-Control"] = "no-store"
-        return {"device_id": device_id, "action": result}
+        return {"device_id": device_id, "action": result, "event": event}
 
     @app.get("/v1/devices/{device_id}/home/actions/{action_id}")
     async def device_home_action_status(
@@ -2261,7 +2875,7 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
                 )
             room_id = selected.room_id
         if (
-            request.action == "transfer"
+            request.action in {"transfer", "group"}
             and request.target_room_id
             and request.target_room_id != device["room_id"]
             and "portable-client" not in device["capabilities"]
@@ -2276,7 +2890,7 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
                 orchestrator.music_player(
                     request.target_room_id, request.target_player_id
                 )
-                if request.action == "transfer" and request.target_room_id
+                if request.action in {"transfer", "group"} and request.target_room_id
                 else None
             )
         except ResolutionError as error:
@@ -2288,6 +2902,18 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
             request.media_uri,
             target_player.id if target_player else None,
             request.source,
+            request.position_seconds,
+            request.muted,
+        )
+        event = database.record_client_event(
+            "pilot.media.commanded.v1",
+            {
+                "action": request.action,
+                "player_id": player.id,
+                "target_player_id": target_player.id if target_player else None,
+            },
+            room_id=room_id,
+            required_capability="media-control",
         )
         response.headers["Cache-Control"] = "no-store"
         return {
@@ -2297,6 +2923,7 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
             "target_room_id": request.target_room_id,
             "target_player": target_player.as_dict() if target_player else None,
             "result": result,
+            "event": event,
         }
 
     @app.post("/v1/devices/{device_id}/media/search")
@@ -2419,20 +3046,26 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
         except AudioAssetError as error:
             raise HTTPException(status_code=422, detail=str(error)) from None
 
+        structured = assistant_result.as_dict()
+        event = database.record_client_event(
+            "pilot.assistant.completed.v1",
+            assistant_client_payload(structured),
+            room_id=device["room_id"],
+            device_id=device_id,
+            required_capability="voice",
+        )
         response.headers["Cache-Control"] = "no-store"
         return {
             "device_id": device_id,
             "room_id": device["room_id"],
             "transcript": transcript,
-            "response_text": assistant_result.response_text,
-            "conversation_id": assistant_result.session_id,
-            "provider": assistant_result.provider,
-            "continue_conversation": assistant_result.continue_conversation,
+            **structured,
             "audio": {
                 **audio_assets.public_view(asset),
                 "download_url": f"/v1/audio-assets/{asset['id']}",
             },
             "synthesis": synthesized.metadata(),
+            "event": event,
         }
 
     @app.get("/v1/devices/{device_id}/firmware")
@@ -2587,6 +3220,16 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
                     "command": completed,
                 }
                 await hub.broadcast(event)
+                database.record_client_event(
+                    "pilot.device.command.completed.v1",
+                    {
+                        "command_id": command_id,
+                        "status": completed["status"],
+                        "action": completed["payload"].get("action"),
+                    },
+                    room_id=completed["room_id"],
+                    device_id=device_id,
+                )
                 await device_hub.send(
                     device_id,
                     {"type": "command_ack", "command_id": command_id},
@@ -2620,6 +3263,16 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
             )
         except PermissionError as error:
             raise HTTPException(status_code=403, detail=str(error)) from None
+        if request.type == "source_state":
+            recorded["client_event"] = database.record_client_event(
+                "pilot.audio.source.changed.v1",
+                {
+                    "source": request.payload["source"],
+                    "active": request.payload["active"],
+                    "focus": recorded.get("focus"),
+                },
+                room_id=request.room_id,
+            )
         await hub.broadcast(recorded)
         return recorded
 
@@ -2690,6 +3343,8 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
             command.media_uri,
             command.target_player_id,
             command.source,
+            command.position_seconds,
+            command.muted,
         )
 
     @app.post("/v1/assistant", dependencies=[Depends(require_admin)])
@@ -2720,6 +3375,13 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
                 request.expires_in_seconds,
                 request.retention_seconds,
             )
+        result["event"] = database.record_client_event(
+            "pilot.assistant.completed.v1",
+            assistant_client_payload(result),
+            room_id=request.room_id,
+            device_id=request.device_id,
+            required_capability="voice",
+        )
         return result
 
     @app.get("/v1/assistant/status", dependencies=[Depends(require_admin)])

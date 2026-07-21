@@ -8,17 +8,25 @@ Music Assistant client.
 
 - Tablet-first adaptive navigation with room, energy, music, and assistant
   views.
-- Secure enrolment against Pilot Core.
+- One-time pairing-grant enrolment, including `pilot://pair` deep-link input and
+  an advanced existing-token recovery path.
 - Device tokens encrypted at rest with an Android Keystore AES-GCM key.
+- Device-manifest discovery and resumable cursor-based event polling with
+  snapshot recovery.
 - Live room and now-playing state.
-- Music Assistant search, playback, transport, and volume control through
-  Pilot Core.
-- Contextual assistant conversations scoped to the selected room.
+- Music Assistant search, playback, previous/next, seek, mute, room transfer
+  and volume control through Pilot Core.
+- Curated room controls that render Core's presentation metadata and invoke
+  only returned supported actions; confirmation-gated actions remain explicit.
+- Text and push-to-talk assistant conversations scoped to the selected room,
+  including 16 kHz mono capture, structured cards/sources, response audio and
+  listening/processing/speaking states.
 - Animated solar, grid, battery, and home energy flow.
-- Night-friendly palette, optional keep-awake behavior, and subtle burn-in
-  offset movement.
+- Night-friendly palette, optional keep-awake behavior, ambient clock mode and
+  subtle burn-in offset movement.
 - Explicit loading, stale, offline, and error states.
-- Preview fixtures, accessibility semantics, and protocol/security unit tests.
+- Preview fixtures, an instrumentation screenshot scaffold, accessibility
+  semantics and protocol/security unit tests.
 
 The client never receives Home Assistant, Music Assistant, Ollama, Denon, or
 room-agent credentials.
@@ -38,19 +46,22 @@ test, lint, and assembly gates.
 
 ## Enrolment
 
-Create a dedicated tablet device with:
+Use the dashboard's **Wall panel** profile. It creates a short-lived,
+single-use grant and local scan-to-pair QR with:
 
 ```text
 display
+home-read
+home-control
 media-control
-portable-client
 voice
 ```
 
-Use `portable-client` while the wall tablet is intended to control multiple
-rooms. A future fixed-room deployment may remove that capability and rely on a
-room-bound identity. Transfer the one-time token directly into the enrolment
-screen; never store it in source control or a mobile deployment profile.
+That default identity is fixed to the selected room. If the wall tablet is
+intentionally permitted to control multiple rooms, create a reviewed custom
+grant that also includes `portable-client`; do not add it merely to work around
+an incorrect room mapping. Redeem the grant directly in the app and never
+store the resulting token in source control or a mobile deployment profile.
 
 ## Appliance boundary
 
@@ -64,6 +75,11 @@ target tablet:
 4. validate Wi-Fi loss, Pilot Core restart, and token revocation;
 5. set display timeout and burn-in policy appropriate to the actual panel.
 
+Also verify microphone permission denial/recovery, real response-audio
+playback, event reconnect after Core restart, and rejection after credential
+revocation. The source implementation and CI build are **not** substitutes for
+these checks on the mounted tablet.
+
 ## Digital twin
 
 The current room controls are the foundation for the shared Pilot Home Digital
@@ -71,3 +87,7 @@ Twin. The full interactive 3D house requires a versioned geometry and entity
 mapping contract from Pilot Core so iOS/iPadOS and Android render the same
 model and invoke the same typed actions. See
 [HOME_DIGITAL_TWIN.md](HOME_DIGITAL_TWIN.md).
+
+No production 3D house asset or geometry contract is claimed by this release.
+The polished 2D room controls are the accepted product surface until the house
+model, mappings, accessibility alternative and performance budget are real.

@@ -44,6 +44,132 @@ struct PilotAPI: Sendable {
         return try JSONDecoder().decode(DeviceMediaEnvelope.self, from: data)
     }
 
+    func manifest() async throws -> PilotClientManifest {
+        let data = try await request(path: "v1/devices/\(deviceID)/manifest")
+        return try JSONDecoder().decode(PilotClientManifest.self, from: data)
+    }
+
+    func energy() async throws -> EnergySnapshot {
+        let data = try await request(path: "v1/devices/\(deviceID)/energy")
+        if let direct = try? JSONDecoder().decode(EnergyEnvelope.self, from: data) {
+            return direct.snapshot
+        }
+        let object = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        guard
+            let energy = object?["energy"],
+            JSONSerialization.isValidJSONObject(energy)
+        else { throw PilotAPIError.invalidResponse }
+        let nested = try JSONSerialization.data(withJSONObject: energy)
+        return try JSONDecoder().decode(EnergyEnvelope.self, from: nested).snapshot
+    }
+
+    func surfaceEnergy() async throws -> EnergySnapshot {
+        let data = try await request(path: "v1/devices/\(deviceID)/surface")
+        let object = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        guard
+            let energy = object?["energy"],
+            JSONSerialization.isValidJSONObject(energy)
+        else { throw PilotAPIError.invalidResponse }
+        let nested = try JSONSerialization.data(withJSONObject: energy)
+        return try JSONDecoder().decode(EnergyEnvelope.self, from: nested).snapshot
+    }
+
+    static func redeemBootstrap(
+        token bootstrapToken: String,
+        coreURL: URL
+    ) async throws -> BootstrapCredentials {
+        let url = coreURL.appending(path: "v1/devices/bootstrap")
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 30
+        request.setValue("Bearer \(bootstrapToken)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        let (data, response) = try await URLSession.shared.data(for: request)
+        try validate(response, data: data)
+        return try JSONDecoder().decode(BootstrapCredentials.self, from: data)
+    }
+
+    func eventSnapshot(after cursor: String?) async throws -> ClientEventSnapshot {
+        var components = URLComponents(
+            url: coreURL.appending(path: "v1/devices/\(deviceID)/events/snapshot"),
+            resolvingAgainstBaseURL: false
+        )
+        if let cursor, !cursor.isEmpty {
+            components?.queryItems = [URLQueryItem(name: "cursor", value: cursor)]
+        }
+        guard let url = components?.url else { throw PilotAPIError.invalidURL }
+        var eventRequest = URLRequest(url: url)
+        eventRequest.timeoutInterval = 30
+        eventRequest.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        eventRequest.setValue(deviceID, forHTTPHeaderField: "X-Pilot-Device-ID")
+        let (data, response) = try await URLSession.shared.data(for: eventRequest)
+        try Self.validate(response, data: data)
+        return try JSONDecoder().decode(ClientEventSnapshot.self, from: data)
+    }
+
+    func pollEvents(after cursor: String?) async throws -> ClientEventSnapshot {
+        var components = URLComponents(
+            url: coreURL.appending(path: "v1/devices/\(deviceID)/events"),
+            resolvingAgainstBaseURL: false
+        )
+        var query = [URLQueryItem(name: "timeout_seconds", value: "25")]
+        if let cursor, !cursor.isEmpty {
+            query.append(URLQueryItem(name: "cursor", value: cursor))
+        }
+        components?.queryItems = query
+        guard let url = components?.url else { throw PilotAPIError.invalidURL }
+        var eventRequest = URLRequest(url: url)
+        eventRequest.timeoutInterval = 35
+        eventRequest.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        eventRequest.setValue(deviceID, forHTTPHeaderField: "X-Pilot-Device-ID")
+        let (data, response) = try await URLSession.shared.data(for: eventRequest)
+        try Self.validate(response, data: data)
+        return try JSONDecoder().decode(ClientEventSnapshot.self, from: data)
+    }
+
+    func receiveEvents(
+        after cursor: String?,
+        handler: @escaping @MainActor @Sendable (PilotClientEvent) async -> Void
+    ) async throws {
+        var components = URLComponents(
+            url: coreURL.appending(path: "v1/devices/\(deviceID)/events/ws"),
+            resolvingAgainstBaseURL: false
+        )
+        if let cursor, !cursor.isEmpty {
+            components?.queryItems = [URLQueryItem(name: "cursor", value: cursor)]
+        }
+        guard var url = components?.url else { throw PilotAPIError.invalidURL }
+        if url.scheme == "http" {
+            var replaced = URLComponents(url: url, resolvingAgainstBaseURL: false)
+            replaced?.scheme = "ws"
+            if let websocketURL = replaced?.url { url = websocketURL }
+        } else if url.scheme == "https" {
+            var replaced = URLComponents(url: url, resolvingAgainstBaseURL: false)
+            replaced?.scheme = "wss"
+            if let websocketURL = replaced?.url { url = websocketURL }
+        }
+        var eventRequest = URLRequest(url: url)
+        eventRequest.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        eventRequest.setValue(deviceID, forHTTPHeaderField: "X-Pilot-Device-ID")
+        let socket = URLSession.shared.webSocketTask(with: eventRequest)
+        socket.resume()
+        try await withTaskCancellationHandler {
+            while !Task.isCancelled {
+                let message = try await socket.receive()
+                let data: Data
+                switch message {
+                case let .data(value): data = value
+                case let .string(value): data = Data(value.utf8)
+                @unknown default: continue
+                }
+                let event = try JSONDecoder().decode(PilotClientEvent.self, from: data)
+                await handler(event)
+            }
+        } onCancel: {
+            socket.cancel(with: .goingAway, reason: nil)
+        }
+    }
+
     func home(roomID: String) async throws -> HomeProjection {
         var components = URLComponents(
             url: coreURL.appending(path: "v1/devices/\(deviceID)/home"),
@@ -251,6 +377,22 @@ struct PilotAPI: Sendable {
                 detail as? String ?? "Pilot Core returned HTTP \(http.statusCode)."
             )
         }
+    }
+}
+
+struct ClientEventSnapshot: Codable, Sendable {
+    let schemaVersion: String?
+    let cursor: String?
+    let revision: Int?
+    let resetRequired: Bool?
+    let resyncRequired: Bool?
+    let events: [PilotClientEvent]
+
+    enum CodingKeys: String, CodingKey {
+        case cursor, revision, events
+        case schemaVersion = "schema_version"
+        case resetRequired = "reset_required"
+        case resyncRequired = "resync_required"
     }
 }
 

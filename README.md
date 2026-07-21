@@ -10,6 +10,30 @@ Pilot is a local-first platform for voice, audio, home automation, media,
 meetings, and personal intelligence. The repository contains the deployed
 Debian room endpoint and the first secure Pilot Core orchestration service.
 
+## Current release status
+
+The current source release adds the first shared, versioned product contract
+for Pilot clients:
+
+- a device manifest (`pilot.client.v1`) that advertises the authenticated
+  device identity, capabilities, feature gates and canonical endpoints;
+- a recoverable product snapshot (`pilot.snapshot.v1`) plus cursor-based long
+  polling and WebSocket event delivery;
+- curated Home Assistant projections with explainable include/exclude policy,
+  authoritative room trust, supported actions and duplicate identity metadata;
+- single-use, room-bound pairing grants, a locally rendered scan-to-pair QR,
+  and encrypted client-side device-token storage, with self-service rotation
+  and administrator revocation;
+- typed media, energy, home and assistant payloads shared by iOS, Android,
+  Shield TV and the Linux display surface.
+
+The Core contract and Python display service have automated test coverage in
+this worktree. Native mobile and TV builds are also CI-gated; installation,
+touch/focus tuning and audiovisual acceptance on the actual phone, wall tablet
+and Shield remain separate physical-device acceptance steps. Production Pilot
+Core continues to run the previously deployed release until the normal backup,
+deploy and health-check procedure promotes this source release.
+
 The deployment deliberately does **not** configure Intel GPU or HDMI
 passthrough.
 
@@ -49,8 +73,11 @@ and restore are documented in
 
 After deployment, the private operations dashboard is available at
 `http://PILOT_CORE_HOST:8770/dashboard`. Room state and controls remain
-protected by the Pilot Core administrator token; the first dashboard release
-offers telemetry and non-audible transient-state cancellation only.
+protected by the Pilot Core administrator token. The dashboard can now mint a
+short-lived, single-use pairing grant for an explicitly selected device
+profile and room, render that grant as a local QR, and review or override
+entity presentation policy. It never shows provider credentials or an existing
+device token.
 
 The physical acceptance receipt and fail-closed room playback gate are
 documented in [docs/SUPERVISED_ACTIVATION.md](docs/SUPERVISED_ACTIVATION.md).
@@ -120,7 +147,7 @@ Read-only Denon HEOS and NVIDIA Shield discovery, Media Room registration, and
 the fail-closed player control gate are documented in
 [docs/MEDIA_ROOM.md](docs/MEDIA_ROOM.md).
 
-The buildable read-only NVIDIA Shield client is documented in
+The device-paired NVIDIA Shield media-room client is documented in
 [docs/SHIELD_TV.md](docs/SHIELD_TV.md).
 
 Central alerts and authenticated Prometheus metrics are documented in
@@ -182,7 +209,7 @@ apps/room-agent/       Local health/status API
 apps/pilot-core/       Central room and player registry API
 apps/pilot-ios/        Native iPhone and iPad home, media, and assistant client
 apps/pilot-android/    Native Android wall-tablet Pilot client
-apps/shield-tv/        Kotlin/Compose for TV operations client
+apps/shield-tv/        Kotlin/Compose for TV media-room client
 config/                Versioned example room configuration
 deploy/ansible/        Reproducible Debian 13 deployment
 deploy/scripts/        Inventory, validation, and rollback commands
@@ -201,7 +228,16 @@ integrations/          Home Assistant and other platform adapters
 - Bluetooth is optional and remains disabled in configuration until requested.
 - Device selection is explicit; the deployment does not guess which sound card
   should become the default.
+- Inferred room mappings are readable but are not authoritative enough for a
+  Home Assistant mutation. An administrator must confirm the mapping or the HA
+  registry must supply it.
+- Pairing codes are short-lived and single-use. Clients receive their own
+  capability-scoped device credential, never the Core administrator or
+  provider credentials.
 - Each deployment is installed as a new release. `pilot-rollback` switches back
   to the preceding release and retains configuration backups.
 - LLMs may query filtered state and propose plans, but real actions always pass
   through execution policy and the skill runtime.
+- Production Faster Whisper on the planned RTX 3080 remains deferred until
+  that GPU is installed. Meeting transcription must continue to fail closed
+  when no configured private Whisper-compatible endpoint is available.

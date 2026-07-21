@@ -395,7 +395,7 @@ class HomeIntelligence:
                 local_id,
                 entity_metadata.get("aliases"),
             )
-            area_id = self._area_id(
+            area_id, area_source = self._area_mapping(
                 entity_id,
                 friendly_name,
                 entity_metadata.get("area_id"),
@@ -428,6 +428,7 @@ class HomeIntelligence:
                     "state": state,
                     "attributes": safe_attributes,
                     "area_id": area_id,
+                    "area_source": area_source,
                     "device_id": device_id,
                     "aliases": aliases,
                     "availability": availability,
@@ -556,15 +557,15 @@ class HomeIntelligence:
                 seen.add(folded)
         return aliases
 
-    def _area_id(
+    def _area_mapping(
         self,
         entity_id: str,
         friendly_name: str,
         registry_area_id: Any,
-    ) -> str | None:
+    ) -> tuple[str | None, str]:
         registered = _slug(_clean_text(registry_area_id, 128))
         if registered:
-            return registered
+            return registered, "registry"
         haystack = f" {entity_id.replace('.', ' ').replace('_', ' ')} {friendly_name.casefold()} "
         matches: list[str] = []
         for room in self.rooms:
@@ -574,7 +575,9 @@ class HomeIntelligence:
                 for name in names
             ):
                 matches.append(_slug(room.id))
-        return matches[0] if len(set(matches)) == 1 else None
+        if len(set(matches)) == 1:
+            return matches[0], "inferred"
+        return None, "unassigned"
 
     def catalog(
         self,
@@ -597,6 +600,10 @@ class HomeIntelligence:
         )
         return {
             **result,
+            "entities": [
+                {**entity, "presentation": self.presentation(entity)}
+                for entity in result["entities"]
+            ],
             "query": {
                 "q": query,
                 "domain": domain,
@@ -608,9 +615,14 @@ class HomeIntelligence:
         }
 
     def entity(self, entity_id: str) -> dict[str, Any] | None:
-        return self.store.get_home_entity(
+        entity = self.store.get_home_entity(
             entity_id,
             self.settings.home_catalog_stale_after_seconds,
+        )
+        return (
+            {**entity, "presentation": self.presentation(entity)}
+            if entity is not None
+            else None
         )
 
     def search(
@@ -635,7 +647,8 @@ class HomeIntelligence:
         tokens = set(normalized.split())
         scored: list[tuple[int, dict[str, Any], str]] = []
         for entity in raw["entities"]:
-            if not self.is_relevant(entity):
+            presentation = self.presentation(entity)
+            if not presentation["included"]:
                 continue
             fields = {
                 entity["entity_id"].casefold(),
@@ -660,7 +673,7 @@ class HomeIntelligence:
                 score += 5
             if entity["stale"]:
                 score -= 20
-            scored.append((score, entity, reason))
+            scored.append((score, {**entity, "presentation": presentation}, reason))
         scored.sort(key=lambda item: (-item[0], item[1]["name"].casefold()))
         matches = [
             {**entity, "match_score": score, "match_reason": reason}
@@ -716,25 +729,90 @@ class HomeIntelligence:
 
     def is_relevant(self, entity: dict[str, Any]) -> bool:
         """Return whether an entity belongs in user and assistant projections."""
+        return bool(self.presentation(entity)["included"])
+
+    def presentation(self, entity: dict[str, Any]) -> dict[str, Any]:
+        """Return explainable, persisted presentation policy for one entity."""
+        automatic, automatic_reason = self._automatic_relevance(entity)
+        override = self.store.get_home_entity_presentation(entity["entity_id"]) or {}
+        policy = str(override.get("exposure_policy") or "automatic")
+        included = (
+            True if policy == "include" else False if policy == "exclude" else automatic
+        )
+        reason = str(
+            override.get("reason")
+            or (
+                "explicit_include"
+                if policy == "include"
+                else "explicit_exclude"
+                if policy == "exclude"
+                else automatic_reason
+            )
+        )
+        domain = str(entity.get("domain") or "")
+        attributes = entity.get("attributes") or {}
+        device_class = str(attributes.get("device_class") or "").casefold()
+        category, section, priority, control = self._presentation_defaults(
+            domain, device_class
+        )
+        room_id = override.get("room_id") or self._pilot_room_for_area(
+            entity.get("area_id")
+        )
+        area_source = str(entity.get("area_source") or "unassigned")
+        room_trust = "explicit" if override.get("room_id") else area_source
+        authoritative = room_trust in {"registry", "explicit"}
+        identity = self.store.home_entity_identity(
+            entity["entity_id"], entity.get("stable_id") or entity["entity_id"]
+        )
+        canonical_id = override.get("canonical_id") or identity["canonical_id"]
+        duplicate_of = override.get("duplicate_of") or identity["duplicate_of"]
+        return {
+            "exposure_policy": policy,
+            "included": included,
+            "hidden": not included,
+            "reason": reason,
+            "category": override.get("category") or category,
+            "priority": (
+                int(override["priority"])
+                if override.get("priority") is not None
+                else priority
+            ),
+            "room": {
+                "id": room_id,
+                "area_id": entity.get("area_id"),
+                "trust": room_trust,
+                "authoritative": authoritative,
+            },
+            "display_name": override.get("display_name") or entity.get("name"),
+            "icon": override.get("icon") or attributes.get("icon"),
+            "section": override.get("section") or section,
+            "control": override.get("control") or control,
+            "supported_actions": self._supported_actions(domain),
+            "canonical_id": canonical_id,
+            "duplicate_of": duplicate_of,
+            "updated_at": override.get("updated_at"),
+        }
+
+    def _automatic_relevance(self, entity: dict[str, Any]) -> tuple[bool, str]:
         attributes = entity.get("attributes") or {}
         if any(
             attributes.get(f"_pilot_registry_{key}")
             for key in ("disabled_by", "hidden_by")
         ):
-            return False
+            return False, "hidden_by_home_assistant_registry"
         if attributes.get("_pilot_registry_entity_category") in {
             "config",
             "diagnostic",
         }:
-            return False
+            return False, "registry_diagnostic_or_configuration"
         entity_id = str(entity.get("entity_id", ""))
         domain, _, local_id = entity_id.partition(".")
         if _RAW_HARDWARE_ENTITY.fullmatch(local_id):
-            return False
+            return False, "raw_hardware_identifier"
         if any(term in local_id for term in _INTERNAL_ENTITY_TERMS):
-            return False
+            return False, "internal_or_diagnostic_name"
         if domain in _PUBLIC_DOMAINS:
-            return True
+            return True, "user_facing_domain"
         device_class = str(attributes.get("device_class", "")).casefold()
         if domain == "sensor":
             configured = {
@@ -747,14 +825,125 @@ class HomeIntelligence:
                 self.settings.energy_home_load_entity_id,
             }
             unit = str(attributes.get("unit_of_measurement", "")).casefold()
-            return (
+            included = (
                 entity_id in configured
                 or device_class in _PUBLIC_SENSOR_CLASSES
                 or unit in _PUBLIC_SENSOR_UNITS
             )
+            return (
+                included,
+                "configured_or_user_facing_sensor"
+                if included
+                else "sensor_without_user_facing_semantics",
+            )
         if domain == "binary_sensor":
-            return device_class in _PUBLIC_BINARY_SENSOR_CLASSES
-        return False
+            included = device_class in _PUBLIC_BINARY_SENSOR_CLASSES
+            return (
+                included,
+                "user_facing_binary_sensor"
+                if included
+                else "binary_sensor_without_user_facing_semantics",
+            )
+        return False, "unsupported_domain"
+
+    def _pilot_room_for_area(self, area_id: Any) -> str | None:
+        selected = str(area_id or "")
+        if not selected:
+            return None
+        matches = [
+            room.id
+            for room in self.rooms
+            if selected in {room.id, *room.home_area_ids}
+        ]
+        return matches[0] if len(matches) == 1 else None
+
+    @staticmethod
+    def _presentation_defaults(
+        domain: str, device_class: str
+    ) -> tuple[str, str, int, str]:
+        controls = {
+            "alarm_control_panel": "alarm",
+            "climate": "climate",
+            "cover": "cover",
+            "fan": "fan",
+            "light": "light",
+            "lock": "lock",
+            "media_player": "media",
+            "scene": "scene",
+            "switch": "switch",
+            "vacuum": "vacuum",
+        }
+        if domain in {"alarm_control_panel", "lock"} or device_class in {
+            "carbon_monoxide",
+            "gas",
+            "moisture",
+            "problem",
+            "safety",
+            "smoke",
+        }:
+            return "safety", "Safety", 100, controls.get(domain, "status")
+        if domain in controls:
+            section = "Scenes" if domain == "scene" else "Controls"
+            priority = 85 if domain in {"light", "climate"} else 70
+            return "control", section, priority, controls[domain]
+        if domain == "weather":
+            return "environment", "Climate", 75, "weather"
+        if domain == "sensor":
+            category = (
+                "energy"
+                if device_class
+                in {
+                    "apparent_power",
+                    "current",
+                    "energy",
+                    "power",
+                    "reactive_energy",
+                    "reactive_power",
+                    "voltage",
+                }
+                else "environment"
+                if device_class
+                in {
+                    "aqi",
+                    "atmospheric_pressure",
+                    "carbon_dioxide",
+                    "humidity",
+                    "illuminance",
+                    "moisture",
+                    "pm1",
+                    "pm10",
+                    "pm25",
+                    "pressure",
+                    "temperature",
+                    "volatile_organic_compounds",
+                }
+                else "status"
+            )
+            section = "Energy" if category == "energy" else "Environment"
+            return category, section, 55, "sensor"
+        if domain == "binary_sensor":
+            return "status", "Status", 65, "binary_status"
+        return "status", "Other", 20, "status"
+
+    @staticmethod
+    def _supported_actions(domain: str) -> list[str]:
+        actions = {
+            "alarm_control_panel": ["arm_home", "arm_away", "disarm"],
+            "climate": [
+                "turn_on",
+                "turn_off",
+                "set_temperature",
+                "set_hvac_mode",
+            ],
+            "cover": ["open", "close", "stop", "set_position"],
+            "fan": ["turn_on", "turn_off", "toggle", "set_percentage"],
+            "input_boolean": ["turn_on", "turn_off", "toggle"],
+            "light": ["turn_on", "turn_off", "toggle", "set_brightness"],
+            "lock": ["lock", "unlock"],
+            "scene": ["activate"],
+            "switch": ["turn_on", "turn_off", "toggle"],
+        }
+        return list(actions.get(domain, ()))
 
     @staticmethod
     def public_entity(entity: dict[str, Any]) -> dict[str, Any]:
@@ -767,9 +956,29 @@ class HomeIntelligence:
         return projected
 
     def coverage(self) -> dict[str, Any]:
-        return self.store.home_catalog_coverage(
+        coverage = self.store.home_catalog_coverage(
             self.settings.home_catalog_stale_after_seconds
         )
+        catalogue = self.store.search_home_entities(
+            include_missing=False,
+            limit=5_000,
+            stale_after_seconds=self.settings.home_catalog_stale_after_seconds,
+        )
+        presentations = [self.presentation(entity) for entity in catalogue["entities"]]
+        reasons: dict[str, int] = {}
+        policies: dict[str, int] = {}
+        for item in presentations:
+            reasons[item["reason"]] = reasons.get(item["reason"], 0) + 1
+            policy = item["exposure_policy"]
+            policies[policy] = policies.get(policy, 0) + 1
+        included = sum(bool(item["included"]) for item in presentations)
+        return {
+            **coverage,
+            "readable": included,
+            "excluded": len(presentations) - included,
+            "by_exposure_policy": dict(sorted(policies.items())),
+            "by_exposure_reason": dict(sorted(reasons.items())),
+        }
 
     def areas(self) -> list[dict[str, Any]]:
         return self.store.home_area_summaries(

@@ -21,7 +21,10 @@ final class PilotModel {
     var isSearching = false
     var isSendingMessage = false
     var activeMediaAction: String?
+    var activeMediaResultID: String?
+    var mediaError: String?
     var energy = EnergySnapshot.awaitingBackend
+    var energyError: String?
     var home: HomeProjection?
     var pendingHomeAction: HomeAction?
     var isLoadingHome = false
@@ -33,10 +36,32 @@ final class PilotModel {
     var selectedMeeting: PilotMeetingDetail?
     var isLoadingMeetingDetail = false
     var isRecordingMeeting = false
+    var isSubmittingMeeting = false
     var activeMeetingID: String?
     var meetingRecordingStartedAt: Date?
+    var pendingMeetingRecordings: [PendingMeetingRecording] = []
+    var clientManifest: PilotClientManifest?
+    var liveUpdatesConnected = false
+    var lastEventAt: Date?
+    var assistantStatus = "ready"
+    private(set) var hasActiveConfiguration = false
+    @ObservationIgnored private var activeCoreURL = ""
+    @ObservationIgnored private var activeDeviceID = ""
+    @ObservationIgnored private var activeToken = ""
+    @ObservationIgnored private var eventCursor: String?
     @ObservationIgnored private var meetingRecorder: AVAudioRecorder?
     @ObservationIgnored private var meetingRecordingURL: URL?
+    @ObservationIgnored private var activeMeetingTitle: String?
+
+    private enum StorageKey {
+        static let mediaCache = "pilot.cache.media.v1"
+        static let homeCache = "pilot.cache.home.v1"
+        static let energyCache = "pilot.cache.energy.v1"
+        static let meetingsCache = "pilot.cache.meetings.v1"
+        static let cacheDate = "pilot.cache.date.v1"
+        static let pendingMeetings = "pilot.pendingMeetings.v1"
+        static let eventCursor = "pilot.events.cursor.v1"
+    }
 
     init(loadStoredSettings: Bool = true) {
         if loadStoredSettings {
@@ -54,12 +79,20 @@ final class PilotModel {
             selectedRoomID = "office"
         }
         connectionState = .notConfigured
+        activeCoreURL = coreURL
+        activeDeviceID = deviceID
+        activeToken = token
+        hasActiveConfiguration = Self.configurationIsValid(
+            coreURL: activeCoreURL,
+            deviceID: activeDeviceID,
+            token: activeToken
+        )
+        eventCursor = UserDefaults.standard.string(forKey: StorageKey.eventCursor)
+        restoreDurableState()
     }
 
     var isConfigured: Bool {
-        !coreURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            && !deviceID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            && !token.isEmpty
+        Self.configurationIsValid(coreURL: coreURL, deviceID: deviceID, token: token)
     }
 
     var status: String {
@@ -92,14 +125,11 @@ final class PilotModel {
         }
     }
 
-    func saveSettings() {
-        coreURL = coreURL.trimmingCharacters(in: .whitespacesAndNewlines)
-            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-        deviceID = deviceID.trimmingCharacters(in: .whitespacesAndNewlines)
-        UserDefaults.standard.set(coreURL, forKey: "pilot.coreURL")
-        UserDefaults.standard.set(deviceID, forKey: "pilot.deviceID")
+    private func saveActiveSettings() {
+        UserDefaults.standard.set(activeCoreURL, forKey: "pilot.coreURL")
+        UserDefaults.standard.set(activeDeviceID, forKey: "pilot.deviceID")
         UserDefaults.standard.set(selectedRoomID, forKey: "pilot.roomID")
-        try? KeychainStore.save(token, account: "device-token")
+        try? KeychainStore.save(activeToken, account: "device-token")
     }
 
     func selectRoom(_ roomID: String) {
@@ -110,22 +140,76 @@ final class PilotModel {
     }
 
     func api() throws -> PilotAPI {
-        guard isConfigured else { throw PilotAPIError.notConfigured }
-        guard let url = URL(string: coreURL), ["http", "https"].contains(url.scheme) else {
+        guard hasActiveConfiguration else { throw PilotAPIError.notConfigured }
+        guard let url = URL(string: activeCoreURL), ["http", "https"].contains(url.scheme) else {
             throw PilotAPIError.invalidURL
         }
-        return PilotAPI(coreURL: url, deviceID: deviceID, token: token)
+        return PilotAPI(coreURL: url, deviceID: activeDeviceID, token: activeToken)
     }
 
     @discardableResult
     func connect() async -> Bool {
-        saveSettings()
-        return await refresh()
+        let candidateURL = Self.normalizedCoreURL(coreURL)
+        let candidateDeviceID = deviceID.trimmingCharacters(in: .whitespacesAndNewlines)
+        let candidateToken = token.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard
+            Self.configurationIsValid(
+                coreURL: candidateURL,
+                deviceID: candidateDeviceID,
+                token: candidateToken
+            ),
+            let url = URL(string: candidateURL)
+        else {
+            connectionState = .offline("Enter a valid Pilot Core URL, device ID, and token.")
+            return false
+        }
+
+        connectionState = .connecting
+        isRefreshing = true
+        defer { isRefreshing = false }
+        do {
+            let candidate = PilotAPI(
+                coreURL: url,
+                deviceID: candidateDeviceID,
+                token: candidateToken
+            )
+            let manifest = try? await candidate.manifest()
+            let media: DeviceMediaEnvelope?
+            if manifest?.features["media"] == false {
+                media = nil
+            } else {
+                // Media remains the compatibility authentication probe for a
+                // Core release that predates the client manifest.
+                media = try await candidate.media()
+            }
+            activeCoreURL = candidateURL
+            activeDeviceID = candidateDeviceID
+            activeToken = candidateToken
+            coreURL = candidateURL
+            deviceID = candidateDeviceID
+            token = candidateToken
+            hasActiveConfiguration = true
+            if let media {
+                apply(media)
+                cache(media: media)
+            }
+            saveActiveSettings()
+            lastSuccessfulRefresh = .now
+            connectionState = .connected
+            clientManifest = manifest
+            await refreshHome(silent: true)
+            await refreshEnergy(silent: true)
+            await refreshMeetings(silent: true)
+            return true
+        } catch {
+            connectionState = .offline(Self.friendlyMessage(for: error))
+            return false
+        }
     }
 
     @discardableResult
     func refresh(silent: Bool = false) async -> Bool {
-        guard isConfigured else {
+        guard hasActiveConfiguration else {
             connectionState = .notConfigured
             return false
         }
@@ -135,32 +219,200 @@ final class PilotModel {
         isRefreshing = true
         defer { isRefreshing = false }
         do {
-            let value = try await api().media()
-            rooms = value.rooms
-            playerStates = value.media.players.values.sorted {
-                $0.player.name.localizedCaseInsensitiveCompare($1.player.name)
-                    == .orderedAscending
-            }
+            let service = try api()
+            let value = try await service.media()
+            apply(value)
+            cache(media: value)
             if !rooms.contains(where: { $0.id == selectedRoomID }) {
                 selectRoom(value.roomID)
             }
             lastSuccessfulRefresh = .now
             connectionState = .connected
+            mediaError = nil
+            if clientManifest == nil { clientManifest = try? await service.manifest() }
             await refreshHome(silent: true)
+            await refreshEnergy(silent: true)
             await refreshMeetings(silent: true)
             return true
+        } catch {
+            let message = Self.friendlyMessage(for: error)
+            mediaError = message
+            connectionState = .offline(message)
+            return false
+        }
+    }
+
+    func refreshEnergy(silent: Bool = false) async {
+        guard hasActiveConfiguration else { return }
+        do {
+            let service = try api()
+            do {
+                energy = try await service.energy()
+            } catch {
+                // Compatibility with deployed Core versions while the portable
+                // energy contract rolls out. This only succeeds for clients
+                // already granted the display capability.
+                energy = try await service.surfaceEnergy()
+            }
+            energyError = energy.detail
+            cache(energy: energy)
+        } catch {
+            energyError = Self.friendlyMessage(for: error)
+            if !energy.isPopulated {
+                energy = EnergySnapshot(
+                    status: .unavailable,
+                    solarWatts: nil,
+                    gridWatts: nil,
+                    batteryWatts: nil,
+                    batteryStateOfCharge: nil,
+                    homeLoadWatts: nil,
+                    observedAt: nil,
+                    detail: energyError
+                )
+            }
+        }
+    }
+
+    func runUpdateLoop() async {
+        _ = await refresh()
+        while !Task.isCancelled {
+            guard hasActiveConfiguration else {
+                try? await Task.sleep(for: .seconds(2))
+                continue
+            }
+            do {
+                let service = try api()
+                if clientManifest == nil { clientManifest = try? await service.manifest() }
+                if let snapshot = try? await service.eventSnapshot(after: eventCursor) {
+                    for event in snapshot.events { await handle(event) }
+                    updateEventCursor(snapshot.cursor)
+                }
+                liveUpdatesConnected = true
+                while !Task.isCancelled {
+                    let batch = try await service.pollEvents(after: eventCursor)
+                    if batch.resetRequired == true || batch.resyncRequired == true {
+                        let recovery = try await service.eventSnapshot(after: nil)
+                        for event in recovery.events { await handle(event) }
+                        updateEventCursor(recovery.cursor)
+                    } else {
+                        for event in batch.events { await handle(event) }
+                        updateEventCursor(batch.cursor)
+                    }
+                    liveUpdatesConnected = true
+                }
+            } catch is CancellationError {
+                liveUpdatesConnected = false
+                return
+            } catch {
+                liveUpdatesConnected = false
+                // Older Core releases do not yet expose device event streams.
+                // Polling remains a bounded compatibility path, not a second
+                // source of truth.
+                _ = await refresh(silent: true)
+                try? await Task.sleep(for: .seconds(15))
+            }
+        }
+    }
+
+    func pair(using pairingCode: String) async -> Bool {
+        guard let payload = Self.parsePairingCode(pairingCode, defaultCoreURL: coreURL) else {
+            connectionState = .offline("That pairing code is not valid.")
+            return false
+        }
+        connectionState = .connecting
+        isRefreshing = true
+        defer { isRefreshing = false }
+        do {
+            let credentials = try await PilotAPI.redeemBootstrap(
+                token: payload.token,
+                coreURL: payload.coreURL
+            )
+            coreURL = Self.normalizedCoreURL(payload.coreURL.absoluteString)
+            deviceID = credentials.deviceID
+            token = credentials.deviceToken
+            // Authentication and capabilities are tested before any credential
+            // is activated or persisted.
+            return await connect()
         } catch {
             connectionState = .offline(Self.friendlyMessage(for: error))
             return false
         }
     }
 
+    static func parsePairingCode(
+        _ rawValue: String,
+        defaultCoreURL: String
+    ) -> (coreURL: URL, token: String)? {
+        let value = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !value.isEmpty else { return nil }
+
+        if
+            let data = value.data(using: .utf8),
+            let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+            let core = (object["core_url"] ?? object["core"]) as? String,
+            let token = (object["bootstrap_token"] ?? object["token"]) as? String,
+            let url = URL(string: Self.normalizedCoreURL(core))
+        {
+            return (url, token)
+        }
+
+        if let components = URLComponents(string: value), components.scheme == "pilot" {
+            let values = Dictionary(
+                uniqueKeysWithValues: (components.queryItems ?? []).map { ($0.name, $0.value ?? "") }
+            )
+            let core = values["core_url"] ?? values["core"]
+            let grant = values["bootstrap_token"] ?? values["token"] ?? values["code"]
+            if
+                let core,
+                let grant,
+                let url = URL(string: Self.normalizedCoreURL(core)),
+                !grant.isEmpty
+            {
+                return (url, grant)
+            }
+        }
+
+        guard
+            let url = URL(string: Self.normalizedCoreURL(defaultCoreURL)),
+            !value.contains(where: \.isWhitespace)
+        else { return nil }
+        return (url, value)
+    }
+
+    private func handle(_ event: PilotClientEvent) async {
+        lastEventAt = .now
+        if let revision = event.revision { updateEventCursor(String(revision)) }
+        let normalized = event.type.lowercased()
+        if normalized.contains("assistant") {
+            assistantStatus = normalized
+        }
+        if normalized.contains("media") || normalized.contains("player")
+            || normalized.contains("audio") || normalized.contains("source") {
+            _ = await refresh(silent: true)
+        } else if normalized.contains("home") || normalized.contains("entity") {
+            await refreshHome(silent: true)
+            if normalized.contains("energy") { await refreshEnergy(silent: true) }
+        } else if normalized.contains("meeting") {
+            await refreshMeetings(silent: true)
+        } else if normalized.contains("energy") {
+            await refreshEnergy(silent: true)
+        }
+    }
+
+    private func updateEventCursor(_ cursor: String?) {
+        guard let cursor, !cursor.isEmpty else { return }
+        eventCursor = cursor
+        UserDefaults.standard.set(cursor, forKey: StorageKey.eventCursor)
+    }
+
     func refreshHome(silent: Bool = false) async {
-        guard isConfigured else { return }
+        guard hasActiveConfiguration else { return }
         if !silent { isLoadingHome = true }
         defer { isLoadingHome = false }
         do {
-            home = try await api().home(roomID: selectedRoomID)
+            let projection = try await api().home(roomID: selectedRoomID)
+            home = projection
+            cache(home: projection)
             homeError = nil
         } catch {
             homeError = Self.friendlyMessage(for: error)
@@ -215,23 +467,33 @@ final class PilotModel {
     func command(
         _ action: String,
         volume: Int? = nil,
-        mediaURI: String? = nil
+        mediaURI: String? = nil,
+        positionSeconds: Double? = nil,
+        muted: Bool? = nil,
+        operationID: String? = nil
     ) async {
         guard let player = selectedPlayer else { return }
         activeMediaAction = action
-        defer { activeMediaAction = nil }
+        activeMediaResultID = operationID
+        defer {
+            activeMediaAction = nil
+            activeMediaResultID = nil
+        }
         do {
             try await api().send(
                 MediaCommand(
                     action: action,
                     playerID: player.player.id,
                     mediaURI: mediaURI,
-                    volume: volume
+                    volume: volume,
+                    positionSeconds: positionSeconds,
+                    muted: muted
                 )
             )
             _ = await refresh(silent: true)
+            mediaError = nil
         } catch {
-            connectionState = .offline(Self.friendlyMessage(for: error))
+            mediaError = Self.friendlyMessage(for: error)
         }
     }
 
@@ -250,7 +512,7 @@ final class PilotModel {
             selectRoom(roomID)
             _ = await refresh(silent: true)
         } catch {
-            connectionState = .offline(Self.friendlyMessage(for: error))
+            mediaError = Self.friendlyMessage(for: error)
         }
     }
 
@@ -269,7 +531,7 @@ final class PilotModel {
             connectionState = .connected
         } catch {
             searchResults = []
-            connectionState = .offline(Self.friendlyMessage(for: error))
+            mediaError = Self.friendlyMessage(for: error)
         }
     }
 
@@ -286,7 +548,18 @@ final class PilotModel {
                 conversationID: conversationID
             )
             conversationID = reply.conversationID
-            messages.append(ChatMessage(role: .pilot, text: reply.responseText))
+            messages.append(
+                ChatMessage(
+                    role: .pilot,
+                    text: reply.responseText,
+                    provider: reply.provider,
+                    cards: reply.cards ?? [],
+                    sources: reply.sources ?? [],
+                    actions: reply.actions ?? [],
+                    toolCalls: reply.toolCalls ?? []
+                )
+            )
+            assistantStatus = reply.status ?? "ready"
             connectionState = .connected
         } catch {
             let message = Self.friendlyMessage(for: error)
@@ -303,11 +576,12 @@ final class PilotModel {
     }
 
     func refreshMeetings(silent: Bool = false) async {
-        guard isConfigured else { return }
+        guard hasActiveConfiguration else { return }
         if !silent { isLoadingMeetings = true }
         defer { isLoadingMeetings = false }
         do {
             meetings = try await api().meetings()
+            cache(meetings: meetings)
             meetingError = nil
         } catch {
             meetingError = Self.friendlyMessage(for: error)
@@ -315,7 +589,7 @@ final class PilotModel {
     }
 
     func loadMeeting(_ meetingID: String) async {
-        guard isConfigured else { return }
+        guard hasActiveConfiguration else { return }
         isLoadingMeetingDetail = true
         defer { isLoadingMeetingDetail = false }
         do {
@@ -340,11 +614,10 @@ final class PilotModel {
             try audioSession.setCategory(
                 .playAndRecord,
                 mode: .spokenAudio,
-                options: [.defaultToSpeaker, .allowBluetooth]
+                options: [.defaultToSpeaker, .allowBluetoothHFP]
             )
             try audioSession.setActive(true)
-            let directory = FileManager.default.temporaryDirectory
-                .appending(path: "PilotMeetings", directoryHint: .isDirectory)
+            let directory = try Self.meetingRecordingDirectory()
             try FileManager.default.createDirectory(
                 at: directory,
                 withIntermediateDirectories: true
@@ -366,6 +639,7 @@ final class PilotModel {
             meetingRecorder = recorder
             meetingRecordingURL = recordingURL
             activeMeetingID = meeting.id
+            activeMeetingTitle = normalized
             meetingRecordingStartedAt = .now
             isRecordingMeeting = true
             meetings.insert(meeting, at: 0)
@@ -385,28 +659,234 @@ final class PilotModel {
         meetingRecorder = nil
         isRecordingMeeting = false
         meetingRecordingStartedAt = nil
+        let title = activeMeetingTitle ?? "Meeting recording"
+        let pending = PendingMeetingRecording(
+            id: meetingID,
+            meetingID: meetingID,
+            title: title,
+            recordingPath: recordingURL.path,
+            state: .ready,
+            uploadComplete: false,
+            failureMessage: nil,
+            updatedAt: .now
+        )
+        upsertPendingRecording(pending)
+        activeMeetingID = nil
+        activeMeetingTitle = nil
+        meetingRecordingURL = nil
         defer {
-            activeMeetingID = nil
-            meetingRecordingURL = nil
-            try? FileManager.default.removeItem(at: recordingURL)
             try? AVAudioSession.sharedInstance().setActive(
                 false,
                 options: .notifyOthersOnDeactivation
             )
         }
+        await submitPendingRecording(meetingID)
+    }
+
+    func retryPendingMeeting(_ meetingID: String) async {
+        await submitPendingRecording(meetingID)
+    }
+
+    private func submitPendingRecording(_ meetingID: String) async {
+        guard
+            let initialIndex = pendingMeetingRecordings.firstIndex(where: { $0.meetingID == meetingID })
+        else { return }
+        let recordingURL = pendingMeetingRecordings[initialIndex].recordingURL
+        guard FileManager.default.fileExists(atPath: recordingURL.path) else {
+            updatePendingRecording(
+                meetingID,
+                state: .failed,
+                failure: "The retained recording file is no longer available."
+            )
+            return
+        }
+        isSubmittingMeeting = true
+        defer { isSubmittingMeeting = false }
         do {
             let service = try api()
-            try await service.uploadMeetingRecording(
-                meetingID: meetingID,
-                recordingURL: recordingURL
-            )
+            if !pendingMeetingRecordings[initialIndex].uploadComplete {
+                updatePendingRecording(meetingID, state: .uploading, failure: nil)
+                try await service.uploadMeetingRecording(
+                    meetingID: meetingID,
+                    recordingURL: recordingURL
+                )
+                markPendingUploadComplete(meetingID)
+            }
+            updatePendingRecording(meetingID, state: .processing, failure: nil)
             _ = try await service.processMeeting(meetingID)
+            // The local source is removed only after Core has both accepted the
+            // upload and queued processing. Every failure path above retains it.
+            try? FileManager.default.removeItem(at: recordingURL)
+            pendingMeetingRecordings.removeAll { $0.meetingID == meetingID }
+            persistPendingRecordings()
             await refreshMeetings(silent: true)
             meetingError = nil
         } catch {
-            meetingError = Self.friendlyMessage(for: error)
+            let message = Self.friendlyMessage(for: error)
+            updatePendingRecording(meetingID, state: .failed, failure: message)
+            meetingError = "Recording retained on this device. \(message)"
             await refreshMeetings(silent: true)
         }
+    }
+
+    private func apply(_ envelope: DeviceMediaEnvelope) {
+        rooms = envelope.rooms
+        playerStates = envelope.media.players.values.sorted {
+            $0.player.name.localizedCaseInsensitiveCompare($1.player.name)
+                == .orderedAscending
+        }
+    }
+
+    private func restoreDurableState() {
+        let defaults = UserDefaults.standard
+        let decoder = JSONDecoder()
+        if
+            hasActiveConfiguration,
+            let data = defaults.data(forKey: StorageKey.mediaCache),
+            let cached = try? decoder.decode(DeviceMediaEnvelope.self, from: data)
+        {
+            apply(cached)
+        }
+        if
+            let data = defaults.data(forKey: StorageKey.homeCache),
+            let cached = try? decoder.decode(HomeProjection.self, from: data),
+            cached.selectedRoomID == selectedRoomID
+        {
+            home = cached
+        }
+        if
+            let data = defaults.data(forKey: StorageKey.energyCache),
+            let cached = try? decoder.decode(EnergySnapshot.self, from: data)
+        {
+            energy = cached
+        }
+        if
+            let data = defaults.data(forKey: StorageKey.meetingsCache),
+            let cached = try? decoder.decode([PilotMeeting].self, from: data)
+        {
+            meetings = cached
+        }
+        if let date = defaults.object(forKey: StorageKey.cacheDate) as? Date {
+            lastSuccessfulRefresh = date
+        }
+        if
+            let data = defaults.data(forKey: StorageKey.pendingMeetings),
+            let cached = try? decoder.decode([PendingMeetingRecording].self, from: data)
+        {
+            pendingMeetingRecordings = cached.map { value in
+                guard FileManager.default.fileExists(atPath: value.recordingPath) else {
+                    var missing = value
+                    missing.state = .failed
+                    missing.failureMessage = "The retained recording file is missing."
+                    return missing
+                }
+                return value
+            }
+        }
+    }
+
+    private func cache(media: DeviceMediaEnvelope) {
+        if let data = try? JSONEncoder().encode(media) {
+            UserDefaults.standard.set(data, forKey: StorageKey.mediaCache)
+        }
+        markCacheUpdated()
+    }
+
+    private func cache(home: HomeProjection) {
+        if let data = try? JSONEncoder().encode(home) {
+            UserDefaults.standard.set(data, forKey: StorageKey.homeCache)
+        }
+        markCacheUpdated()
+    }
+
+    private func cache(energy: EnergySnapshot) {
+        if let data = try? JSONEncoder().encode(energy) {
+            UserDefaults.standard.set(data, forKey: StorageKey.energyCache)
+        }
+        markCacheUpdated()
+    }
+
+    private func cache(meetings: [PilotMeeting]) {
+        if let data = try? JSONEncoder().encode(meetings) {
+            UserDefaults.standard.set(data, forKey: StorageKey.meetingsCache)
+        }
+        markCacheUpdated()
+    }
+
+    private func markCacheUpdated() {
+        let date = Date.now
+        UserDefaults.standard.set(date, forKey: StorageKey.cacheDate)
+        lastSuccessfulRefresh = date
+    }
+
+    private func upsertPendingRecording(_ recording: PendingMeetingRecording) {
+        pendingMeetingRecordings.removeAll { $0.meetingID == recording.meetingID }
+        pendingMeetingRecordings.insert(recording, at: 0)
+        persistPendingRecordings()
+    }
+
+    private func updatePendingRecording(
+        _ meetingID: String,
+        state: PendingMeetingRecording.State,
+        failure: String?
+    ) {
+        guard let index = pendingMeetingRecordings.firstIndex(where: { $0.meetingID == meetingID }) else {
+            return
+        }
+        pendingMeetingRecordings[index].state = state
+        pendingMeetingRecordings[index].failureMessage = failure
+        pendingMeetingRecordings[index].updatedAt = .now
+        persistPendingRecordings()
+    }
+
+    private func markPendingUploadComplete(_ meetingID: String) {
+        guard let index = pendingMeetingRecordings.firstIndex(where: { $0.meetingID == meetingID }) else {
+            return
+        }
+        pendingMeetingRecordings[index].uploadComplete = true
+        pendingMeetingRecordings[index].updatedAt = .now
+        persistPendingRecordings()
+    }
+
+    private func persistPendingRecordings() {
+        if let data = try? JSONEncoder().encode(pendingMeetingRecordings) {
+            UserDefaults.standard.set(data, forKey: StorageKey.pendingMeetings)
+        }
+    }
+
+    private static func meetingRecordingDirectory() throws -> URL {
+        let applicationSupport = try FileManager.default.url(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask,
+            appropriateFor: nil,
+            create: true
+        )
+        let directory = applicationSupport
+            .appending(path: "Pilot", directoryHint: .isDirectory)
+            .appending(path: "MeetingRecordings", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(
+            at: directory,
+            withIntermediateDirectories: true
+        )
+        return directory
+    }
+
+    private static func normalizedCoreURL(_ value: String) -> String {
+        value.trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+    }
+
+    private static func configurationIsValid(
+        coreURL: String,
+        deviceID: String,
+        token: String
+    ) -> Bool {
+        guard
+            let url = URL(string: normalizedCoreURL(coreURL)),
+            ["http", "https"].contains(url.scheme)
+        else { return false }
+        return !deviceID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !token.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     static func friendlyMessage(for error: Error) -> String {
@@ -480,7 +960,8 @@ final class PilotModel {
                         artist: "Massive Attack",
                         album: "Mezzanine"
                     )
-                )
+                ),
+                capabilities: nil
             ),
             PilotPlayerState(
                 player: mediaPlayer,
@@ -493,7 +974,8 @@ final class PilotModel {
                     muted: false,
                     source: "HEOS",
                     media: nil
-                )
+                ),
+                capabilities: nil
             ),
         ]
         model.energy = EnergySnapshot(

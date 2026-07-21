@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime
+from hashlib import sha256
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit
 
 from .config import Player
 from .integrations import (
@@ -118,6 +120,7 @@ class MediaStateReader:
             for player in sorted(players, key=lambda item: item.id)
         }
         return {
+            "schema_version": "pilot.media.v1",
             "observed_at": datetime.now(UTC).isoformat(),
             "room_id": room_id,
             "providers": provider_status,
@@ -178,6 +181,12 @@ class MediaStateReader:
                         if isinstance(elapsed, (int, float))
                         else None
                     ),
+                    "position_seconds": (
+                        round(float(elapsed), 1)
+                        if isinstance(elapsed, (int, float))
+                        else None
+                    ),
+                    "artwork": self._artwork(media, "music_assistant"),
                 }
             )
         return {
@@ -215,14 +224,57 @@ class MediaStateReader:
         muted: bool | None = None
         source: str | None = None
         media: dict[str, Any] | None = None
+        position_seconds: float | None = None
+        duration_seconds: float | None = None
+        queue: dict[str, Any] = {
+            "status": "not_loaded",
+            "index": None,
+            "items": [],
+            "truncated": False,
+        }
         if music is not None and isinstance(music.get("volume_percent"), int):
             volume_percent = music["volume_percent"]
+        if music is not None:
+            media = music.get("media")
+            position_seconds = music.get("position_seconds")
+            duration_seconds = music.get("duration_seconds")
+            queue = music["queue"]
         if home is not None:
             if isinstance(home.get("volume_percent"), int):
                 volume_percent = home["volume_percent"]
             muted = home.get("muted")
             source = home.get("source")
-            media = home.get("media")
+            media = media or home.get("media")
+            position_seconds = (
+                position_seconds
+                if position_seconds is not None
+                else home.get("position_seconds")
+            )
+            duration_seconds = (
+                duration_seconds
+                if duration_seconds is not None
+                else home.get("duration_seconds")
+            )
+
+        actions = (
+            [
+                "play",
+                "pause",
+                "stop",
+                "set_volume",
+                "play_media",
+                "transfer",
+                "next",
+                "previous",
+                "seek",
+                "mute",
+            ]
+            if player.control_enabled
+            else []
+        )
+        if actions and music is not None and music.get("grouping_supported"):
+            actions.extend(["group", "ungroup"])
+        artwork = media.get("artwork") if isinstance(media, dict) else None
 
         return {
             "player": player.as_dict(),
@@ -235,6 +287,24 @@ class MediaStateReader:
                 "muted": muted,
                 "source": source,
                 "media": media,
+                "position_seconds": position_seconds,
+                "duration_seconds": duration_seconds,
+                "artwork_url": (
+                    artwork.get("proxy_url") or artwork.get("source_url")
+                    if isinstance(artwork, dict)
+                    else None
+                ),
+                "queue": queue,
+            },
+            "capabilities": {
+                "actions": actions,
+                "transport": bool(actions),
+                "volume": "set_volume" in actions,
+                "seek": "seek" in actions,
+                "transfer": "transfer" in actions,
+                "grouping": bool(
+                    music is not None and music.get("grouping_supported")
+                ),
             },
             "music_assistant": music,
             "home_assistant": home,
@@ -250,6 +320,24 @@ class MediaStateReader:
         if not isinstance(device, dict):
             device = {}
         volume = row.get("volume_level")
+        current_media = row.get("current_media")
+        media = (
+            MediaStateReader._media_item(current_media, "music_assistant")
+            if isinstance(current_media, dict)
+            else None
+        )
+        duration = current_media.get("duration") if isinstance(current_media, dict) else None
+        position = row.get("elapsed_time")
+        raw_queue = row.get("queue_items")
+        queue_items = (
+            [
+                MediaStateReader._media_item(item, "music_assistant")
+                for item in raw_queue[:10]
+                if isinstance(item, dict)
+            ]
+            if isinstance(raw_queue, list)
+            else []
+        )
         return {
             "player_id": row.get("player_id"),
             "configured_external_id": player.external_id or None,
@@ -267,6 +355,22 @@ class MediaStateReader:
             ),
             "active_source": row.get("active_source"),
             "group_members": list(row.get("group_childs") or []),
+            "grouping_supported": bool(
+                row.get("can_group_with") or row.get("group_childs")
+            ),
+            "media": media,
+            "position_seconds": MediaStateReader._number(position),
+            "duration_seconds": MediaStateReader._number(duration),
+            "queue": {
+                "status": "ok" if isinstance(raw_queue, list) else "not_loaded",
+                "index": (
+                    int(row["current_index"])
+                    if isinstance(row.get("current_index"), int)
+                    else None
+                ),
+                "items": queue_items,
+                "truncated": isinstance(raw_queue, list) and len(raw_queue) > 10,
+            },
             "device": {
                 "manufacturer": device.get("manufacturer"),
                 "model": device.get("model"),
@@ -285,7 +389,7 @@ class MediaStateReader:
         if not isinstance(attributes, dict):
             attributes = {}
         raw_volume = attributes.get("volume_level")
-        media = {
+        media: dict[str, Any] | None = {
             "content_id": attributes.get("media_content_id"),
             "content_type": attributes.get("media_content_type"),
             "title": attributes.get("media_title"),
@@ -294,6 +398,14 @@ class MediaStateReader:
         }
         if not any(value is not None for value in media.values()):
             media = None
+        else:
+            media["artwork"] = MediaStateReader._artwork(
+                {
+                    "image_url": attributes.get("entity_picture"),
+                    "title": attributes.get("media_title"),
+                },
+                "home_assistant",
+            )
         return {
             "entity_id": player.endpoint,
             "state": state.get("state") or "unknown",
@@ -307,5 +419,58 @@ class MediaStateReader:
             "muted": attributes.get("is_volume_muted"),
             "source": attributes.get("source"),
             "media": media,
+            "position_seconds": MediaStateReader._number(
+                attributes.get("media_position")
+            ),
+            "duration_seconds": MediaStateReader._number(
+                attributes.get("media_duration")
+            ),
             "supported_features": attributes.get("supported_features"),
+        }
+
+    @staticmethod
+    def _number(value: Any) -> float | None:
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return None
+        selected = float(value)
+        return round(selected, 3) if selected >= 0 else None
+
+    @staticmethod
+    def _media_item(raw: dict[str, Any], source: str) -> dict[str, Any]:
+        duration = MediaStateReader._number(raw.get("duration"))
+        raw_id = raw.get("item_id") or raw.get("media_item_id")
+        if raw_id is None and raw.get("uri") is not None:
+            raw_id = "media_" + sha256(str(raw["uri"]).encode()).hexdigest()[:24]
+        if raw_id is None:
+            raw_id = raw.get("title") or "unknown"
+        return {
+            "id": str(raw_id)[:500],
+            "media_type": str(raw.get("media_type") or "unknown")[:64],
+            "title": str(raw.get("title") or "Unknown title")[:300],
+            "artist": str(raw.get("artist") or "")[:300] or None,
+            "album": str(raw.get("album") or "")[:300] or None,
+            "duration_seconds": duration,
+            "artwork": MediaStateReader._artwork(raw, source),
+        }
+
+    @staticmethod
+    def _artwork(raw: dict[str, Any], source: str) -> dict[str, Any]:
+        candidate = raw.get("image_url") or raw.get("image") or raw.get("artwork_url")
+        safe_url: str | None = None
+        if isinstance(candidate, str) and len(candidate) <= 2000:
+            parsed = urlsplit(candidate)
+            if parsed.scheme in {"http", "https"} and parsed.netloc:
+                safe_url = urlunsplit(
+                    (parsed.scheme, parsed.netloc, parsed.path, "", "")
+                )
+            elif candidate.startswith("/") and not candidate.startswith("//"):
+                safe_url = candidate.split("?", 1)[0]
+        cache_key = sha256(safe_url.encode()).hexdigest()[:24] if safe_url else None
+        return {
+            "available": safe_url is not None,
+            "source": source,
+            "source_url": safe_url,
+            "proxy_url": None,
+            "cache_key": cache_key,
+            "cache_status": "not_cached" if safe_url else "unavailable",
         }

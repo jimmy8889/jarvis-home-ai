@@ -22,6 +22,8 @@ class PilotPreferences(context: Context) {
         nightMode = runCatching {
             NightMode.valueOf(preferences.getString("night_mode", NightMode.Automatic.name)!!)
         }.getOrDefault(NightMode.Automatic),
+        kioskMode = preferences.getBoolean("kiosk_mode", true),
+        ambientAfterMinutes = preferences.getInt("ambient_after_minutes", 5).coerceIn(1, 60),
     )
 
     fun token(): String? = tokenStore.read()
@@ -33,6 +35,8 @@ class PilotPreferences(context: Context) {
             .putInt("refresh_seconds", config.refreshSeconds.coerceIn(5, 300))
             .putBoolean("keep_screen_on", config.keepScreenOn)
             .putString("night_mode", config.nightMode.name)
+            .putBoolean("kiosk_mode", config.kioskMode)
+            .putInt("ambient_after_minutes", config.ambientAfterMinutes.coerceIn(1, 60))
             .apply()
         token?.trim()?.takeIf(String::isNotEmpty)?.let(tokenStore::write)
     }

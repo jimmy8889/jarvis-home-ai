@@ -10,6 +10,8 @@ data class PilotConfig(
     val refreshSeconds: Int = 15,
     val keepScreenOn: Boolean = true,
     val nightMode: NightMode = NightMode.Automatic,
+    val kioskMode: Boolean = true,
+    val ambientAfterMinutes: Int = 5,
 )
 
 enum class NightMode { Automatic, Day, Night }
@@ -39,6 +41,9 @@ data class CurrentMedia(
     val artist: String?,
     val album: String?,
     val imageUrl: String?,
+    val mediaType: String? = null,
+    val contentId: String? = null,
+    val durationSeconds: Double? = null,
 )
 
 data class EffectiveMediaState(
@@ -49,6 +54,10 @@ data class EffectiveMediaState(
     val muted: Boolean?,
     val source: String?,
     val media: CurrentMedia?,
+    val positionSeconds: Double? = null,
+    val durationSeconds: Double? = null,
+    val capabilities: Set<String> = emptySet(),
+    val groupMembers: List<String> = emptyList(),
 )
 
 data class PilotPlayerState(
@@ -61,6 +70,24 @@ data class MediaSnapshot(
     val observedAt: Instant?,
     val rooms: List<PilotRoom>,
     val players: List<PilotPlayerState>,
+    val revision: String? = null,
+    val queues: Map<String, MediaQueue> = emptyMap(),
+)
+
+data class MediaQueueItem(
+    val id: String,
+    val title: String,
+    val artist: String?,
+    val album: String?,
+    val imageUrl: String?,
+    val durationSeconds: Double?,
+    val active: Boolean,
+)
+
+data class MediaQueue(
+    val playerId: String,
+    val index: Int?,
+    val items: List<MediaQueueItem>,
 )
 
 data class EnergyMeasurement(
@@ -97,6 +124,18 @@ data class MusicSearchResult(
     val subtitle: String,
     val uri: String,
     val mediaType: String?,
+    val imageUrl: String? = null,
+)
+
+data class AssistantCard(
+    val kind: String,
+    val title: String,
+    val detail: String?,
+)
+
+data class AssistantSource(
+    val label: String,
+    val url: String?,
 )
 
 data class AssistantReply(
@@ -105,6 +144,12 @@ data class AssistantReply(
     val provider: String?,
     val continueConversation: Boolean,
     val roomId: String?,
+    val status: String = "complete",
+    val transcript: String? = null,
+    val audioDownloadUrl: String? = null,
+    val cards: List<AssistantCard> = emptyList(),
+    val sources: List<AssistantSource> = emptyList(),
+    val actions: List<String> = emptyList(),
 )
 
 data class ChatMessage(
@@ -115,6 +160,8 @@ data class ChatMessage(
 )
 
 enum class ChatRole { User, Pilot }
+
+enum class AssistantPhase { Idle, Listening, Processing, Speaking, Failed }
 
 data class PilotSnapshot(
     val media: MediaSnapshot,
@@ -129,6 +176,27 @@ data class MediaCommand(
     val targetRoomId: String? = null,
     val targetPlayerId: String? = null,
     val volume: Int? = null,
+    val positionSeconds: Double? = null,
+    val muted: Boolean? = null,
+    val source: String? = null,
+)
+
+enum class HomeControlKind { Light, Climate, Cover, Fan, Lock, Scene, Switch, Sensor, Contact, Generic }
+
+data class EntityPresentation(
+    val included: Boolean = true,
+    val exposurePolicy: String = "automatic",
+    val reason: String? = null,
+    val category: String? = null,
+    val priority: Int = 500,
+    val roomTrust: String? = null,
+    val roomAuthoritative: Boolean = false,
+    val canonicalId: String? = null,
+    val duplicateOf: String? = null,
+    val displayName: String? = null,
+    val icon: String? = null,
+    val section: String? = null,
+    val control: String? = null,
 )
 
 data class HomeEntity(
@@ -141,17 +209,94 @@ data class HomeEntity(
     val stale: Boolean,
     val actions: List<String>,
     val brightnessPercent: Float?,
+    val presentation: EntityPresentation = EntityPresentation(),
+    val unit: String? = null,
+    val deviceClass: String? = null,
+    val numericValue: Double? = null,
+    val targetTemperature: Double? = null,
+    val positionPercent: Float? = null,
+    val percentage: Float? = null,
 ) {
     val isOn: Boolean
         get() = state.lowercase() in setOf(
             "on", "open", "opening", "unlocked", "active", "heat", "cool",
         )
+
+    val displayName: String get() = presentation.displayName ?: name
+
+    val controlKind: HomeControlKind
+        get() = when (presentation.control?.lowercase()) {
+            "light" -> HomeControlKind.Light
+            "climate" -> HomeControlKind.Climate
+            "cover", "shade" -> HomeControlKind.Cover
+            "fan" -> HomeControlKind.Fan
+            "lock" -> HomeControlKind.Lock
+            "scene" -> HomeControlKind.Scene
+            "switch" -> HomeControlKind.Switch
+            "sensor" -> HomeControlKind.Sensor
+            "contact" -> HomeControlKind.Contact
+            else -> when (domain) {
+                "light" -> HomeControlKind.Light
+                "climate" -> HomeControlKind.Climate
+                "cover" -> HomeControlKind.Cover
+                "fan" -> HomeControlKind.Fan
+                "lock", "alarm_control_panel" -> HomeControlKind.Lock
+                "scene" -> HomeControlKind.Scene
+                "switch", "input_boolean" -> HomeControlKind.Switch
+                "binary_sensor" -> HomeControlKind.Contact
+                "sensor" -> HomeControlKind.Sensor
+                else -> HomeControlKind.Generic
+            }
+        }
+
+    val section: String
+        get() = presentation.section?.takeIf(String::isNotBlank) ?: when (controlKind) {
+            HomeControlKind.Light -> "Lighting"
+            HomeControlKind.Climate -> "Climate"
+            HomeControlKind.Cover -> "Shades"
+            HomeControlKind.Fan -> "Air"
+            HomeControlKind.Lock, HomeControlKind.Contact -> "Security"
+            HomeControlKind.Scene -> "Scenes"
+            HomeControlKind.Sensor -> "Sensors"
+            HomeControlKind.Switch -> "Switches"
+            HomeControlKind.Generic -> "Other"
+        }
 }
 
 data class HomeProjection(
     val roomId: String,
     val roomName: String,
     val entities: List<HomeEntity>,
+    val observedAt: Instant? = null,
+    val status: String = "ok",
+)
+
+data class ClientManifest(
+    val schema: String = "pilot.client.v1",
+    val version: String? = null,
+    val features: Set<String> = emptySet(),
+    val eventSnapshotPath: String? = null,
+    val eventLongPollPath: String? = null,
+    val eventWebSocketPath: String? = null,
+)
+
+data class PilotEvent(
+    val id: String,
+    val type: String,
+    val revision: String?,
+    val occurredAt: Instant?,
+)
+
+data class PilotEventPage(
+    val cursor: String?,
+    val resetRequired: Boolean,
+    val events: List<PilotEvent>,
+)
+
+data class BootstrapRegistration(
+    val deviceId: String,
+    val deviceToken: String,
+    val roomId: String?,
 )
 
 data class HomeAction(
@@ -167,11 +312,16 @@ data class HomeAction(
 internal object PilotJson {
     fun home(root: JSONObject): HomeProjection {
         val room = root.optJSONObject("room") ?: JSONObject()
+        val freshness = root.optJSONObject("freshness") ?: JSONObject()
         return HomeProjection(
             roomId = room.optString("id", root.optString("selected_room_id")),
             roomName = room.optString("name", "Room"),
             entities = root.optJSONArray("entities").objects().map { entity ->
                 val attributes = entity.optJSONObject("attributes") ?: JSONObject()
+                val presentation = entity.optJSONObject("presentation") ?: JSONObject()
+                val roomPresentation = presentation.optJSONObject("room") ?: JSONObject()
+                val supportedActions = presentation.optJSONArray("supported_actions").strings()
+                    .ifEmpty { entity.optJSONArray("actions").strings() }
                 HomeEntity(
                     entityId = entity.optString("entity_id"),
                     domain = entity.optString("domain"),
@@ -180,12 +330,41 @@ internal object PilotJson {
                     areaId = entity.optNullableString("area_id"),
                     unavailable = entity.optBoolean("unavailable"),
                     stale = entity.optBoolean("stale"),
-                    actions = entity.optJSONArray("actions").strings(),
+                    actions = supportedActions,
                     brightnessPercent = attributes.optDouble("brightness")
                         .takeIf { attributes.has("brightness") && it.isFinite() }
                         ?.div(255.0)?.times(100)?.toFloat()?.coerceIn(0f, 100f),
+                    presentation = EntityPresentation(
+                        included = presentation.optNullableBoolean("included") ?: true,
+                        exposurePolicy = presentation.optString("exposure_policy", "automatic"),
+                        reason = presentation.optNullableString("reason"),
+                        category = presentation.optNullableString("category"),
+                        priority = presentation.optInt("priority", 500),
+                        roomTrust = roomPresentation.optNullableString("trust")
+                            ?: presentation.optNullableString("room_trust"),
+                        roomAuthoritative = roomPresentation.optNullableBoolean("authoritative")
+                            ?: presentation.optBoolean("room_authoritative", false),
+                        canonicalId = presentation.optNullableString("canonical_id"),
+                        duplicateOf = presentation.optNullableString("duplicate_of"),
+                        displayName = presentation.optNullableString("display_name"),
+                        icon = presentation.optNullableString("icon"),
+                        section = presentation.optNullableString("section"),
+                        control = presentation.optNullableString("control"),
+                    ),
+                    unit = attributes.optNullableString("unit_of_measurement"),
+                    deviceClass = attributes.optNullableString("device_class"),
+                    numericValue = entity.optFiniteDouble("state")
+                        ?: attributes.optFiniteDouble("value"),
+                    targetTemperature = attributes.optFiniteDouble("temperature"),
+                    positionPercent = attributes.optFiniteDouble("current_position")
+                        ?.toFloat()?.coerceIn(0f, 100f),
+                    percentage = attributes.optFiniteDouble("percentage")
+                        ?.toFloat()?.coerceIn(0f, 100f),
                 )
-            },
+            }.filter { it.presentation.included && it.presentation.duplicateOf == null },
+            observedAt = freshness.optInstant("observed_at")
+                ?: root.optInstant("observed_at"),
+            status = freshness.optString("status", root.optString("status", "ok")),
         )
     }
 
@@ -208,10 +387,21 @@ internal object PilotJson {
         val states = media.optJSONObject("players").objectsWithKeys().map { (id, value) ->
             playerState(value, id)
         }
+        val queueRoot = media.optJSONObject("queues") ?: root.optJSONObject("queues")
+        val topLevelQueues = queueRoot.objectsWithKeys().associate { (id, value) ->
+            id to queue(value, id)
+        }
+        val embeddedQueues = media.optJSONObject("players").objectsWithKeys().mapNotNull { (id, value) ->
+            val embedded = (value.optJSONObject("effective") ?: value).optJSONObject("queue")
+            embedded?.let { id to queue(it, id) }
+        }.toMap()
         return MediaSnapshot(
             observedAt = media.optInstant("observed_at"),
             rooms = rooms,
             players = states,
+            revision = media.optNullableString("revision")
+                ?: root.optNullableString("revision"),
+            queues = topLevelQueues + embeddedQueues,
         )
     }
 
@@ -220,8 +410,12 @@ internal object PilotJson {
         val nowPlaying = when (nowPlayingValue) {
             is JSONArray -> nowPlayingValue.objects().map { playerState(it) }
             is JSONObject -> {
-                val players = nowPlayingValue.optJSONObject("players") ?: nowPlayingValue
-                players.objectsWithKeys().map { (id, value) -> playerState(value, id) }
+                val items = nowPlayingValue.optJSONArray("items")
+                if (items != null) items.objects().map(::nowPlayingState)
+                else {
+                    val players = nowPlayingValue.optJSONObject("players") ?: nowPlayingValue
+                    players.objectsWithKeys().map { (id, value) -> playerState(value, id) }
+                }
             }
             else -> emptyList()
         }
@@ -234,11 +428,75 @@ internal object PilotJson {
         )
     }
 
-    fun assistant(root: JSONObject) = AssistantReply(
-        text = root.optString("response_text", "I couldn't prepare a response."),
-        conversationId = root.optNullableString("conversation_id"),
-        provider = root.optNullableString("provider"),
-        continueConversation = root.optBoolean("continue_conversation", false),
+    fun assistant(root: JSONObject): AssistantReply {
+        val audio = root.optJSONObject("audio") ?: JSONObject()
+        return AssistantReply(
+            text = root.optString("response_text", "I couldn't prepare a response."),
+            conversationId = root.optNullableString("conversation_id"),
+            provider = root.optNullableString("provider"),
+            continueConversation = root.optBoolean("continue_conversation", false),
+            roomId = root.optNullableString("room_id"),
+            status = root.optString("status", "complete"),
+            transcript = root.optNullableString("transcript"),
+            audioDownloadUrl = audio.optNullableString("download_url"),
+            cards = root.optJSONArray("cards").objects().map { card ->
+                AssistantCard(
+                    kind = card.optString("kind", card.optString("type", "information")),
+                    title = card.optString("title", "Pilot"),
+                    detail = card.optNullableString("detail")
+                        ?: card.optNullableString("text"),
+                )
+            },
+            sources = (root.optJSONArray("sources") ?: root.optJSONArray("citations")).objects().map { source ->
+                AssistantSource(
+                    label = source.optString("label", source.optString("title", "Source")),
+                    url = source.optNullableString("url"),
+                )
+            },
+            actions = root.optJSONArray("actions").strings(),
+        )
+    }
+
+    fun manifest(root: JSONObject): ClientManifest {
+        val contract = root.optJSONObject("contract") ?: root
+        val endpoints = root.optJSONObject("endpoints") ?: JSONObject()
+        return ClientManifest(
+            schema = contract.optString(
+                "schema",
+                root.optString("schema_version", root.optString("schema", "pilot.client.v1")),
+            ),
+            version = contract.optNullableString("version")
+                ?: root.optNullableString("version")
+                ?: root.optNullableString("core_version"),
+            features = root.optJSONArray("features").strings().toSet() +
+                (root.optJSONObject("features")?.trueKeys().orEmpty()),
+            eventSnapshotPath = endpoints.endpointPath("events_snapshot")
+                ?: endpoints.endpointPath("event_snapshot")
+                ?: endpoints.endpointPath("snapshot"),
+            eventLongPollPath = endpoints.endpointPath("events")
+                ?: endpoints.endpointPath("event_long_poll"),
+            eventWebSocketPath = endpoints.endpointPath("events_websocket")
+                ?: endpoints.endpointPath("events_ws"),
+        )
+    }
+
+    fun events(root: JSONObject): PilotEventPage = PilotEventPage(
+        cursor = root.optNullableString("cursor") ?: root.optNullableString("next_cursor"),
+        resetRequired = root.optBoolean("reset_required", false),
+        events = root.optJSONArray("events").objects().map { event ->
+            PilotEvent(
+                id = event.optString("id", event.optString("cursor")),
+                type = event.optString("type", "state.changed"),
+                revision = event.optNullableString("revision"),
+                occurredAt = event.optInstant("occurred_at")
+                    ?: event.optInstant("created_at"),
+            )
+        },
+    )
+
+    fun bootstrap(root: JSONObject) = BootstrapRegistration(
+        deviceId = root.optString("device_id"),
+        deviceToken = root.optString("device_token"),
         roomId = root.optNullableString("room_id"),
     )
 
@@ -264,6 +522,8 @@ internal object PilotJson {
                                     ?: "",
                                 uri = uri,
                                 mediaType = item.optNullableString("media_type"),
+                                imageUrl = item.optNullableString("image_url")
+                                    ?: item.optNullableString("image"),
                             ),
                         )
                     } else {
@@ -297,6 +557,19 @@ internal object PilotJson {
     private fun playerState(value: JSONObject, fallbackId: String = ""): PilotPlayerState {
         val player = player(value.optJSONObject("player") ?: value, fallbackId)
         val effective = value.optJSONObject("effective") ?: value
+        val nowPlaying = effective.optJSONObject("now_playing")
+            ?: effective.optJSONObject("media")
+        val capabilityRoot = effective.opt("capabilities") ?: value.opt("capabilities")
+        val capabilities = when (capabilityRoot) {
+            is JSONArray -> capabilityRoot.strings().toSet()
+            is JSONObject -> capabilityRoot.trueKeys() +
+                capabilityRoot.optJSONArray("actions").strings() +
+                setOfNotNull(
+                    "group".takeIf { capabilityRoot.optBoolean("grouping", false) },
+                    "set_volume".takeIf { capabilityRoot.optBoolean("volume", false) },
+                )
+            else -> emptySet()
+        }
         return PilotPlayerState(
             player = player,
             status = value.optString("status", "unknown"),
@@ -307,16 +580,99 @@ internal object PilotJson {
                 volumePercent = effective.optNullableInt("volume_percent"),
                 muted = effective.optNullableBoolean("muted"),
                 source = effective.optNullableString("source"),
-                media = effective.optJSONObject("media")?.let {
+                media = nowPlaying?.let {
                     CurrentMedia(
                         title = it.optNullableString("title"),
                         artist = it.optNullableString("artist"),
                         album = it.optNullableString("album"),
-                        imageUrl = it.optNullableString("image_url")
+                        imageUrl = effective.optNullableString("artwork_url")
+                            ?: it.optJSONObject("artwork")?.optNullableString("proxy_url")
+                            ?: it.optJSONObject("artwork")?.optNullableString("source_url")
+                            ?: it.optNullableString("artwork_url")
+                            ?: it.optNullableString("image_url")
                             ?: it.optNullableString("image"),
+                        mediaType = it.optNullableString("media_type")
+                            ?: it.optNullableString("content_type"),
+                        contentId = it.optNullableString("content_id")
+                            ?: it.optNullableString("uri"),
+                        durationSeconds = it.optFiniteDouble("duration_seconds")
+                            ?: it.optFiniteDouble("duration"),
                     )
                 },
+                positionSeconds = effective.optFiniteDouble("position_seconds")
+                    ?: effective.optFiniteDouble("elapsed_seconds"),
+                durationSeconds = effective.optFiniteDouble("duration_seconds")
+                    ?: nowPlaying?.optFiniteDouble("duration_seconds")
+                    ?: nowPlaying?.optFiniteDouble("duration"),
+                capabilities = capabilities,
+                groupMembers = effective.optJSONArray("group_members").strings()
+                    .ifEmpty {
+                        effective.optJSONObject("group")
+                            ?.optJSONArray("members").strings()
+                    },
             ),
+        )
+    }
+
+    private fun nowPlayingState(value: JSONObject): PilotPlayerState {
+        val id = value.optString("player_id")
+        return PilotPlayerState(
+            player = PilotPlayer(
+                id = id,
+                roomId = value.optString("room_id"),
+                name = value.optString("player_name", id),
+                kind = "audio",
+                protocol = value.optString("provider"),
+                enabled = true,
+                controlEnabled = true,
+            ),
+            status = value.optString("status", "ok"),
+            effective = EffectiveMediaState(
+                available = true,
+                powered = true,
+                playbackState = value.optNullableString("state"),
+                volumePercent = value.optNullableInt("volume_percent"),
+                muted = value.optNullableBoolean("muted"),
+                source = value.optNullableString("source"),
+                media = CurrentMedia(
+                    title = value.optNullableString("title"),
+                    artist = value.optNullableString("artist"),
+                    album = value.optNullableString("album"),
+                    imageUrl = value.optNullableString("artwork_url")
+                        ?: value.optNullableString("image_url"),
+                    mediaType = value.optNullableString("media_type"),
+                    contentId = value.optNullableString("content_id"),
+                    durationSeconds = value.optFiniteDouble("duration_seconds"),
+                ),
+                positionSeconds = value.optFiniteDouble("elapsed_seconds")
+                    ?: value.optFiniteDouble("position_seconds"),
+                durationSeconds = value.optFiniteDouble("duration_seconds"),
+                capabilities = value.optJSONArray("capabilities").strings().toSet(),
+                groupMembers = value.optJSONArray("group_members").strings(),
+            ),
+        )
+    }
+
+    private fun queue(value: JSONObject, fallbackId: String): MediaQueue {
+        val entries = value.optJSONArray("items") ?: value.optJSONArray("queue")
+        val activeIndex = value.optNullableInt("index")
+            ?: value.optNullableInt("current_index")
+        return MediaQueue(
+            playerId = value.optString("player_id", fallbackId),
+            index = activeIndex,
+            items = entries.objects().mapIndexed { index, item ->
+                MediaQueueItem(
+                    id = item.optString("id", item.optString("uri", "$fallbackId-$index")),
+                    title = item.optString("title", item.optString("name", "Untitled")),
+                    artist = item.optNullableString("artist"),
+                    album = item.optNullableString("album"),
+                    imageUrl = item.optNullableString("artwork_url")
+                        ?: item.optNullableString("image_url"),
+                    durationSeconds = item.optFiniteDouble("duration_seconds")
+                        ?: item.optFiniteDouble("duration"),
+                    active = item.optBoolean("active", activeIndex == index),
+                )
+            },
         )
     }
 
@@ -350,8 +706,12 @@ private fun JSONObject?.objectsWithKeys(): List<Pair<String, JSONObject>> =
         optJSONObject(key)?.let { key to it }
     }.toList()
 
+private fun JSONObject.trueKeys(): Set<String> = keys().asSequence().mapNotNull { key ->
+    key.takeIf { optBoolean(key, false) }
+}.toSet()
+
 private fun JSONObject.optNullableString(key: String): String? =
-    optString(key).takeIf { has(key) && !isNull(key) && it.isNotBlank() }
+    (opt(key) as? String)?.takeIf(String::isNotBlank)
 
 private fun JSONObject.optNullableInt(key: String): Int? =
     if (has(key) && !isNull(key)) optInt(key) else null
@@ -361,3 +721,16 @@ private fun JSONObject.optNullableBoolean(key: String): Boolean? =
 
 private fun JSONObject.optInstant(key: String): Instant? =
     optNullableString(key)?.let { runCatching { Instant.parse(it) }.getOrNull() }
+
+private fun JSONObject.optFiniteDouble(key: String): Double? {
+    if (!has(key) || isNull(key)) return null
+    val value = when (val raw = opt(key)) {
+        is Number -> raw.toDouble()
+        is String -> raw.toDoubleOrNull()
+        else -> null
+    }
+    return value?.takeIf(Double::isFinite)
+}
+
+private fun JSONObject.endpointPath(key: String): String? =
+    optNullableString(key) ?: optJSONObject(key)?.optNullableString("path")

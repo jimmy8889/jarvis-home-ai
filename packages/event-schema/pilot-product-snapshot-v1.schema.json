@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pilot.local/schemas/pilot-product-snapshot-v1.schema.json",
+  "title": "Pilot product snapshot v1",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "generated_at",
+    "registry_revision",
+    "revision",
+    "cursor",
+    "device",
+    "features",
+    "assistant",
+    "events",
+    "resync_required"
+  ],
+  "properties": {
+    "schema_version": {"const": "pilot.snapshot.v1"},
+    "generated_at": {"type": "string", "format": "date-time"},
+    "registry_revision": {"type": "string"},
+    "revision": {"type": "integer", "minimum": 0},
+    "cursor": {"type": "string", "pattern": "^[0-9]+$"},
+    "device": {"type": "object"},
+    "features": {"type": "object"},
+    "assistant": {"type": "object"},
+    "home": {"type": "object"},
+    "energy": {"type": "object"},
+    "media": {"type": "object"},
+    "meetings": {"type": "object"},
+    "events": {
+      "type": "array",
+      "items": {"$ref": "pilot-client-event-v1.schema.json"}
+    },
+    "resync_required": {"type": "boolean"}
+  },
+  "additionalProperties": false
+}

@@ -100,16 +100,13 @@ private enum class PilotDestination(val label: String, val glyph: String) {
 @Composable
 fun PilotWallApp(state: PilotUiState, model: PilotViewModel, night: Boolean) {
     if (!state.configured) {
-        OnboardingScreen(
-            initialConfig = state.config,
-            busy = state.connection == ConnectionState.Loading,
-            error = state.error,
-            connect = model::connect,
-        )
+        PilotPairingScreen(state, model)
         return
     }
-    BurnInGuard(enabled = night) {
-        PilotShell(state, model)
+    PilotIdleGuard(state) {
+        BurnInGuard(enabled = night) {
+            PilotShell(state, model)
+        }
     }
     state.pendingHomeAction?.let { action ->
         AlertDialog(
@@ -129,6 +126,7 @@ fun PilotWallApp(state: PilotUiState, model: PilotViewModel, night: Boolean) {
             },
         )
     }
+    PilotAssistantOverlay(state, model)
 }
 
 @Composable
@@ -187,7 +185,12 @@ private fun PilotShell(state: PilotUiState, model: PilotViewModel) {
             bottomBar = {
                 Column {
                     if (nowPlaying != null) {
-                        MiniPlayer(nowPlaying, state.actionInFlight, model::media)
+                        PilotMiniPlayer(
+                            nowPlaying,
+                            model::artwork,
+                            state.actionInFlight,
+                            model::media,
+                        )
                     }
                     if (!wide) {
                         NavigationBar {
@@ -209,8 +212,8 @@ private fun PilotShell(state: PilotUiState, model: PilotViewModel) {
                 when (destination) {
                     PilotDestination.Home -> HomeScreen(state, model)
                     PilotDestination.Rooms -> RoomsScreen(state, model)
-                    PilotDestination.Music -> MusicScreen(state, model)
-                    PilotDestination.Assistant -> AssistantScreen(state, model)
+                    PilotDestination.Music -> PilotMusicExperience(state, model)
+                    PilotDestination.Assistant -> PilotAssistantPanel(state, model)
                     PilotDestination.Settings -> SettingsScreen(state, model)
                 }
             }
@@ -252,7 +255,12 @@ private fun ConnectionBanner(state: PilotUiState, refresh: () -> Unit) {
 
 @Composable
 private fun HomeScreen(state: PilotUiState, model: PilotViewModel) {
-    val now = remember { LocalDateTime.now() }
+    val now by produceState(LocalDateTime.now()) {
+        while (true) {
+            value = LocalDateTime.now()
+            delay(30_000)
+        }
+    }
     val energy = state.snapshot?.surface?.energy
     val playing = state.snapshot?.media?.players?.filter {
         it.effective.playbackState == "playing"
@@ -309,7 +317,7 @@ private fun HomeScreen(state: PilotUiState, model: PilotViewModel) {
             }
         }
         item {
-            HomeControlsCard(state, model)
+            CuratedHomeControls(state, model)
         }
         item {
             Text("Active now", style = MaterialTheme.typography.headlineMedium)
@@ -832,6 +840,12 @@ private fun SettingsScreen(state: PilotUiState, model: PilotViewModel) {
     var nightMode by remember(state.config.nightMode) {
         mutableStateOf(state.config.nightMode)
     }
+    var kioskMode by remember(state.config.kioskMode) {
+        mutableStateOf(state.config.kioskMode)
+    }
+    var ambientAfter by remember(state.config.ambientAfterMinutes) {
+        mutableStateOf(state.config.ambientAfterMinutes.toString())
+    }
     LazyColumn(
         contentPadding = PaddingValues(24.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
@@ -878,6 +892,23 @@ private fun SettingsScreen(state: PilotUiState, model: PilotViewModel) {
                     "Night mode lowers contrast and moves the interface slightly each minute to reduce static OLED/LCD wear.",
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Kiosk display", fontWeight = FontWeight.SemiBold)
+                        Text(
+                            "Hide Android system bars; swipe from an edge for temporary access.",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Switch(checked = kioskMode, onCheckedChange = { kioskMode = it })
+                }
+                OutlinedTextField(
+                    value = ambientAfter,
+                    onValueChange = { ambientAfter = it.filter(Char::isDigit).take(2) },
+                    label = { Text("Ambient mode after (minutes)") },
+                    supportingText = { Text("1–60 minutes; any touch wakes the dashboard.") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                )
             }
         }
         item {
@@ -891,7 +922,13 @@ private fun SettingsScreen(state: PilotUiState, model: PilotViewModel) {
                 )
                 Button(
                     onClick = {
-                        model.updateSettings(refresh.toIntOrNull() ?: 15, keepAwake, nightMode)
+                        model.updateSettings(
+                            refresh.toIntOrNull() ?: 15,
+                            keepAwake,
+                            nightMode,
+                            kioskMode,
+                            ambientAfter.toIntOrNull() ?: 5,
+                        )
                     },
                 ) { Text("Save settings") }
             }

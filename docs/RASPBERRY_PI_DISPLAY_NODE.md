@@ -66,6 +66,28 @@ holds the room-scoped device credential and proxies bounded media requests to
 Pilot Core; neither the browser nor the Pi receives Home Assistant, Music
 Assistant, or Pilot administrator credentials.
 
+## Current source release
+
+The display service and touch UI now also implement:
+
+- a configurable `display` or `media-console` presentation mode;
+- a persistent selected room/output stored in browser-local presentation
+  state, without persisting a credential in the browser;
+- five-second local status/media refresh and a device-authenticated product
+  snapshot refresh through the loopback proxy;
+- stale-state indication and visual de-emphasis rather than silently showing
+  old data as live;
+- now-playing progress and an up-next queue hint;
+- an on-screen touch keyboard for music search;
+- a loopback-only client-event snapshot proxy and assistant response overlay
+  driven by `pilot.assistant.completed.v1` events.
+
+The updated Python service tests and JavaScript syntax check validate these
+source paths. They have not yet replaced the physically accepted Pi release
+described below. A new deployment requires the normal immutable-release,
+health, touch and rollback acceptance before these additions can be called
+operational on `pilot-display-pi`.
+
 ## Storage controls
 
 The 16 GB card is sufficient for the appliance:
@@ -97,6 +119,15 @@ mode-0600 controller copy of the device credential before making changes. A
 pending display-mode reboot is recorded on disk, so an interrupted playbook
 resumes safely.
 
+Use the standard wall-display experience by leaving:
+
+```yaml
+display_node_mode: display
+```
+
+The same service can seed an N150 television shell with
+`display_node_mode: media-console`; see [N150_MEDIA_CONSOLE.md](N150_MEDIA_CONSOLE.md).
+
 ## Operations
 
 ```bash
@@ -119,7 +150,7 @@ directions successfully.
 
 ## Acceptance receipt
 
-The deployed node passed:
+The previously deployed Pi release passed:
 
 - native 1024 x 600 KMS mode after reboot
 - ILITEK touchscreen discovery on `seat0`, unprivileged input access, Chromium
@@ -132,3 +163,8 @@ The deployed node passed:
 - 466 MiB active memory use with about 1.3 GiB available
 - no current or historical thermal throttling
 - two-way application rollback
+
+After promoting the current source release, repeat those checks and also
+verify output persistence, the touch keyboard, progress/queue updates, stale
+recovery and a real assistant-completion overlay. Until that run is recorded,
+the new UI behavior is **built and tested in source but awaiting Pi acceptance**.

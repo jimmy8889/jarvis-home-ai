@@ -1,6 +1,6 @@
 # Pilot Core production operations
 
-Pilot Core 0.11 provides a repeatable central deployment without enabling any
+Pilot Core 0.25 provides a repeatable central deployment without enabling any
 audible room action. The production Compose definition uses a read-only root
 filesystem, drops all Linux capabilities, prevents privilege escalation, limits
 process count and log growth, and stores persistent data in one named volume.
@@ -103,6 +103,10 @@ JavaScript shell are public on the trusted bind address, but every operational
 payload and command requires the administrator bearer token. The dashboard
 does not expose audible actions. Its **Clear transient state** action sends only
 the existing non-audible `cancel` command.
+
+The pairing panel renders a local QR containing only the short-lived,
+single-use grant and also exposes a copyable code for clients without a camera.
+The permanent device token is issued only after that grant is redeemed.
 
 Media Room player state is read through `/v1/media/state`,
 `/v1/rooms/media-room/media-state`, and the dashboard. The Denon and Shield

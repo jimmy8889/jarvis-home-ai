@@ -1,6 +1,6 @@
 # Pilot OS Blueprint
 
-Version 4.0
+Version 4.1
 
 Last updated: 2026-07-22
 
@@ -111,16 +111,18 @@ Music streams: TCP 8097
 Sendspin server: TCP 8927
 Pilot Core: 10.0.1.64:8770
 Pilot Core host: debian-docker / Debian 12
-Pilot Core target image: jarvis-home-ai/pilot-core:core-0.24.1-20260721.1
+Pilot Core target image: jarvis-home-ai/pilot-core:core-0.25.0-20260722.1
+Pilot Core deployed commit: 9c8bac75db84464de9734f44130a31d049cb646d
 ```
 
-That image is the deployed production baseline. The current source release adds
-the device manifest and recoverable product snapshot contracts, authenticated
+That image is the deployed production baseline. Pilot Core 0.25 provides the
+device manifest and recoverable product snapshot contracts, authenticated
 resumable client events, persistent entity presentation/trust policy,
 single-use client pairing profiles, credential rotation/revocation, richer
-media commands and structured assistant output. Those additions are source
-tested and must pass the normal cold-backup, deploy, readiness and persistence
-procedure before this section records them as production.
+media commands and structured assistant output. Promotion created and verified
+a cold pre-deploy backup, preserved the existing data volume and secrets, and
+passed version, commit-marker, readiness, authenticated API, Home Assistant,
+Music Assistant, TTS, Office reconnect and backup-integrity checks.
 
 The Home Assistant add-on is the preferred initial Music Assistant deployment.
 It provides simple lifecycle management and close HA integration. A standalone
@@ -1066,3 +1068,8 @@ deployed integration, hardware boundary, or milestone status changes.
   Pi, Shield and N150 acceptance remain explicitly separate. Dedicated
   production Whisper on the RTX 3080 remains deferred until that GPU is
   installed.
+- **4.1** — Promoted Pilot Core 0.25.0 as immutable image
+  `core-0.25.0-20260722.1` at commit `9c8bac75`; verified the cold rollback
+  archive, persistent image pin, authenticated operations/devices/presentation
+  endpoints, Home Assistant, Music Assistant, TTS and Office room reconnect.
+  Native clients and hardware surfaces remain awaiting physical acceptance.

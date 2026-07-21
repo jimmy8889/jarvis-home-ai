@@ -40,10 +40,12 @@
 - Extended CI to test the display service, validate display JavaScript and all
   product schema JSON, and run the iOS test target on an available simulator.
 - Updated product and operations documentation to separate source-tested,
-  deployed-healthy and physically accepted capabilities. This source release
-  still requires normal Core promotion and real phone/tablet/Shield/Pi/N150
-  acceptance. Dedicated production Whisper deployment remains deferred until
-  the RTX 3080 is installed.
+  deployed-healthy and physically accepted capabilities. Pilot Core 0.25.0 was
+  promoted as immutable image `core-0.25.0-20260722.1` after a verified cold
+  backup and passed readiness, authenticated API, Home Assistant, Music
+  Assistant, TTS and Office reconnect checks. Real phone/tablet/Shield/Pi/N150
+  acceptance remains outstanding. Dedicated production Whisper deployment
+  remains deferred until the RTX 3080 is installed.
 
 ## 2026-07-20
 

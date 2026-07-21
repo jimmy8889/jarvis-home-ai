@@ -9,8 +9,7 @@ wall-display, voice, and LLM search surfaces receive only the curated projection
 
 ## Included by default
 
-- lighting, climate, covers, fans, locks, alarms, scenes, switches and useful
-  helpers;
+- semantic lighting, climate, covers, fans, locks, alarms, scenes and switches;
 - cameras, media players, vacuums, people and weather;
 - environmental, safety, occupancy, security, battery, energy and power sensors;
 - explicitly configured Pilot weather, temperature and energy entities.
@@ -21,6 +20,8 @@ wall-display, voice, and LLM search surfaces receive only the curated projection
 - Home Assistant `diagnostic` and `config` entity categories;
 - firmware, identify, restart, uptime, last-seen, RSSI, LQI and link-quality
   internals;
+- raw Zigbee hardware IDs, mmWave target coordinates/resolution and duplicate
+  low-level presence sources when a semantic aggregate is available;
 - update, automation, script, button, number, text, select, time and other
   implementation-oriented domains until a product surface explicitly governs
   them;

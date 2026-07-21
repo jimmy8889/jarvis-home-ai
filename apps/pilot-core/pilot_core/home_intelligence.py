@@ -18,6 +18,7 @@ class HomeResolutionError(ValueError):
 _ENTITY_ID = re.compile(r"^[a-z0-9_]+\.[a-z0-9_]+$")
 _CONTROL_CHARACTERS = re.compile(r"[\x00-\x1f\x7f]+")
 _NON_WORD = re.compile(r"[^a-z0-9]+")
+_RAW_HARDWARE_ENTITY = re.compile(r"^0x[0-9a-f]{8,}$")
 _SAFE_ATTRIBUTES = frozenset(
     {
         "attribution",
@@ -68,7 +69,6 @@ _PUBLIC_DOMAINS = frozenset(
         "climate",
         "cover",
         "fan",
-        "input_boolean",
         "light",
         "lock",
         "media_player",
@@ -185,12 +185,21 @@ _INTERNAL_ENTITY_TERMS = frozenset(
     {
         "firmware",
         "identify",
+        "ld2420",
+        "ld2450",
         "last_seen",
         "linkquality",
         "lqi",
+        "moving_distance",
+        "raw_",
         "restart",
+        "resolution",
         "rssi",
         "signal_strength",
+        "still_target",
+        "target_1",
+        "target_2",
+        "target_3",
         "uptime",
     }
 )
@@ -720,6 +729,8 @@ class HomeIntelligence:
             return False
         entity_id = str(entity.get("entity_id", ""))
         domain, _, local_id = entity_id.partition(".")
+        if _RAW_HARDWARE_ENTITY.fullmatch(local_id):
+            return False
         if any(term in local_id for term in _INTERNAL_ENTITY_TERMS):
             return False
         if domain in _PUBLIC_DOMAINS:

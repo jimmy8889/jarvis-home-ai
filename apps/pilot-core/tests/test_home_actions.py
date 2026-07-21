@@ -141,6 +141,22 @@ class HomeActionApiTests(unittest.TestCase):
                     "attributes": {"friendly_name": "Office Internal Light"},
                     "last_updated": "2026-07-21T00:00:00+00:00",
                 },
+                {
+                    "entity_id": "light.0xa4c138b01d2d952e",
+                    "state": "off",
+                    "attributes": {"friendly_name": "Office Lamp Hardware"},
+                    "last_updated": "2026-07-21T00:00:00+00:00",
+                },
+                {
+                    "entity_id": "sensor.office_ld2450_target_1_x",
+                    "state": "310",
+                    "attributes": {
+                        "friendly_name": "Office Target 1 X",
+                        "device_class": "distance",
+                        "unit_of_measurement": "mm",
+                    },
+                    "last_updated": "2026-07-21T00:00:00+00:00",
+                },
             ],
             synced_at=datetime.now(UTC).isoformat(),
             registry_metadata={
@@ -153,6 +169,8 @@ class HomeActionApiTests(unittest.TestCase):
                     "area_id": "james_office",
                     "hidden_by": "integration",
                 },
+                "light.0xa4c138b01d2d952e": {"area_id": "james_office"},
+                "sensor.office_ld2450_target_1_x": {"area_id": "james_office"},
             },
         )
         self.store.replace_home_catalog(sync_id, records)
@@ -187,6 +205,8 @@ class HomeActionApiTests(unittest.TestCase):
         self.assertNotIn("lock.bedroom_door", response.text)
         self.assertNotIn("sensor.office_linkquality", response.text)
         self.assertNotIn("light.office_internal", response.text)
+        self.assertNotIn("light.0xa4c138b01d2d952e", response.text)
+        self.assertNotIn("sensor.office_ld2450_target_1_x", response.text)
 
     def test_fixed_room_device_cannot_project_another_room(self) -> None:
         response = self.client.get(

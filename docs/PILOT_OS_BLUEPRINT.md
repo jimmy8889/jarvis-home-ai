@@ -97,7 +97,7 @@ Music streams: TCP 8097
 Sendspin server: TCP 8927
 Pilot Core: 10.0.1.64:8770
 Pilot Core host: debian-docker / Debian 12
-Pilot Core target image: jarvis-home-ai/pilot-core:core-0.24.0-20260721.1
+Pilot Core target image: jarvis-home-ai/pilot-core:core-0.24.1-20260721.1
 ```
 
 The Home Assistant add-on is the preferred initial Music Assistant deployment.

@@ -20,10 +20,12 @@ The observability model reports one of:
 - `degraded`: one or more provider, endpoint, freshness, or player warnings;
 - `critical`: reserved for conditions that make the control plane unsafe.
 
-Checks cover configured integrations, enrolled room endpoints, 90-second
+Checks cover configured integrations, explicitly enrolled `realtime-agent`
+room endpoints, 90-second
 telemetry freshness, normalized media-player resolution, and control-gate
 visibility. Rooms with no endpoint are reported as `not_enrolled` rather than
-being silently treated as connected.
+being silently treated as connected. Polling and user-launched clients are
+reported as `on_demand`; their lack of a permanent WebSocket is not an outage.
 
 Metrics intentionally expose no credentials, unfiltered provider payloads,
 media titles, device MAC addresses, or personal content. Current gauges cover

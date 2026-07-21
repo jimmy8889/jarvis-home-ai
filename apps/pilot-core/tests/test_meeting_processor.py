@@ -167,6 +167,19 @@ class MeetingProcessorTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(MeetingProcessingError, "timestamped segments"):
             await processor.transcribe(recording, "en")
 
+    async def test_meeting_analysis_can_use_a_dedicated_model(self) -> None:
+        processor = MeetingProcessor(
+            self.store,
+            IntegrationSettings(
+                llm_provider="openai",
+                llm_url="http://ollama.internal:11434/v1",
+                llm_model="fast-voice-model",
+                meeting_analysis_model="strong-meeting-model",
+            ),
+        )
+
+        self.assertEqual(processor.status()["analysis_model"], "strong-meeting-model")
+
 
 if __name__ == "__main__":
     unittest.main()

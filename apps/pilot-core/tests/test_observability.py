@@ -40,6 +40,7 @@ class ObservabilityTests(unittest.TestCase):
                         {
                             "id": "pilot-office",
                             "name": "Office N150",
+                            "capabilities": ["realtime-agent"],
                             "connected": True,
                             "health": {
                                 "updated_at": (
@@ -113,6 +114,25 @@ class ObservabilityTests(unittest.TestCase):
         self.assertIn(
             'pilot_core_observability_status{status="guarded"} 1',
             metrics,
+        )
+
+    def test_on_demand_clients_do_not_raise_false_offline_alerts(self) -> None:
+        snapshot = self.snapshot()
+        device = snapshot["rooms"]["office"]["devices"][0]
+        device["id"] = "pilot-ios-james"
+        device["name"] = "James iPhone"
+        device["capabilities"] = ["meetings", "media-control"]
+        device["connected"] = False
+        device["health"] = None
+
+        result = evaluate_observability(snapshot)
+
+        self.assertEqual(result["status"], "guarded")
+        self.assertEqual(result["summary"]["offline_device_count"], 0)
+        self.assertFalse(any(alert["code"] == "DEVICE_OFFLINE" for alert in result["alerts"]))
+        self.assertIn(
+            "on_demand",
+            {check["status"] for check in result["checks"]},
         )
 
 

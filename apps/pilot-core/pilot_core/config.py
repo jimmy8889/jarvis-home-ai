@@ -71,6 +71,7 @@ class IntegrationSettings:
     meeting_stt_token_env: str = "PILOT_MEETING_STT_TOKEN"
     meeting_stt_model: str = "whisper-1"
     meeting_stt_timeout_seconds: int = 600
+    meeting_analysis_model: str = ""
     meeting_transcript_max_characters: int = 500_000
 
 
@@ -394,6 +395,9 @@ def load_settings(path: str | Path) -> Settings:
         meeting_stt_timeout_seconds=int(
             integration_values.get("meeting_stt_timeout_seconds", 600)
         ),
+        meeting_analysis_model=str(
+            integration_values.get("meeting_analysis_model", "")
+        ).strip(),
         meeting_transcript_max_characters=int(
             integration_values.get("meeting_transcript_max_characters", 500_000)
         ),

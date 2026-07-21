@@ -113,6 +113,29 @@ final class PilotTests: XCTestCase {
         XCTAssertEqual(envelope.meetings[0].actionItemCount, 2)
     }
 
+    func testMeetingDetailDecodesEvidenceLinkedOutput() throws {
+        let data = Data(
+            """
+            {
+              "id":"meeting-1","title":"Planning","language":"en-AU",
+              "source_device_id":"pilot-ios-james","started_at":"2026-07-21T00:00:00Z",
+              "ended_at":null,"status":"ready","summary":"Release approved.",
+              "recording":{"filename":"meeting.m4a","content_type":"audio/m4a","sha256":"abc","size_bytes":2048,"created_at":"2026-07-21T00:10:00Z"},
+              "participants":[],
+              "transcript":[{"id":"segment-1","sequence":0,"speaker_label":"James","start_ms":0,"end_ms":2500,"text":"Ship it.","confidence":0.94,"created_at":"2026-07-21T00:10:00Z"}],
+              "decisions":[{"id":"decision-1","summary":"Release approved.","segment_ids":["segment-1"],"created_at":"2026-07-21T00:10:00Z"}],
+              "action_items":[{"id":"action-1","task":"Publish notes","owner":"James","due_at":null,"status":"open","confidence":0.9,"segment_ids":["segment-1"],"created_at":"2026-07-21T00:10:00Z","updated_at":"2026-07-21T00:10:00Z"}],
+              "created_at":"2026-07-21T00:00:00Z","updated_at":"2026-07-21T00:10:00Z"
+            }
+            """.utf8
+        )
+
+        let meeting = try JSONDecoder().decode(PilotMeetingDetail.self, from: data)
+        XCTAssertEqual(meeting.transcript[0].speakerLabel, "James")
+        XCTAssertEqual(meeting.decisions[0].segmentIDs, ["segment-1"])
+        XCTAssertEqual(meeting.actionItems[0].task, "Publish notes")
+    }
+
     @MainActor
     func testPreviewModelHasAdaptiveProductContent() {
         let model = PilotModel.preview()

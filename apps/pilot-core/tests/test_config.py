@@ -142,6 +142,7 @@ tts_provider = "home_assistant"
 llm_provider = "openai"
 llm_url = "http://rtx.local:11434/v1"
 llm_model = "qwen3:8b"
+meeting_analysis_model = "gemma4:12b"
 llm_max_tool_rounds = 3
 
 [[rooms]]""",
@@ -149,6 +150,7 @@ llm_max_tool_rounds = 3
         )
         settings = self._load(configured)
         self.assertEqual(settings.integrations.llm_model, "qwen3:8b")
+        self.assertEqual(settings.integrations.meeting_analysis_model, "gemma4:12b")
         self.assertEqual(settings.integrations.llm_max_tool_rounds, 3)
 
         invalid = VALID_CONFIG.replace(

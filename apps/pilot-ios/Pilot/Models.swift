@@ -408,3 +408,98 @@ struct PilotMeeting: Codable, Identifiable, Hashable, Sendable {
         }
     }
 }
+
+struct PilotMeetingDetail: Codable, Identifiable, Hashable, Sendable {
+    let id: String
+    let title: String
+    let language: String
+    let sourceDeviceID: String?
+    let startedAt: String
+    let endedAt: String?
+    let status: String
+    let summary: String?
+    let recording: MeetingRecording?
+    let participants: [MeetingParticipant]
+    let transcript: [MeetingTranscriptSegment]
+    let decisions: [MeetingDecision]
+    let actionItems: [MeetingActionItem]
+
+    enum CodingKeys: String, CodingKey {
+        case id, title, language, status, summary, recording, participants, transcript, decisions
+        case sourceDeviceID = "source_device_id"
+        case startedAt = "started_at"
+        case endedAt = "ended_at"
+        case actionItems = "action_items"
+    }
+}
+
+struct MeetingRecording: Codable, Hashable, Sendable {
+    let filename: String
+    let contentType: String
+    let sha256: String
+    let sizeBytes: Int
+    let createdAt: String
+
+    enum CodingKeys: String, CodingKey {
+        case filename, sha256
+        case contentType = "content_type"
+        case sizeBytes = "size_bytes"
+        case createdAt = "created_at"
+    }
+}
+
+struct MeetingParticipant: Codable, Identifiable, Hashable, Sendable {
+    let id: String
+    let displayName: String?
+    let speakerLabel: String
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case displayName = "display_name"
+        case speakerLabel = "speaker_label"
+    }
+}
+
+struct MeetingTranscriptSegment: Codable, Identifiable, Hashable, Sendable {
+    let id: String
+    let sequence: Int
+    let speakerLabel: String
+    let startMS: Int
+    let endMS: Int
+    let text: String
+    let confidence: Double?
+
+    enum CodingKeys: String, CodingKey {
+        case id, sequence, text, confidence
+        case speakerLabel = "speaker_label"
+        case startMS = "start_ms"
+        case endMS = "end_ms"
+    }
+}
+
+struct MeetingDecision: Codable, Identifiable, Hashable, Sendable {
+    let id: String
+    let summary: String
+    let segmentIDs: [String]
+
+    enum CodingKeys: String, CodingKey {
+        case id, summary
+        case segmentIDs = "segment_ids"
+    }
+}
+
+struct MeetingActionItem: Codable, Identifiable, Hashable, Sendable {
+    let id: String
+    let task: String
+    let owner: String?
+    let dueAt: String?
+    let status: String
+    let confidence: Double?
+    let segmentIDs: [String]
+
+    enum CodingKeys: String, CodingKey {
+        case id, task, owner, status, confidence
+        case dueAt = "due_at"
+        case segmentIDs = "segment_ids"
+    }
+}

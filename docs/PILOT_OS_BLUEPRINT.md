@@ -1,6 +1,6 @@
 # Pilot OS Blueprint
 
-Version 3.5
+Version 3.6
 
 Last updated: 2026-07-20
 
@@ -97,7 +97,7 @@ Music streams: TCP 8097
 Sendspin server: TCP 8927
 Pilot Core: 10.0.1.64:8770
 Pilot Core host: debian-docker / Debian 12
-Pilot Core image: jarvis-home-ai/pilot-core:core-0.19.1-20260720.1
+Pilot Core target image: jarvis-home-ai/pilot-core:core-0.24.0-20260721.1
 ```
 
 The Home Assistant add-on is the preferred initial Music Assistant deployment.
@@ -691,6 +691,7 @@ deployed integration, hardware boundary, or milestone status changes.
 
 - [x] Read-only Home Assistant entity, device, area, floor, and alias inventory
 - [x] Bounded catalogue security classification and attribute projection
+- [x] Curated client/assistant entity exposure with diagnostic and helper filtering
 - [x] Persistent catalogue freshness, missing, stale, and outage handling
 - [x] Semantic entity search and ambiguity-safe read tools
 - [x] Pilot Core coverage, catalogue, area, device, floor, and energy APIs
@@ -715,6 +716,8 @@ deployed integration, hardware boundary, or milestone status changes.
 - [ ] Multi-speaker diarisation and participant review
 - [ ] macOS dictation client
 - [x] iOS meeting capture and status client foundation
+- [x] iOS timestamped transcript, decision, action, and evidence review surface
+- [x] Dedicated stronger Ollama model selection for meeting analysis
 
 ### Phase 6 — Memory and advanced workflows
 
@@ -937,3 +940,7 @@ deployed integration, hardware boundary, or milestone status changes.
   capability- and ownership-scoped mobile APIs, and Pilot iOS background AAC
   capture/upload/status UI. Production Whisper deployment, diarisation, and
   physical long-recording acceptance remain explicit follow-up gates.
+- **3.9** — Added Core 0.24's curated Home Assistant exposure policy,
+  on-demand versus realtime endpoint health semantics, an independent stronger
+  Ollama model for meeting analysis, and Pilot iOS review of timestamped
+  transcripts, evidence-linked decisions, and actions.

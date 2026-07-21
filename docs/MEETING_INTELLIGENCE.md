@@ -1,6 +1,6 @@
 # Meeting intelligence foundation
 
-Pilot Core 0.23 contains the local storage, processing, retrieval, and
+Pilot Core 0.24 contains the local storage, processing, retrieval, and
 device-scoped client contract for meeting intelligence. The original 0.10
 ingestion foundation remains, now joined by local speech and analysis workers.
 
@@ -54,7 +54,9 @@ reason.
 The meeting worker calls an OpenAI-compatible Whisper endpoint only when it is
 configured on a private/local address. It requests timestamped segments,
 normalizes confidence, bounds transcript size, and fails closed for public STT
-URLs. Pilot's local LLM then creates a summary, decisions, and actions. Any
+URLs. Pilot's local LLM then creates a summary, decisions, and actions. Meeting
+analysis may use a dedicated stronger model while the latency-sensitive voice
+path remains on its faster model. Any
 decision or action lacking a valid source-segment ID is discarded.
 
 The assistant can search meeting titles, summaries, transcripts, decisions,
@@ -64,8 +66,8 @@ will be added only after production transcript quality is measured.
 
 Pilot iOS can create a meeting, record mono AAC with the iOS background-audio
 mode, upload the recording, queue processing, and display processing status,
-summaries, transcript counts, and action counts. Real-device background and
-long-meeting acceptance remains required.
+summaries, evidence-linked decisions and actions, and the timestamped speaker
+transcript. Real-device background and long-meeting acceptance remains required.
 
 ## Remaining work
 

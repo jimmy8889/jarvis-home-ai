@@ -934,7 +934,12 @@ private struct MeetingsView: View {
                         .padding(.vertical, 34)
                     } else {
                         ForEach(model.meetings) { meeting in
-                            MeetingCard(meeting: meeting)
+                            NavigationLink {
+                                MeetingDetailView(meetingID: meeting.id)
+                            } label: {
+                                MeetingCard(meeting: meeting)
+                            }
+                            .buttonStyle(.plain)
                         }
                     }
                 }
@@ -1011,6 +1016,156 @@ private struct MeetingsView: View {
         .padding(18)
         .background(PilotTheme.card, in: RoundedRectangle(cornerRadius: 24))
         .overlay { RoundedRectangle(cornerRadius: 24).stroke(PilotTheme.border) }
+    }
+}
+
+private struct MeetingDetailView: View {
+    @Environment(PilotModel.self) private var model
+    let meetingID: String
+
+    var body: some View {
+        ZStack {
+            PilotTheme.background.ignoresSafeArea()
+            if model.isLoadingMeetingDetail && model.selectedMeeting?.id != meetingID {
+                ProgressView("Loading private meeting record…")
+            } else if let meeting = model.selectedMeeting, meeting.id == meetingID {
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 22) {
+                        header(meeting)
+                        if let summary = meeting.summary, !summary.isEmpty {
+                            detailSection("Summary", symbol: "sparkles") {
+                                Text(summary).foregroundStyle(.secondary)
+                            }
+                        }
+                        if !meeting.actionItems.isEmpty {
+                            detailSection("Action items", symbol: "checklist") {
+                                ForEach(meeting.actionItems) { action in
+                                    VStack(alignment: .leading, spacing: 7) {
+                                        Text(action.task).font(.headline)
+                                        HStack(spacing: 12) {
+                                            if let owner = action.owner, !owner.isEmpty {
+                                                Label(owner, systemImage: "person")
+                                            }
+                                            if let due = action.dueAt {
+                                                Label(Self.date(due), systemImage: "calendar")
+                                            }
+                                            evidenceLabel(action.segmentIDs.count)
+                                        }
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                    }
+                                    .padding(.vertical, 5)
+                                }
+                            }
+                        }
+                        if !meeting.decisions.isEmpty {
+                            detailSection("Decisions", symbol: "checkmark.seal") {
+                                ForEach(meeting.decisions) { decision in
+                                    VStack(alignment: .leading, spacing: 6) {
+                                        Text(decision.summary)
+                                        evidenceLabel(decision.segmentIDs.count)
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    .padding(.vertical, 4)
+                                }
+                            }
+                        }
+                        detailSection("Transcript", symbol: "text.quote") {
+                            if meeting.transcript.isEmpty {
+                                Text("The timestamped transcript will appear after local processing.")
+                                    .foregroundStyle(.secondary)
+                            } else {
+                                ForEach(meeting.transcript) { segment in
+                                    HStack(alignment: .top, spacing: 12) {
+                                        Text(Self.duration(segment.startMS))
+                                            .font(.system(.caption, design: .monospaced))
+                                            .foregroundStyle(PilotTheme.cyan)
+                                            .frame(width: 48, alignment: .leading)
+                                        VStack(alignment: .leading, spacing: 3) {
+                                            Text(segment.speakerLabel)
+                                                .font(.caption.weight(.semibold))
+                                                .foregroundStyle(.secondary)
+                                            Text(segment.text)
+                                        }
+                                    }
+                                    .padding(.vertical, 5)
+                                }
+                            }
+                        }
+                    }
+                    .frame(maxWidth: 900)
+                    .padding(18)
+                    .padding(.bottom, 60)
+                    .frame(maxWidth: .infinity)
+                }
+                .refreshable { await model.loadMeeting(meetingID) }
+            } else {
+                ContentUnavailableView(
+                    "Meeting unavailable",
+                    systemImage: "exclamationmark.triangle",
+                    description: Text(
+                        model.meetingError ?? "Pilot Core could not load this meeting."
+                    )
+                )
+            }
+        }
+        .navigationTitle("Meeting")
+        .navigationBarTitleDisplayMode(.inline)
+        .task { await model.loadMeeting(meetingID) }
+    }
+
+    private func header(_ meeting: PilotMeetingDetail) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(meeting.title).font(.largeTitle.bold())
+            HStack(spacing: 14) {
+                Label(Self.date(meeting.startedAt), systemImage: "calendar")
+                Label(meeting.status.capitalized, systemImage: "lock.shield")
+                if let recording = meeting.recording {
+                    Label(
+                        ByteCountFormatter.string(
+                            fromByteCount: Int64(recording.sizeBytes),
+                            countStyle: .file
+                        ),
+                        systemImage: "waveform"
+                    )
+                }
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
+    }
+
+    private func detailSection<Content: View>(
+        _ title: String,
+        symbol: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 13) {
+            Label(title, systemImage: symbol)
+                .font(.title3.bold())
+                .foregroundStyle(PilotTheme.cyan)
+            content()
+        }
+        .padding(18)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(PilotTheme.card, in: RoundedRectangle(cornerRadius: 22))
+        .overlay { RoundedRectangle(cornerRadius: 22).stroke(PilotTheme.border) }
+    }
+
+    private func evidenceLabel(_ count: Int) -> some View {
+        Label("\(count) source\(count == 1 ? "" : "s")", systemImage: "link")
+    }
+
+    private static func duration(_ milliseconds: Int) -> String {
+        let seconds = max(0, milliseconds / 1000)
+        return String(format: "%02d:%02d", seconds / 60, seconds % 60)
+    }
+
+    private static func date(_ value: String) -> String {
+        let formatter = ISO8601DateFormatter()
+        guard let date = formatter.date(from: value) else { return value }
+        return date.formatted(date: .abbreviated, time: .shortened)
     }
 }
 

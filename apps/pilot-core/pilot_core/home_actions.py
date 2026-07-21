@@ -81,6 +81,8 @@ class HomeActions:
                 limit=1000,
             )
             for entity in page["entities"]:
+                if not self.intelligence.is_relevant(entity):
+                    continue
                 if entity["entity_id"] in seen:
                     continue
                 seen.add(entity["entity_id"])
@@ -400,6 +402,7 @@ class HomeActions:
         return None
 
     def _project_entity(self, entity: dict[str, Any]) -> dict[str, Any]:
+        entity = self.intelligence.public_entity(entity)
         return {
             "entity_id": entity["entity_id"],
             "domain": entity["domain"],

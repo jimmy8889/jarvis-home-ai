@@ -57,6 +57,7 @@ meeting_stt_url = ""
 meeting_stt_token_env = "PILOT_MEETING_STT_TOKEN"
 meeting_stt_model = "whisper-1"
 meeting_stt_timeout_seconds = 600
+meeting_analysis_model = "gemma4:12b"
 meeting_transcript_max_characters = 500000
 
 [[rooms]]

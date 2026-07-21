@@ -115,7 +115,11 @@ class MeetingProcessor:
     ) -> None:
         self.store = store
         self.settings = settings
-        self.llm = llm or OpenAICompatibleLLM(settings, transport=transport)
+        self.llm = llm or OpenAICompatibleLLM(
+            settings,
+            transport=transport,
+            model=settings.meeting_analysis_model or settings.llm_model,
+        )
         self.transport = transport
 
     def status(self) -> dict[str, Any]:

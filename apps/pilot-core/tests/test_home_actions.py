@@ -119,12 +119,40 @@ class HomeActionApiTests(unittest.TestCase):
                     "attributes": {"friendly_name": "Unassigned"},
                     "last_updated": "2026-07-21T00:00:00+00:00",
                 },
+                {
+                    "entity_id": "sensor.office_temperature",
+                    "state": "23.4",
+                    "attributes": {
+                        "friendly_name": "Office Temperature",
+                        "device_class": "temperature",
+                        "unit_of_measurement": "°C",
+                    },
+                    "last_updated": "2026-07-21T00:00:00+00:00",
+                },
+                {
+                    "entity_id": "sensor.office_linkquality",
+                    "state": "91",
+                    "attributes": {"friendly_name": "Office Linkquality"},
+                    "last_updated": "2026-07-21T00:00:00+00:00",
+                },
+                {
+                    "entity_id": "light.office_internal",
+                    "state": "off",
+                    "attributes": {"friendly_name": "Office Internal Light"},
+                    "last_updated": "2026-07-21T00:00:00+00:00",
+                },
             ],
             synced_at=datetime.now(UTC).isoformat(),
             registry_metadata={
                 "light.office_lamp": {"area_id": "james_office"},
                 "lock.bedroom_door": {"area_id": "bedroom"},
                 "switch.unassigned": {"area_id": None},
+                "sensor.office_temperature": {"area_id": "james_office"},
+                "sensor.office_linkquality": {"area_id": "james_office"},
+                "light.office_internal": {
+                    "area_id": "james_office",
+                    "hidden_by": "integration",
+                },
             },
         )
         self.store.replace_home_catalog(sync_id, records)
@@ -149,11 +177,16 @@ class HomeActionApiTests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(response.headers["cache-control"], "no-store")
-        self.assertEqual(response.json()["entity_count"], 1)
-        entity = response.json()["entities"][0]
+        self.assertEqual(response.json()["entity_count"], 2)
+        entity = next(
+            item for item in response.json()["entities"]
+            if item["entity_id"] == "light.office_lamp"
+        )
         self.assertEqual(entity["entity_id"], "light.office_lamp")
         self.assertIn("set_brightness", entity["actions"])
         self.assertNotIn("lock.bedroom_door", response.text)
+        self.assertNotIn("sensor.office_linkquality", response.text)
+        self.assertNotIn("light.office_internal", response.text)
 
     def test_fixed_room_device_cannot_project_another_room(self) -> None:
         response = self.client.get(

@@ -76,6 +76,8 @@ def evaluate_observability(
             )
         for device in devices:
             device_id = str(device.get("id", "unknown"))
+            capabilities = set(device.get("capabilities") or [])
+            persistent = "realtime-agent" in capabilities
             connected = device.get("connected") is True
             health = device.get("health") or {}
             health_at = _timestamp(health.get("updated_at"))
@@ -86,15 +88,17 @@ def evaluate_observability(
             )
             stale = age_seconds is None or age_seconds > device_stale_after_seconds
             ready = (health.get("payload") or {}).get("ready") is True
-            status = "ok"
-            if not connected:
+            status = "on_demand"
+            if persistent and not connected:
                 status = "offline"
                 offline_devices += 1
-            elif stale:
+            elif persistent and stale:
                 status = "stale"
                 stale_devices += 1
-            elif not ready:
+            elif persistent and not ready:
                 status = "not_ready"
+            elif persistent:
+                status = "ok"
             checks.append(
                 {
                     "kind": "device",
@@ -104,7 +108,7 @@ def evaluate_observability(
                     "telemetry_age_seconds": age_seconds,
                 }
             )
-            if status != "ok":
+            if status not in {"ok", "on_demand"}:
                 alerts.append(
                     {
                         "severity": "warning",

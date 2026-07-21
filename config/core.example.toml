@@ -67,6 +67,8 @@ meeting_stt_url = "http://whisper.internal:8000/v1"
 meeting_stt_token_env = "PILOT_MEETING_STT_TOKEN"
 meeting_stt_model = "whisper-1"
 meeting_stt_timeout_seconds = 600
+# Optional stronger Ollama/OpenAI-compatible model used only after transcription.
+meeting_analysis_model = ""
 meeting_transcript_max_characters = 500000
 
 [[rooms]]

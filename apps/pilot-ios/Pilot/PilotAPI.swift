@@ -132,6 +132,13 @@ struct PilotAPI: Sendable {
         return try JSONDecoder().decode(MeetingEnvelope.self, from: data).meetings
     }
 
+    func meeting(_ meetingID: String) async throws -> PilotMeetingDetail {
+        let data = try await request(
+            path: "v1/devices/\(deviceID)/meetings/\(meetingID)"
+        )
+        return try JSONDecoder().decode(PilotMeetingDetail.self, from: data)
+    }
+
     func createMeeting(title: String) async throws -> PilotMeeting {
         let body = try JSONSerialization.data(withJSONObject: [
             "title": title,

@@ -30,6 +30,8 @@ final class PilotModel {
     var meetings: [PilotMeeting] = []
     var meetingError: String?
     var isLoadingMeetings = false
+    var selectedMeeting: PilotMeetingDetail?
+    var isLoadingMeetingDetail = false
     var isRecordingMeeting = false
     var activeMeetingID: String?
     var meetingRecordingStartedAt: Date?
@@ -308,6 +310,19 @@ final class PilotModel {
             meetings = try await api().meetings()
             meetingError = nil
         } catch {
+            meetingError = Self.friendlyMessage(for: error)
+        }
+    }
+
+    func loadMeeting(_ meetingID: String) async {
+        guard isConfigured else { return }
+        isLoadingMeetingDetail = true
+        defer { isLoadingMeetingDetail = false }
+        do {
+            selectedMeeting = try await api().meeting(meetingID)
+            meetingError = nil
+        } catch {
+            selectedMeeting = nil
             meetingError = Self.friendlyMessage(for: error)
         }
     }

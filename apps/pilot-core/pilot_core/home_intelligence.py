@@ -61,6 +61,139 @@ _ENERGY_DEFAULTS: dict[str, tuple[str, ...]] = {
     ),
     "home_load": ("sensor.saj_home_load",),
 }
+_PUBLIC_DOMAINS = frozenset(
+    {
+        "alarm_control_panel",
+        "camera",
+        "climate",
+        "cover",
+        "fan",
+        "input_boolean",
+        "light",
+        "lock",
+        "media_player",
+        "person",
+        "scene",
+        "switch",
+        "vacuum",
+        "weather",
+    }
+)
+_PUBLIC_SENSOR_CLASSES = frozenset(
+    {
+        "apparent_power",
+        "aqi",
+        "atmospheric_pressure",
+        "battery",
+        "carbon_dioxide",
+        "carbon_monoxide",
+        "current",
+        "data_rate",
+        "distance",
+        "duration",
+        "energy",
+        "energy_distance",
+        "frequency",
+        "gas",
+        "humidity",
+        "illuminance",
+        "moisture",
+        "monetary",
+        "nitrogen_dioxide",
+        "nitrogen_monoxide",
+        "nitrous_oxide",
+        "ozone",
+        "pm1",
+        "pm10",
+        "pm25",
+        "power",
+        "power_factor",
+        "precipitation",
+        "precipitation_intensity",
+        "pressure",
+        "reactive_energy",
+        "reactive_power",
+        "sound_pressure",
+        "speed",
+        "sulphur_dioxide",
+        "temperature",
+        "volatile_organic_compounds",
+        "volatile_organic_compounds_parts",
+        "voltage",
+        "volume",
+        "volume_flow_rate",
+        "water",
+        "weight",
+        "wind_speed",
+    }
+)
+_PUBLIC_BINARY_SENSOR_CLASSES = frozenset(
+    {
+        "battery",
+        "battery_charging",
+        "carbon_monoxide",
+        "cold",
+        "connectivity",
+        "door",
+        "garage_door",
+        "gas",
+        "heat",
+        "light",
+        "lock",
+        "moisture",
+        "motion",
+        "occupancy",
+        "opening",
+        "plug",
+        "power",
+        "presence",
+        "problem",
+        "running",
+        "safety",
+        "smoke",
+        "sound",
+        "tamper",
+        "vibration",
+        "window",
+    }
+)
+_PUBLIC_SENSOR_UNITS = frozenset(
+    {
+        "%",
+        "a",
+        "c",
+        "°c",
+        "f",
+        "°f",
+        "hpa",
+        "kpa",
+        "kw",
+        "kwh",
+        "l",
+        "lx",
+        "m/s",
+        "mg/m³",
+        "mm",
+        "pa",
+        "ppm",
+        "v",
+        "w",
+        "wh",
+    }
+)
+_INTERNAL_ENTITY_TERMS = frozenset(
+    {
+        "firmware",
+        "identify",
+        "last_seen",
+        "linkquality",
+        "lqi",
+        "restart",
+        "rssi",
+        "signal_strength",
+        "uptime",
+    }
+)
 HOME_READ_TOOL_NAMES = frozenset(
     {
         "search_home_entities",
@@ -273,6 +406,10 @@ class HomeIntelligence:
                 if key in _SAFE_ATTRIBUTES
                 and (safe := _safe_value(value)) is not None
             }
+            for key in ("disabled_by", "hidden_by", "entity_category"):
+                value = _clean_text(entity_metadata.get(key), 64)
+                if value:
+                    safe_attributes[f"_pilot_registry_{key}"] = value
             normalized.append(
                 {
                     "entity_id": entity_id,
@@ -379,6 +516,9 @@ class HomeIntelligence:
                     "area_id": direct_area or device_area,
                     "device_id": device_id,
                     "aliases": aliases if isinstance(aliases, list) else [],
+                    "disabled_by": item.get("disabled_by"),
+                    "hidden_by": item.get("hidden_by"),
+                    "entity_category": item.get("entity_category"),
                 }
         return {
             "floors": floors,
@@ -486,6 +626,8 @@ class HomeIntelligence:
         tokens = set(normalized.split())
         scored: list[tuple[int, dict[str, Any], str]] = []
         for entity in raw["entities"]:
+            if not self.is_relevant(entity):
+                continue
             fields = {
                 entity["entity_id"].casefold(),
                 entity["name"].casefold(),
@@ -531,7 +673,7 @@ class HomeIntelligence:
         area_id: str | None = None,
     ) -> dict[str, Any]:
         direct = self.entity(query.casefold())
-        if direct and not direct["missing"]:
+        if direct and not direct["missing"] and self.is_relevant(direct):
             if domain and direct["domain"] != domain:
                 raise HomeResolutionError("entity does not match the requested domain")
             if area_id and direct["area_id"] != area_id:
@@ -552,16 +694,66 @@ class HomeIntelligence:
         result = self.catalog(area_id=area_id, limit=500)
         if result["total"] == 0:
             raise HomeResolutionError(f"unknown or empty area: {area}")
-        entities = result["entities"]
+        entities = [item for item in result["entities"] if self.is_relevant(item)]
         return {
             "area_id": area_id,
-            "entity_count": result["total"],
+            "entity_count": len(entities),
             "available_count": sum(not item["unavailable"] for item in entities),
             "unavailable_count": sum(item["unavailable"] for item in entities),
             "stale_count": sum(item["stale"] for item in entities),
             "by_domain": self._counts(entities, "domain"),
             "entities": entities[:100],
         }
+
+    def is_relevant(self, entity: dict[str, Any]) -> bool:
+        """Return whether an entity belongs in user and assistant projections."""
+        attributes = entity.get("attributes") or {}
+        if any(
+            attributes.get(f"_pilot_registry_{key}")
+            for key in ("disabled_by", "hidden_by")
+        ):
+            return False
+        if attributes.get("_pilot_registry_entity_category") in {
+            "config",
+            "diagnostic",
+        }:
+            return False
+        entity_id = str(entity.get("entity_id", ""))
+        domain, _, local_id = entity_id.partition(".")
+        if any(term in local_id for term in _INTERNAL_ENTITY_TERMS):
+            return False
+        if domain in _PUBLIC_DOMAINS:
+            return True
+        device_class = str(attributes.get("device_class", "")).casefold()
+        if domain == "sensor":
+            configured = {
+                self.settings.outdoor_temperature_entity_id,
+                self.settings.indoor_temperature_entity_id,
+                self.settings.energy_solar_power_entity_id,
+                self.settings.energy_grid_power_entity_id,
+                self.settings.energy_battery_power_entity_id,
+                self.settings.energy_battery_soc_entity_id,
+                self.settings.energy_home_load_entity_id,
+            }
+            unit = str(attributes.get("unit_of_measurement", "")).casefold()
+            return (
+                entity_id in configured
+                or device_class in _PUBLIC_SENSOR_CLASSES
+                or unit in _PUBLIC_SENSOR_UNITS
+            )
+        if domain == "binary_sensor":
+            return device_class in _PUBLIC_BINARY_SENSOR_CLASSES
+        return False
+
+    @staticmethod
+    def public_entity(entity: dict[str, Any]) -> dict[str, Any]:
+        projected = dict(entity)
+        projected["attributes"] = {
+            key: value
+            for key, value in (entity.get("attributes") or {}).items()
+            if not key.startswith("_pilot_registry_")
+        }
+        return projected
 
     def coverage(self) -> dict[str, Any]:
         return self.store.home_catalog_coverage(

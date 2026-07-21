@@ -187,19 +187,21 @@ class OpenAICompatibleLLM:
         self,
         settings: IntegrationSettings,
         transport: httpx.AsyncBaseTransport | None = None,
+        model: str | None = None,
     ) -> None:
         self.settings = settings
         self.transport = transport
+        self.model = model or settings.llm_model
 
     def status(self) -> dict[str, Any]:
         return {
             "configured": bool(
                 self.settings.llm_provider == "openai"
                 and self.settings.llm_url
-                and self.settings.llm_model
+                and self.model
             ),
             "provider": self.settings.llm_provider or None,
-            "model": self.settings.llm_model or None,
+            "model": self.model or None,
             "reasoning_effort": self.settings.llm_reasoning_effort or None,
             "max_tool_rounds": self.settings.llm_max_tool_rounds,
             "context_turns": self.settings.llm_context_turns,
@@ -225,7 +227,7 @@ class OpenAICompatibleLLM:
         if token:
             headers["Authorization"] = f"Bearer {token}"
         payload = {
-            "model": self.settings.llm_model,
+            "model": self.model,
             "messages": messages,
             "tools": tools,
             "tool_choice": tool_choice,

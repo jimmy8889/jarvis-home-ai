@@ -7,6 +7,7 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.activity.compose.LocalActivity
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -88,6 +89,7 @@ import java.time.Duration
 import java.time.Instant
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
+import kotlin.math.roundToInt
 
 private enum class PilotDestination(val label: String, val glyph: String) {
     Home("Home", "⌂"),
@@ -383,16 +385,22 @@ private fun HomeEntityControl(
 @Composable
 private fun EnergyFlowCard(energy: EnergySnapshot) {
     val onSurface = MaterialTheme.colorScheme.onSurface
-    val transition = rememberInfiniteTransition(label = "energy-flow")
-    val phase by transition.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(1_700, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart,
-        ),
-        label = "flow-position",
-    )
+    val animationsEnabled = rememberSystemAnimationsEnabled()
+    val phase = if (animationsEnabled) {
+        val transition = rememberInfiniteTransition(label = "energy-flow")
+        val animatedPhase by transition.animateFloat(
+            initialValue = 0f,
+            targetValue = 1f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(1_700, easing = LinearEasing),
+                repeatMode = RepeatMode.Restart,
+            ),
+            label = "flow-position",
+        )
+        animatedPhase
+    } else {
+        .35f
+    }
     Card(
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         shape = RoundedCornerShape(26.dp),
@@ -755,6 +763,10 @@ private fun SettingsScreen(state: PilotUiState, model: PilotViewModel) {
     var ambientAfter by remember(state.config.ambientAfterMinutes) {
         mutableStateOf(state.config.ambientAfterMinutes.toString())
     }
+    var displayBrightness by remember(state.config.displayBrightnessPercent) {
+        mutableStateOf(state.config.displayBrightnessPercent.toFloat())
+    }
+    val activity = LocalActivity.current
     LazyColumn(
         contentPadding = PaddingValues(24.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
@@ -817,6 +829,34 @@ private fun SettingsScreen(state: PilotUiState, model: PilotViewModel) {
                     label = { Text("Ambient mode after (minutes)") },
                     supportingText = { Text("1–60 minutes; any touch wakes the dashboard.") },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Display brightness", fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                    Text("${displayBrightness.roundToInt()}%", color = PilotCyan)
+                }
+                Slider(
+                    value = displayBrightness,
+                    onValueChange = { value ->
+                        displayBrightness = value
+                        activity?.window?.let { window ->
+                            window.attributes = window.attributes.apply {
+                                screenBrightness = displayBrightnessFraction(value.roundToInt())
+                            }
+                        }
+                    },
+                    onValueChangeFinished = {
+                        model.updateDisplayBrightness(displayBrightness.roundToInt())
+                    },
+                    valueRange = MIN_DISPLAY_BRIGHTNESS_PERCENT.toFloat()..
+                        MAX_DISPLAY_BRIGHTNESS_PERCENT.toFloat(),
+                    steps = 18,
+                    modifier = Modifier.semantics {
+                        contentDescription = "Display brightness ${displayBrightness.roundToInt()} percent"
+                    },
+                )
+                Text(
+                    "Applied immediately and restored after the configured idle dim.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
         }

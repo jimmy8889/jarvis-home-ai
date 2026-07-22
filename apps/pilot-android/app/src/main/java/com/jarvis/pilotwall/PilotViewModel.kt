@@ -215,6 +215,17 @@ class PilotViewModel(application: Application) : AndroidViewModel(application) {
         startPolling()
     }
 
+    fun updateDisplayBrightness(brightnessPercent: Int) {
+        val config = _state.value.config.copy(
+            displayBrightnessPercent = brightnessPercent.coerceIn(
+                MIN_DISPLAY_BRIGHTNESS_PERCENT,
+                MAX_DISPLAY_BRIGHTNESS_PERCENT,
+            ),
+        )
+        preferences.save(config)
+        _state.update { it.copy(config = config) }
+    }
+
     fun disconnect() {
         pollJob?.cancel()
         eventJob?.cancel()

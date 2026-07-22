@@ -79,6 +79,7 @@ internal fun shouldShowVehicleEnergy(vehicle: DashboardVehicle): Boolean =
 fun PilotEnergyDashboard(state: PilotUiState, model: PilotViewModel) {
     var page by remember { mutableStateOf(DashboardPage.Flow) }
     val dashboard = state.snapshot?.dashboard
+    val animationsEnabled = rememberSystemAnimationsEnabled()
     Column(Modifier.fillMaxSize().padding(horizontal = 20.dp, vertical = 12.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
@@ -110,7 +111,7 @@ fun PilotEnergyDashboard(state: PilotUiState, model: PilotViewModel) {
             }
         } else {
             when (page) {
-                DashboardPage.Flow -> FlowDashboard(dashboard)
+                DashboardPage.Flow -> FlowDashboard(dashboard, animationsEnabled)
                 DashboardPage.History -> HistoryDashboard(dashboard)
                 DashboardPage.Daily -> DailyDashboard(dashboard, state.actionInFlight, model)
                 DashboardPage.Climate -> ClimateDashboard(dashboard)
@@ -120,7 +121,7 @@ fun PilotEnergyDashboard(state: PilotUiState, model: PilotViewModel) {
 }
 
 @Composable
-private fun FlowDashboard(value: DashboardSnapshot) {
+private fun FlowDashboard(value: DashboardSnapshot, animationsEnabled: Boolean) {
     Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             DailyMetric("Generated", value.daily.generatedKWh, PilotAmber, Modifier.weight(1f))
@@ -149,7 +150,12 @@ private fun FlowDashboard(value: DashboardSnapshot) {
                     modifier = Modifier.fillMaxSize().padding(horizontal = 42.dp, vertical = 6.dp),
                     contentScale = ContentScale.Fit,
                 )
-                EnergyFlowCanvas(value.power, value.vehicle, Modifier.fillMaxSize())
+                EnergyFlowCanvas(
+                    value.power,
+                    value.vehicle,
+                    animationsEnabled,
+                    Modifier.fillMaxSize(),
+                )
                 HomeEnergyNode(
                     Modifier
                         .offset(x = maxWidth * .48f, y = maxHeight * .47f)
@@ -159,12 +165,14 @@ private fun FlowDashboard(value: DashboardSnapshot) {
                     soc = value.power.batterySocPercent,
                     powerW = value.power.batteryW,
                     direction = value.power.batteryDirection,
+                    animationsEnabled = animationsEnabled,
                     modifier = Modifier
                         .offset(x = maxWidth * .69f, y = maxHeight * .60f)
                         .size(width = 72.dp, height = 116.dp),
                 )
                 ServerRackVisual(
                     powerW = value.power.serverRackW,
+                    animationsEnabled = animationsEnabled,
                     modifier = Modifier
                         .offset(x = maxWidth * .84f, y = maxHeight * .53f)
                         .size(width = 76.dp, height = 116.dp),
@@ -212,16 +220,26 @@ private fun FlowDashboard(value: DashboardSnapshot) {
 }
 
 @Composable
-private fun EnergyFlowCanvas(power: DashboardPower, vehicle: DashboardVehicle, modifier: Modifier) {
+private fun EnergyFlowCanvas(
+    power: DashboardPower,
+    vehicle: DashboardVehicle,
+    animationsEnabled: Boolean,
+    modifier: Modifier,
+) {
     val maximum = maxOf(
         abs(power.solarW ?: 0.0), abs(power.gridW ?: 0.0), abs(power.batteryW ?: 0.0),
         abs(vehicle.powerW ?: 0.0), abs(power.serverRackW ?: 0.0), 1.0,
     )
     val duration = (3900 - min(2500.0, maximum / 3)).toInt().coerceAtLeast(900)
-    val phase by rememberInfiniteTransition(label = "power-flow").animateFloat(
-        initialValue = 0f, targetValue = 1f,
-        animationSpec = infiniteRepeatable(tween(duration, easing = LinearEasing)), label = "phase",
-    )
+    val phase = if (animationsEnabled) {
+        val animatedPhase by rememberInfiniteTransition(label = "power-flow").animateFloat(
+            initialValue = 0f, targetValue = 1f,
+            animationSpec = infiniteRepeatable(tween(duration, easing = LinearEasing)), label = "phase",
+        )
+        animatedPhase
+    } else {
+        .35f
+    }
     Canvas(modifier) {
         fun flow(
             anchors: List<Offset>,
@@ -385,29 +403,43 @@ private fun HomeEnergyNode(modifier: Modifier) {
 }
 
 @Composable
-private fun AnimatedBatteryTower(soc: Double?, powerW: Double?, direction: String, modifier: Modifier) {
+private fun AnimatedBatteryTower(
+    soc: Double?,
+    powerW: Double?,
+    direction: String,
+    animationsEnabled: Boolean,
+    modifier: Modifier,
+) {
     val targetSoc = ((soc ?: 0.0) / 100.0).toFloat().coerceIn(0f, 1f)
-    val animatedSoc by animateFloatAsState(targetSoc, tween(900), label = "battery-soc")
+    val changingSoc by animateFloatAsState(targetSoc, tween(900), label = "battery-soc")
+    val animatedSoc = if (animationsEnabled) changingSoc else targetSoc
     val active = abs(powerW ?: 0.0) >= ENERGY_ACTIVITY_THRESHOLD_W
     val charging = direction == "charging"
-    val transition = rememberInfiniteTransition(label = "battery-motion")
-    val sweep by transition.animateFloat(
-        0f,
-        1f,
-        infiniteRepeatable(tween(1250, easing = LinearEasing)),
-        label = "battery-sweep",
-    )
-    val pulse by transition.animateFloat(
-        .25f,
-        1f,
-        infiniteRepeatable(tween(850), RepeatMode.Reverse),
-        label = "battery-pulse",
-    )
+    val motion = if (animationsEnabled) {
+        val transition = rememberInfiniteTransition(label = "battery-motion")
+        val sweep by transition.animateFloat(
+            0f,
+            1f,
+            infiniteRepeatable(tween(1250, easing = LinearEasing)),
+            label = "battery-sweep",
+        )
+        val pulse by transition.animateFloat(
+            .25f,
+            1f,
+            infiniteRepeatable(tween(850), RepeatMode.Reverse),
+            label = "battery-pulse",
+        )
+        sweep to pulse
+    } else {
+        .5f to .65f
+    }
+    val sweep = motion.first
+    val pulse = motion.second
     Box(
         modifier
             .graphicsLayer {
-                scaleX = 1f + if (active) pulse * .018f else 0f
-                scaleY = 1f + if (active) pulse * .018f else 0f
+                scaleX = 1f + if (active && animationsEnabled) pulse * .018f else 0f
+                scaleY = 1f + if (active && animationsEnabled) pulse * .018f else 0f
             }
             .semantics {
                 contentDescription = "Home battery ${soc?.toInt() ?: 0} percent, ${direction.ifBlank { "idle" }}"
@@ -451,7 +483,7 @@ private fun AnimatedBatteryTower(soc: Double?, powerW: Double?, direction: Strin
                 cornerRadius = CornerRadius(7f, 7f),
                 alpha = .82f,
             )
-            if (active && filledHeight > 2f) {
+            if (active && animationsEnabled && filledHeight > 2f) {
                 val travel = innerHeight * sweep
                 val y = if (charging) bodyTop + bodyHeight - inset - travel else bodyTop + inset + travel
                 if (y in fillTop..(bodyTop + bodyHeight - inset)) {
@@ -472,21 +504,28 @@ private fun AnimatedBatteryTower(soc: Double?, powerW: Double?, direction: Strin
 }
 
 @Composable
-private fun ServerRackVisual(powerW: Double?, modifier: Modifier) {
+private fun ServerRackVisual(powerW: Double?, animationsEnabled: Boolean, modifier: Modifier) {
     val active = abs(powerW ?: 0.0) >= ENERGY_ACTIVITY_THRESHOLD_W
-    val transition = rememberInfiniteTransition(label = "rack-lights")
-    val blink by transition.animateFloat(
-        .18f,
-        1f,
-        infiniteRepeatable(tween(720), RepeatMode.Reverse),
-        label = "rack-blink-a",
-    )
-    val alternateBlink by transition.animateFloat(
-        1f,
-        .12f,
-        infiniteRepeatable(tween(940), RepeatMode.Reverse),
-        label = "rack-blink-b",
-    )
+    val lights = if (animationsEnabled) {
+        val transition = rememberInfiniteTransition(label = "rack-lights")
+        val blink by transition.animateFloat(
+            .18f,
+            1f,
+            infiniteRepeatable(tween(720), RepeatMode.Reverse),
+            label = "rack-blink-a",
+        )
+        val alternateBlink by transition.animateFloat(
+            1f,
+            .12f,
+            infiniteRepeatable(tween(940), RepeatMode.Reverse),
+            label = "rack-blink-b",
+        )
+        blink to alternateBlink
+    } else {
+        .72f to .42f
+    }
+    val blink = lights.first
+    val alternateBlink = lights.second
     Box(
         modifier.semantics {
             contentDescription = "Server rack using ${watts(powerW)}"

@@ -23,9 +23,12 @@ Music Assistant client.
 - Watt-scaled directional solar, grid, battery, Tesla, home and server-rack
   energy flow; a 100 W grid deadband; 24-hour power history; daily totals;
   Amber prices; weather; and five room temperatures.
-- Night-friendly palette and optional keep-awake behavior. After 45 seconds of
-  inactivity the window dims to 3%; the next touch restores it immediately.
-  There is no separate ambient/screensaver page.
+- Night-friendly palette, optional keep-awake behavior and a persisted 5–100%
+  awake-brightness control. After the configured 1–60 minute idle interval
+  (five minutes by default), the window dims to 3%; the first touch restores
+  the selected brightness immediately and is consumed as a wake gesture. There
+  is no separate ambient/screensaver page. Flow, battery, rack-light and voice
+  animations become static when Android's animator duration scale is disabled.
 - Explicit loading, stale, offline, and error states.
 - Preview fixtures, an instrumentation screenshot scaffold, accessibility
   semantics and protocol/security unit tests.
@@ -71,8 +74,8 @@ The app is kiosk-ready but does not silently assume Android device-owner
 privileges. Production hardening still requires physical acceptance on the
 target tablet:
 
-1. confirm touch targets, 45-second dim/tap wake, orientation, and every energy
-   direction at real loads;
+1. confirm touch targets, selected brightness, configured dim/tap wake,
+   reduced-motion mode, orientation, and every energy direction at real loads;
 2. configure Android lock-task or the chosen managed-launcher policy;
 3. validate boot-to-app and recovery access;
 4. validate Wi-Fi loss, Pilot Core restart, and token revocation;

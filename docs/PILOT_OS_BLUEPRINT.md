@@ -482,10 +482,12 @@ remain separate.
 The Android wall source consumes the same bounded Core contracts, keeps its
 device token encrypted by Android Keystore, adds curated room controls,
 resumable events and push-to-talk/reply audio. Its primary experience is the
-same continuously visible Flow, History, Daily and Climate dashboard; it dims
-to 3% after 45 seconds and wakes on first touch instead of entering an ambient
-screensaver. Bedroom music is hidden by Core policy. CI build evidence does
-not replace acceptance on the mounted tablet.
+same continuously visible Flow, History, Daily and Climate dashboard. Awake
+brightness is adjustable from 5–100%; it dims to 3% after the configured 1–60
+minute interval and consumes the first touch to restore the chosen level rather
+than entering an ambient screensaver. Continuous energy and assistant motion
+honors Android's disabled-animations setting. Bedroom music is hidden by Core
+policy. CI build evidence does not replace acceptance on the mounted tablet.
 
 Pilot TV is now a device-paired Kotlin/Compose for TV media-room client. It
 renders now playing, progress, queue, room outputs, energy and curated room

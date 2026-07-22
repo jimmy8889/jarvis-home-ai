@@ -12,6 +12,7 @@ data class PilotConfig(
     val nightMode: NightMode = NightMode.Automatic,
     val kioskMode: Boolean = true,
     val ambientAfterMinutes: Int = 5,
+    val displayBrightnessPercent: Int = 70,
 )
 
 enum class NightMode { Automatic, Day, Night }

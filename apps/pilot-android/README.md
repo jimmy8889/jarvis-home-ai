@@ -34,9 +34,12 @@ permanently mounted Android tablet.
 - Reconnect-safe event snapshots and cursor-based long polling when advertised
   by Core, with periodic polling retained as a heartbeat/fallback.
 - Automatic day/night palette, kiosk system-bar behavior and keep-awake control.
-  After 45 seconds without interaction brightness drops to 3%; the first touch
-  restores it immediately. The dashboard remains visible rather than entering
-  an ambient screensaver.
+  Awake brightness is adjustable from 5–100%. After the configured 1–60 minute
+  idle interval (five minutes by default), brightness drops to 3%; the first
+  touch restores the chosen level immediately without activating the control
+  underneath. The dashboard remains visible rather than entering an ambient
+  screensaver. Continuous flow, battery, rack-light and voice-orb motion becomes
+  static when Android's animator duration scale is disabled.
 - Accessible descriptions, large touch targets, adaptive 1024×600 layouts,
   canonical contract fixtures, Compose previews and screenshot-test scaffolding.
 
@@ -105,7 +108,8 @@ Before calling the wall appliance accepted, validate on the target hardware:
 1. QR/deep-link pairing and credential rotation/revocation.
 2. Kiosk recovery after reboot and Wi-Fi/Core outages.
 3. Microphone permission, capture quality and TTS speaker routing.
-4. Night brightness, ambient timeout and burn-in movement.
+4. Manual/night brightness, configured idle timeout, immediate touch wake,
+   reduced-motion behavior and burn-in movement.
 5. Touch targeting and layout on both the mounted panel and 1024×600 Pi-class
    display geometry.
 6. Real Music Assistant artwork/queue/group capability payloads and authenticated

@@ -229,16 +229,22 @@ private fun VoiceActionButton(phase: AssistantPhase, action: () -> Unit) {
 
 @Composable
 private fun PilotVoiceOrb(phase: AssistantPhase, modifier: Modifier = Modifier) {
-    val transition = rememberInfiniteTransition(label = "pilot-voice-orb")
-    val pulse by transition.animateFloat(
-        initialValue = .82f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            tween(if (phase == AssistantPhase.Listening) 650 else 1_100, easing = FastOutSlowInEasing),
-            RepeatMode.Reverse,
-        ),
-        label = "pulse",
-    )
+    val animationsEnabled = rememberSystemAnimationsEnabled()
+    val pulse = if (animationsEnabled) {
+        val transition = rememberInfiniteTransition(label = "pilot-voice-orb")
+        val animatedPulse by transition.animateFloat(
+            initialValue = .82f,
+            targetValue = 1f,
+            animationSpec = infiniteRepeatable(
+                tween(if (phase == AssistantPhase.Listening) 650 else 1_100, easing = FastOutSlowInEasing),
+                RepeatMode.Reverse,
+            ),
+            label = "pulse",
+        )
+        animatedPulse
+    } else {
+        .92f
+    }
     Canvas(modifier) {
         val center = Offset(size.width / 2, size.height / 2)
         val radius = size.minDimension * .35f * pulse

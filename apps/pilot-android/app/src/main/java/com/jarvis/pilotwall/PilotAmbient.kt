@@ -20,8 +20,10 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -37,26 +39,57 @@ import kotlinx.coroutines.delay
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 
+internal const val MIN_DISPLAY_BRIGHTNESS_PERCENT = 5
+internal const val MAX_DISPLAY_BRIGHTNESS_PERCENT = 100
+private const val DIMMED_DISPLAY_BRIGHTNESS_PERCENT = 3
+
+internal fun ambientTimeoutMillis(minutes: Int): Long =
+    minutes.coerceIn(1, 60) * 60_000L
+
+internal fun displayBrightnessFraction(percent: Int): Float =
+    percent.coerceIn(MIN_DISPLAY_BRIGHTNESS_PERCENT, MAX_DISPLAY_BRIGHTNESS_PERCENT) / 100f
+
+internal fun resolvedWindowBrightness(brightnessPercent: Int, dimmed: Boolean): Float =
+    if (dimmed) DIMMED_DISPLAY_BRIGHTNESS_PERCENT / 100f
+    else displayBrightnessFraction(brightnessPercent)
+
 @Composable
 fun PilotIdleGuard(
     state: PilotUiState,
     content: @Composable () -> Unit,
 ) {
     var lastInteraction by remember { mutableLongStateOf(SystemClock.elapsedRealtime()) }
-    val dimmed by produceState(false, state.assistantPhase) {
-        while (true) {
-            val elapsed = SystemClock.elapsedRealtime() - lastInteraction
-            value = state.assistantPhase == AssistantPhase.Idle &&
-                elapsed >= 45_000L
-            delay(1_000)
+    var dimmed by remember { mutableStateOf(false) }
+    val idleTimeoutMillis = ambientTimeoutMillis(state.config.ambientAfterMinutes)
+    val wakeDisplay = {
+        lastInteraction = SystemClock.elapsedRealtime()
+        dimmed = false
+    }
+    LaunchedEffect(state.assistantPhase, idleTimeoutMillis) {
+        wakeDisplay()
+    }
+    LaunchedEffect(lastInteraction, state.assistantPhase, idleTimeoutMillis) {
+        if (state.assistantPhase == AssistantPhase.Idle) {
+            val remaining = idleTimeoutMillis -
+                (SystemClock.elapsedRealtime() - lastInteraction)
+            if (remaining > 0) delay(remaining)
+            if (
+                state.assistantPhase == AssistantPhase.Idle &&
+                SystemClock.elapsedRealtime() - lastInteraction >= idleTimeoutMillis
+            ) {
+                dimmed = true
+            }
         }
     }
     val activity = LocalActivity.current
-    DisposableEffect(dimmed, activity) {
+    DisposableEffect(dimmed, activity, state.config.displayBrightnessPercent) {
         val window = activity?.window
         val previous = window?.attributes?.screenBrightness ?: -1f
         window?.let { it.attributes = it.attributes.apply {
-            screenBrightness = if (dimmed) 0.03f else -1f
+            screenBrightness = resolvedWindowBrightness(
+                state.config.displayBrightnessPercent,
+                dimmed,
+            )
         } }
         onDispose {
             window?.let { it.attributes = it.attributes.apply { screenBrightness = previous } }
@@ -69,7 +102,7 @@ fun PilotIdleGuard(
                 awaitPointerEventScope {
                     while (true) {
                         awaitPointerEvent(PointerEventPass.Initial)
-                        lastInteraction = SystemClock.elapsedRealtime()
+                        wakeDisplay()
                     }
                 }
             },
@@ -81,7 +114,16 @@ fun PilotIdleGuard(
                     .fillMaxSize()
                     .background(androidx.compose.ui.graphics.Color.Black.copy(alpha = .58f))
                     .semantics { contentDescription = "Display dimmed. Tap to wake." }
-                    .clickable { lastInteraction = SystemClock.elapsedRealtime() },
+                    .pointerInput(Unit) {
+                        awaitPointerEventScope {
+                            while (true) {
+                                val event = awaitPointerEvent(PointerEventPass.Initial)
+                                event.changes.forEach { it.consume() }
+                                wakeDisplay()
+                            }
+                        }
+                    }
+                    .clickable(onClick = wakeDisplay),
             )
         }
     }

@@ -24,6 +24,8 @@ class PilotPreferences(context: Context) {
         }.getOrDefault(NightMode.Automatic),
         kioskMode = preferences.getBoolean("kiosk_mode", true),
         ambientAfterMinutes = preferences.getInt("ambient_after_minutes", 5).coerceIn(1, 60),
+        displayBrightnessPercent = preferences.getInt("display_brightness_percent", 70)
+            .coerceIn(MIN_DISPLAY_BRIGHTNESS_PERCENT, MAX_DISPLAY_BRIGHTNESS_PERCENT),
     )
 
     fun token(): String? = tokenStore.read()
@@ -37,6 +39,13 @@ class PilotPreferences(context: Context) {
             .putString("night_mode", config.nightMode.name)
             .putBoolean("kiosk_mode", config.kioskMode)
             .putInt("ambient_after_minutes", config.ambientAfterMinutes.coerceIn(1, 60))
+            .putInt(
+                "display_brightness_percent",
+                config.displayBrightnessPercent.coerceIn(
+                    MIN_DISPLAY_BRIGHTNESS_PERCENT,
+                    MAX_DISPLAY_BRIGHTNESS_PERCENT,
+                ),
+            )
             .apply()
         token?.trim()?.takeIf(String::isNotEmpty)?.let(tokenStore::write)
     }

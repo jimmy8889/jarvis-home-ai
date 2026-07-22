@@ -32,6 +32,13 @@
   launch surface plus reproducible Debian 13 x86-64 provisioning. Native HDMI,
   Denon input recovery, video decode and couch-distance usability remain
   hardware acceptance items.
+- Promoted Pilot Core 0.26.0 as immutable image
+  `core-0.26.0-20260722.2` at commit `795cb7a8` after two verified cold backups.
+  The guarded diagnostic caught and corrected a disabled-Bedroom read-path
+  regression before acceptance; the final image passed whole-home state,
+  provider diagnostics and the live dashboard contract with no missing
+  entities. Pilot Linux Display 0.5 was deployed as a rollback-paired release;
+  its staged Sendspin service remains disabled pending the USB DAC.
 
 ## 0.25.0 — 2026-07-22
 

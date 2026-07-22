@@ -890,9 +890,9 @@ deployed integration, hardware boundary, or milestone status changes.
 
 ## 14. Immediate next steps
 
-1. Promote Pilot Core 0.26 and Pilot Linux Display 0.5 through the guarded
-   backup/deploy paths, then accept the refreshed Pi touch dashboard and
-   rollback on the physical 10-inch display.
+1. Physically accept the deployed Pilot Linux Display 0.5 touch dashboard and
+   its rollback on the 10-inch display; service health, Core connectivity and
+   the rollback pair are already verified remotely.
 2. Review the production Home Assistant catalogue in the presentation editor:
    explicitly include useful omissions, hide duplicates and promote only
    trustworthy room mappings before enabling their controls.
@@ -1098,3 +1098,12 @@ deployed integration, hardware boundary, or milestone status changes.
   archive, persistent image pin, authenticated operations/devices/presentation
   endpoints, Home Assistant, Music Assistant, TTS and Office room reconnect.
   Native clients and hardware surfaces remain awaiting physical acceptance.
+- **4.2** — Promoted Pilot Core 0.26.0 as immutable image
+  `core-0.26.0-20260722.2` at commit `795cb7a8`; the guarded post-deploy
+  diagnostic caught a disabled-Bedroom state-read regression in the first
+  candidate and the corrected release passed whole-home state, Home Assistant,
+  Music Assistant, TTS and live dashboard checks with no missing entities.
+  Deployed Pilot Linux Display 0.5 on the office Raspberry Pi with active web
+  and kiosk services, zero restart loops, an intact two-release rollback pair,
+  and Sendspin installed but disabled until its USB DAC is attached. Physical
+  touch, brightness and sound acceptance remain separate.

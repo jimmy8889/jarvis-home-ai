@@ -111,18 +111,17 @@ Music streams: TCP 8097
 Sendspin server: TCP 8927
 Pilot Core: 10.0.1.64:8770
 Pilot Core host: debian-docker / Debian 12
-Pilot Core target image: jarvis-home-ai/pilot-core:core-0.25.0-20260722.1
-Pilot Core deployed commit: 9c8bac75db84464de9734f44130a31d049cb646d
+Pilot Core target image: jarvis-home-ai/pilot-core:core-0.28.0-20260723.1
+Pilot Core deployed commit: a1b9fc5c972902f51ad42d0af022f4079fafdf24
 ```
 
-That image is the deployed production baseline. Pilot Core 0.25 provides the
-device manifest and recoverable product snapshot contracts, authenticated
-resumable client events, persistent entity presentation/trust policy,
-single-use client pairing profiles, credential rotation/revocation, richer
-media commands and structured assistant output. Promotion created and verified
-a cold pre-deploy backup, preserved the existing data volume and secrets, and
-passed version, commit-marker, readiness, authenticated API, Home Assistant,
-Music Assistant, TTS, Office reconnect and backup-integrity checks.
+That image is the deployed production baseline. Pilot Core 0.28 retains the
+device manifest, resumable event, presentation/trust and credential contracts,
+and adds the device-local media command boundary plus bounded temperature and
+Amber history projections required by the native iPhone release. Promotion
+created a cold pre-deploy backup, preserved the existing data volume and
+secrets, and passed version, commit-marker, readiness, Home Assistant, Music
+Assistant and TTS diagnostics.
 
 The Home Assistant add-on is the preferred initial Music Assistant deployment.
 It provides simple lifecycle management and close HA integration. A standalone
@@ -1132,3 +1131,8 @@ deployed integration, hardware boundary, or milestone status changes.
   drag-inspectable power, Amber and 24-hour room-temperature charts. Simulator,
   bundle-resource and full Core tests pass; real iPhone audio/interruption and
   production data-shape acceptance remain explicit physical checks.
+- **4.5** — Promoted commit `a1b9fc5c` as immutable Pilot Core 0.28.0 image
+  `core-0.28.0-20260723.1` on `10.0.1.64:8770`. The guarded deployment created
+  a cold rollback archive, preserved persistent state and secrets, and passed
+  readiness plus Home Assistant, Music Assistant and TTS diagnostics without
+  issuing an audible command.

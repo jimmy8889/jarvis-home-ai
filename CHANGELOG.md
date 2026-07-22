@@ -20,6 +20,10 @@
 - Fixed the Xcode project resource phase so all dashboard artwork is compiled
   into the app. Added a simulator regression test that loads every required
   house, rack and logo asset from the built bundle.
+- Promoted commit `a1b9fc5c` as immutable Pilot Core image
+  `core-0.28.0-20260723.1` after creating a cold integrity-manifested backup.
+  Readiness plus Home Assistant, Music Assistant and TTS diagnostics passed;
+  real iPhone playback and chart interaction remain physical acceptance items.
 
 ## 0.27.1 — 2026-07-22
 

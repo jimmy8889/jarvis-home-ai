@@ -30,10 +30,10 @@ for Pilot clients:
 The Core contract and Python display service have automated test coverage.
 Native mobile and TV builds are also CI-gated; installation, touch/focus tuning
 and audiovisual acceptance on the actual phone, wall tablet and Shield remain
-separate physical-device acceptance steps. Pilot Core 0.25.0 is deployed on the
-Docker server as immutable image `core-0.25.0-20260722.1` from commit
-`9c8bac75`; its cold rollback archive, readiness, authenticated APIs, Home
-Assistant, Music Assistant, TTS and Office reconnect checks all pass.
+separate physical-device acceptance steps. Pilot Core 0.28.0 is deployed on the
+Docker server as immutable image `core-0.28.0-20260723.1` from commit
+`a1b9fc5c`; its cold rollback archive, readiness, authenticated APIs, Home
+Assistant, Music Assistant and TTS checks all pass.
 
 The deployment deliberately does **not** configure Intel GPU or HDMI
 passthrough.

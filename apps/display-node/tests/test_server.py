@@ -15,6 +15,7 @@ from pilot_display_node.server import (
     _artwork_url_allowed,
     _prune_artwork_cache,
     _static_cache_control,
+    status_payload,
 )
 
 
@@ -94,6 +95,19 @@ class CoreStatusTests(unittest.TestCase):
         policy = _static_cache_control("/assets/house-day.png")
         self.assertEqual(policy, "public, max-age=0, must-revalidate")
         self.assertNotIn("immutable", policy)
+
+    @patch("pilot_display_node.server._core_surface", return_value={})
+    @patch("pilot_display_node.server._core_status", return_value={"connected": True})
+    def test_local_video_is_explicitly_gated(
+        self,
+        _core_status: MagicMock,
+        _core_surface: MagicMock,
+    ) -> None:
+        disabled = status_payload("http://pilot-core:8770")
+        enabled = status_payload("http://pilot-core:8770", video_enabled=True)
+
+        self.assertEqual(disabled["features"], {"local_video": False})
+        self.assertEqual(enabled["features"], {"local_video": True})
 
     def test_rejects_non_http_core_url(self) -> None:
         self.assertEqual(
@@ -229,6 +243,9 @@ class CoreStatusTests(unittest.TestCase):
         self.assertIn('const fallback = normalized === "media-console" ? "media" : "home";', script)
         self.assertIn("window.history.replaceState", script)
         self.assertIn("showPage(target);", script)
+        self.assertIn("value.features?.local_video === true", script)
+        self.assertIn('id="console-video-target"', html)
+        self.assertIn("disabled", html)
         self.assertIn('const isDay = typeof configuredDay === "boolean" ? configuredDay : false;', script)
         self.assertIn('image.removeAttribute("src")', script)
         self.assertNotIn("renderNowPlaying(value.surface", script)

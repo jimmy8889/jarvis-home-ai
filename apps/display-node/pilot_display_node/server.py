@@ -360,6 +360,7 @@ def status_payload(
     device_id: str = "",
     device_token_file: str = "",
     mode: str = "display",
+    video_enabled: bool = False,
 ) -> dict[str, Any]:
     uptime_raw = _bounded_text(Path("/proc/uptime"), 64).partition(" ")[0]
     try:
@@ -374,6 +375,7 @@ def status_payload(
     return {
         "version": __version__,
         "mode": mode if mode in {"display", "media-console"} else "display",
+        "features": {"local_video": bool(video_enabled)},
         "generated_at": datetime.now(UTC).isoformat(),
         "hostname": socket.gethostname(),
         "ip_address": _local_ip(core_url),
@@ -446,6 +448,7 @@ class DisplayHandler(BaseHTTPRequestHandler):
                 self.server.device_id,
                 self.server.device_token_file,
                 self.server.mode,
+                self.server.video_enabled,
             )
             self._send(
                 json.dumps(payload, separators=(",", ":")).encode(),
@@ -618,6 +621,7 @@ class DisplayServer(ThreadingHTTPServer):
         artwork_cache_max_bytes: int = DEFAULT_ARTWORK_CACHE_MAX_BYTES,
         artwork_cache_max_items: int = DEFAULT_ARTWORK_CACHE_MAX_ITEMS,
         artwork_cache_max_age_seconds: int = DEFAULT_ARTWORK_CACHE_MAX_AGE_SECONDS,
+        video_enabled: bool = False,
     ) -> None:
         super().__init__(address, DisplayHandler)
         self.core_url = core_url
@@ -629,6 +633,7 @@ class DisplayServer(ThreadingHTTPServer):
         self.artwork_cache_max_bytes = artwork_cache_max_bytes
         self.artwork_cache_max_items = artwork_cache_max_items
         self.artwork_cache_max_age_seconds = artwork_cache_max_age_seconds
+        self.video_enabled = video_enabled
 
 
 def main() -> None:
@@ -640,6 +645,12 @@ def main() -> None:
         "PILOT_DEVICE_TOKEN_FILE", "/etc/pilot-display/device-token"
     )
     mode = os.environ.get("PILOT_DISPLAY_MODE", "display")
+    video_enabled = os.environ.get("PILOT_DISPLAY_VIDEO_ENABLED", "false").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
     artwork_cache_root = Path(
         os.environ.get("PILOT_ARTWORK_CACHE_DIR", str(DEFAULT_ARTWORK_CACHE))
     )
@@ -671,6 +682,7 @@ def main() -> None:
         artwork_cache_max_bytes,
         artwork_cache_max_items,
         artwork_cache_max_age_seconds,
+        video_enabled,
     )
     try:
         server.serve_forever()

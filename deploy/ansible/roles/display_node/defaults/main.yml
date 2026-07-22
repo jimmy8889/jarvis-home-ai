@@ -6,6 +6,7 @@ display_node_core_url: http://10.0.1.64:8770
 display_node_device_id: ""
 display_node_device_token_source_file: ""
 display_node_mode: display
+display_node_video_enabled: false
 display_node_listen_host: 127.0.0.1
 display_node_listen_port: 8780
 display_node_start_page: "{{ 'media' if display_node_mode == 'media-console' else 'home' }}"

@@ -956,6 +956,7 @@ body.keyboard-open .page[data-page="music"] { padding-bottom: 0; }
 .media-console-actions button { position: relative; overflow: hidden; transition: transform .16s ease, border-color .16s ease, background .16s ease; }
 .media-console-actions button:hover,
 .media-console-actions button:focus-visible { border-color: rgba(97,230,168,.42); background: rgba(24,42,58,.95); transform: translateY(-2px); }
+.media-console-actions button:disabled { cursor: default; filter: saturate(.45); opacity: .5; transform: none; }
 .media-console-actions button b { position: absolute; right: 14px; top: 13px; color: #61e6a8; font-size: 10px; letter-spacing: .09em; text-transform: uppercase; }
 
 body[data-mode="media-console"] main {

@@ -21,7 +21,7 @@ const elements = Object.fromEntries(
     "assistant-overlay", "assistant-room", "assistant-response", "assistant-provider",
     "console-now-playing", "console-track", "console-artist", "console-video-panel",
     "console-video-input", "console-video-play", "console-video-pause",
-    "console-video-stop", "console-video-message", "console-clock", "console-date",
+    "console-video-stop", "console-video-message", "console-video-target", "console-clock", "console-date",
     "console-weather-icon", "console-weather-temperature", "console-weather-condition",
     "console-energy-solar", "console-energy-home", "console-energy-battery",
     "console-energy-soc", "console-artwork", "console-progress-fill", "console-play-toggle",
@@ -849,6 +849,7 @@ elements.music_query.addEventListener("keydown", (event) => {
 
 document.querySelectorAll("[data-console-target]").forEach((button) => {
   button.addEventListener("click", () => {
+    if (button.disabled) return;
     const target = button.dataset.consoleTarget;
     if (["music", "home"].includes(target)) {
       showPage(target);
@@ -1044,6 +1045,17 @@ async function updateStatus() {
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const value = await response.json();
     applyDisplayMode(value.mode);
+    const localVideoEnabled = value.features?.local_video === true;
+    if (elements.console_video_target) {
+      elements.console_video_target.disabled = !localVideoEnabled;
+      const detail = elements.console_video_target.querySelector("small");
+      const action = elements.console_video_target.querySelector("b");
+      if (detail) detail.textContent = localVideoEnabled
+        ? "Supervised mpv playback"
+        : "Enable after native playback acceptance";
+      if (action) action.textContent = localVideoEnabled ? "Open" : "Planned";
+      if (!localVideoEnabled) elements.console_video_panel.hidden = true;
+    }
     const core = value.core || {};
     const connected = core.connected === true;
     elements.core_state.textContent = connected ? "Core online" : "Core offline";

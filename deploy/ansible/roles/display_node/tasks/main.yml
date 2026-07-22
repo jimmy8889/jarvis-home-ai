@@ -22,6 +22,13 @@
       The display role supports Debian 13 ARM64 Raspberry Pi displays and
       Debian 13 x86_64 N150 media consoles.
 
+- name: Assert supported display performance profile
+  ansible.builtin.assert:
+    that:
+      - display_node_performance_profile in ['auto', 'balanced', 'low-power']
+    fail_msg: >-
+      display_node_performance_profile must be auto, balanced, or low-power.
+
 - name: Install minimal display appliance packages
   ansible.builtin.apt:
     name: "{{ display_node_packages }}"

@@ -32,6 +32,11 @@ The node deliberately avoids a full desktop:
 
 - Cage provides the single-application Wayland compositor.
 - Chromium runs as the unprivileged `pilot-display` user in kiosk mode.
+- The Pi resolves `display_node_performance_profile: auto` to `low-power`.
+  This keeps the power-scaled travelling paths, directional battery motion and
+  rack LEDs while pausing redundant SVG particles and removing repaint-heavy
+  blur/drop-shadow effects. Motion also pauses whenever the energy page is not
+  visible. Pin `balanced` only after measuring adequate thermal headroom.
 - The browser profile and its bounded caches live under
   `/var/lib/pilot-display`.
 - `pilot-display-web.service` serves the local surface only on

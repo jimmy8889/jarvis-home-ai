@@ -7,6 +7,9 @@ display_node_device_id: ""
 display_node_device_token_source_file: ""
 display_node_mode: display
 display_node_video_enabled: false
+# Auto selects the bounded profile on Raspberry Pi hardware and balanced on
+# x86 media consoles. It can be pinned to low-power or balanced per host.
+display_node_performance_profile: auto
 display_node_listen_host: 127.0.0.1
 display_node_listen_port: 8780
 display_node_start_page: "{{ 'media' if display_node_mode == 'media-console' else 'home' }}"

@@ -86,6 +86,7 @@ all:
           display_node_device_token_source_file: /secure/pilot-display-pi-token
           # Set to media-console for an N150 connected to a television/receiver.
           display_node_mode: display
+          display_node_performance_profile: low-power
           display_node_resolution: 1024x600
           display_node_hdmi_connector: HDMI-A-1
         pilot-media-console:
@@ -98,6 +99,7 @@ all:
           display_node_device_id: pilot-media-console
           display_node_device_token_source_file: /secure/pilot-media-console-token
           display_node_mode: media-console
+          display_node_performance_profile: balanced
           display_node_force_resolution: false
           display_node_keyboard_layout: us
           # Room Agent above is the sole PipeWire/WirePlumber/Sendspin owner.

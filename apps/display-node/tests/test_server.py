@@ -14,12 +14,24 @@ from pilot_display_node.server import (
     _cached_artwork,
     _artwork_url_allowed,
     _prune_artwork_cache,
+    _performance_profile,
     _static_cache_control,
     status_payload,
 )
 
 
 class CoreStatusTests(unittest.TestCase):
+    def test_performance_profile_auto_detects_raspberry_pi(self) -> None:
+        self.assertEqual(
+            _performance_profile("auto", "Raspberry Pi 4 Model B Rev 1.5"),
+            "low-power",
+        )
+        self.assertEqual(_performance_profile("auto", "Intel N150"), "balanced")
+        self.assertEqual(
+            _performance_profile("balanced", "Raspberry Pi 4 Model B"),
+            "balanced",
+        )
+
     def test_artwork_proxy_allows_only_configured_https_hosts(self) -> None:
         hosts = ("resources.tidal.com",)
         self.assertTrue(
@@ -251,6 +263,13 @@ class CoreStatusTests(unittest.TestCase):
         self.assertNotIn("renderNowPlaying(value.surface", script)
         self.assertIn(".onscreen-keyboard", styles)
         self.assertIn("Showing the last known state", styles)
+        self.assertIn('value.performance_profile', script)
+        self.assertIn('flowDiagram?.pauseAnimations?.()', script)
+        self.assertIn('data-performance-profile="low-power"', styles)
+        self.assertIn("steps(var(--flow-steps, 36), end)", styles)
+        self.assertIn('path.style.setProperty("--flow-steps", steps)', script)
+        self.assertIn("battery-charge-efficient", styles)
+        self.assertIn(".motion-paused .flow-active.active", styles)
 
     def test_dashboard_assets_and_media_console_are_packaged(self) -> None:
         static = Path(__file__).parents[1] / "pilot_display_node" / "static"
@@ -305,6 +324,11 @@ class CoreStatusTests(unittest.TestCase):
         self.assertIn("when: not (display_node_audio_services_enabled | bool)", tasks)
         self.assertIn("display_node_audio_services_enabled: false", inventory)
         self.assertIn("display_node_sendspin_enabled: false", inventory)
+        self.assertIn("display_node_performance_profile: auto", defaults)
+        self.assertIn("PILOT_DISPLAY_PERFORMANCE_PROFILE", (
+            role / "templates" / "pilot-display.env.j2"
+        ).read_text(encoding="utf-8"))
+        self.assertIn("display_node_performance_profile: low-power", inventory)
 
 
 if __name__ == "__main__":

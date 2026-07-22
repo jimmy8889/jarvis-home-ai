@@ -355,12 +355,26 @@ def _positive_environment_integer(name: str, default: int) -> int:
         return default
 
 
+def _performance_profile(
+    requested: str,
+    hardware_model: str | None = None,
+) -> str:
+    """Resolve the browser animation budget without trusting client hints."""
+    normalized = requested.strip().lower()
+    if normalized in {"balanced", "low-power"}:
+        return normalized
+    if hardware_model is None:
+        hardware_model = _bounded_text(Path("/proc/device-tree/model"), 256)
+    return "low-power" if "raspberry pi" in hardware_model.lower() else "balanced"
+
+
 def status_payload(
     core_url: str,
     device_id: str = "",
     device_token_file: str = "",
     mode: str = "display",
     video_enabled: bool = False,
+    performance_profile: str = "balanced",
 ) -> dict[str, Any]:
     uptime_raw = _bounded_text(Path("/proc/uptime"), 64).partition(" ")[0]
     try:
@@ -375,6 +389,7 @@ def status_payload(
     return {
         "version": __version__,
         "mode": mode if mode in {"display", "media-console"} else "display",
+        "performance_profile": _performance_profile(performance_profile),
         "features": {"local_video": bool(video_enabled)},
         "generated_at": datetime.now(UTC).isoformat(),
         "hostname": socket.gethostname(),
@@ -449,6 +464,7 @@ class DisplayHandler(BaseHTTPRequestHandler):
                 self.server.device_token_file,
                 self.server.mode,
                 self.server.video_enabled,
+                self.server.performance_profile,
             )
             self._send(
                 json.dumps(payload, separators=(",", ":")).encode(),
@@ -622,6 +638,7 @@ class DisplayServer(ThreadingHTTPServer):
         artwork_cache_max_items: int = DEFAULT_ARTWORK_CACHE_MAX_ITEMS,
         artwork_cache_max_age_seconds: int = DEFAULT_ARTWORK_CACHE_MAX_AGE_SECONDS,
         video_enabled: bool = False,
+        performance_profile: str = "balanced",
     ) -> None:
         super().__init__(address, DisplayHandler)
         self.core_url = core_url
@@ -634,6 +651,7 @@ class DisplayServer(ThreadingHTTPServer):
         self.artwork_cache_max_items = artwork_cache_max_items
         self.artwork_cache_max_age_seconds = artwork_cache_max_age_seconds
         self.video_enabled = video_enabled
+        self.performance_profile = _performance_profile(performance_profile)
 
 
 def main() -> None:
@@ -651,6 +669,9 @@ def main() -> None:
         "yes",
         "on",
     }
+    performance_profile = _performance_profile(
+        os.environ.get("PILOT_DISPLAY_PERFORMANCE_PROFILE", "auto")
+    )
     artwork_cache_root = Path(
         os.environ.get("PILOT_ARTWORK_CACHE_DIR", str(DEFAULT_ARTWORK_CACHE))
     )
@@ -683,6 +704,7 @@ def main() -> None:
         artwork_cache_max_items,
         artwork_cache_max_age_seconds,
         video_enabled,
+        performance_profile,
     )
     try:
         server.serve_forever()

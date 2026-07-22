@@ -865,6 +865,55 @@ body.keyboard-open .page[data-page="music"] { padding-bottom: 0; }
 .server-rack-visual i:nth-of-type(3) { top: 33px; animation-delay: -1.1s; }
 @keyframes rack-led { 50% { opacity: .18; filter: saturate(.4); } }
 
+/*
+ * Raspberry Pi profile: retain the same power-scaled travelling paths and
+ * device state animations, but avoid Chromium's costly software-raster path.
+ * SVG filters, backdrop blur and SMIL particles otherwise repaint most of the
+ * 1024x600 scene every frame. SMIL is paused by app.js for this profile; the
+ * dashed flow remains animated at a bounded 20 visual updates per second.
+ */
+body[data-performance-profile="low-power"] .flow-active.active {
+  animation-timing-function: steps(var(--flow-steps, 36), end);
+}
+body[data-performance-profile="low-power"] .flow-particles { display: none; }
+body[data-performance-profile="low-power"] :is(
+  .solar-flow, .grid-flow, .battery-flow, .vehicle-flow, .server-flow,
+  .solar-particles circle, .grid-particles circle, .battery-particles circle,
+  .vehicle-particles circle, .server-particles circle
+) { filter: none; }
+body[data-performance-profile="low-power"] .house-flow .flow-node {
+  backdrop-filter: none;
+  background: rgba(5, 11, 20, .97);
+}
+body[data-performance-profile="low-power"] .flow-node.active .node-icon {
+  animation: none;
+}
+body[data-performance-profile="low-power"] .house-flow .battery-node.charging .node-icon {
+  animation: battery-charge-efficient 1.8s ease-in-out infinite;
+  will-change: transform, opacity;
+}
+body[data-performance-profile="low-power"] .house-flow .battery-node.discharging .node-icon {
+  animation: battery-discharge-efficient 2s ease-in-out infinite;
+  will-change: transform, opacity;
+}
+body[data-performance-profile="low-power"] .energy-house { will-change: auto; }
+body[data-performance-profile="low-power"] .server-rack-visual { filter: none; }
+body[data-performance-profile="low-power"] .server-rack-visual i {
+  box-shadow: none;
+  animation-duration: 2.4s;
+}
+@keyframes battery-charge-efficient {
+  50% { opacity: .78; transform: scale(1.07); }
+}
+@keyframes battery-discharge-efficient {
+  50% { opacity: .58; transform: scale(.94); }
+}
+.motion-paused .flow-active.active,
+.motion-paused .flow-node.active .node-icon,
+.motion-paused .server-rack-visual i {
+  animation-play-state: paused !important;
+}
+
 .console-only { --console-accent: #62e7b2; }
 .console-topline {
   display: grid;

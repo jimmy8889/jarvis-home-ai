@@ -55,6 +55,28 @@ const HOUSE_SCENES = Object.freeze({
   "house-night": "/assets/house-night.png",
   "house-night-tesla": "/assets/house-night-tesla.png",
 });
+const flowDiagram = document.querySelector(".flow-lines");
+let smilPaused = null;
+
+function applyPerformanceProfile(profile) {
+  const normalized = profile === "low-power" ? "low-power" : "balanced";
+  if (document.body.dataset.performanceProfile !== normalized) {
+    document.body.dataset.performanceProfile = normalized;
+    smilPaused = null;
+  }
+  syncAnimationActivity();
+}
+
+function syncAnimationActivity() {
+  const homeVisible = document.querySelector('.page.active')?.dataset.page === "home";
+  const pagePaused = document.hidden || !homeVisible;
+  document.body.classList.toggle("motion-paused", pagePaused);
+  const pauseSmil = pagePaused || document.body.dataset.performanceProfile === "low-power";
+  if (smilPaused === pauseSmil) return;
+  if (pauseSmil) flowDiagram?.pauseAnimations?.();
+  else flowDiagram?.unpauseAnimations?.();
+  smilPaused = pauseSmil;
+}
 
 function renderHouseScene(value, power, vehicle) {
   const images = [...document.querySelectorAll(".energy-house")];
@@ -115,14 +137,31 @@ function setFlow(path, particles, node, value, reverse = false, threshold = 25) 
   if (!path || !particles || !node) return;
   const magnitude = typeof value === "number" ? Math.abs(value) : 0;
   const active = magnitude >= threshold;
+  const direction = active && reverse;
   path.classList.toggle("active", active);
-  path.classList.toggle("reverse", active && reverse);
+  path.classList.toggle("reverse", direction);
   particles.classList.toggle("active", active);
-  particles.classList.toggle("reverse", active && reverse);
+  particles.classList.toggle("reverse", direction);
   node.classList.toggle("active", active);
   const normalized = Math.min(1, magnitude / 6000);
-  path.style.setProperty("--flow-speed", `${(2.5 - (normalized * 1.7)).toFixed(2)}s`);
-  path.style.setProperty("--flow-strength", String((0.45 + (normalized * 0.55)).toFixed(2)));
+  // Quantising avoids invalidating the SVG paint tree for sensor noise while
+  // retaining a visibly power-scaled speed and intensity.
+  const speedSeconds = Math.round((2.5 - (normalized * 1.7)) * 10) / 10;
+  const speed = `${speedSeconds.toFixed(1)}s`;
+  const steps = String(Math.max(16, Math.round(speedSeconds * 20)));
+  const strength = String((Math.round((0.45 + (normalized * 0.55)) * 20) / 20).toFixed(2));
+  if (path.dataset.flowSpeed !== speed) {
+    path.dataset.flowSpeed = speed;
+    path.style.setProperty("--flow-speed", speed);
+  }
+  if (path.dataset.flowStrength !== strength) {
+    path.dataset.flowStrength = strength;
+    path.style.setProperty("--flow-strength", strength);
+  }
+  if (path.dataset.flowSteps !== steps) {
+    path.dataset.flowSteps = steps;
+    path.style.setProperty("--flow-steps", steps);
+  }
 }
 
 function renderEnergy(energy = {}) {
@@ -966,6 +1005,7 @@ function showPage(name) {
   document.querySelectorAll("nav button").forEach((button) => {
     button.classList.toggle("active", button.dataset.target === name);
   });
+  syncAnimationActivity();
 }
 
 document.querySelectorAll("nav button").forEach((button) => {
@@ -975,6 +1015,7 @@ document.querySelectorAll("nav button").forEach((button) => {
   });
 });
 window.addEventListener("hashchange", () => showPage(window.location.hash.slice(1)));
+document.addEventListener("visibilitychange", syncAnimationActivity);
 
 let swipeStart = null;
 const pages = document.querySelector("#pages");
@@ -1044,6 +1085,7 @@ async function updateStatus() {
     const response = await fetch("/api/status", { cache: "no-store" });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const value = await response.json();
+    applyPerformanceProfile(value.performance_profile);
     applyDisplayMode(value.mode);
     const localVideoEnabled = value.features?.local_video === true;
     if (elements.console_video_target) {

@@ -113,6 +113,10 @@ class RoomOrchestrator:
             endpoint_device = self.device(room_id, connected_ids).as_dict()
         except ResolutionError:
             endpoint_device = None
+        try:
+            default_music_player = self.music_player(room_id).as_dict()
+        except ResolutionError:
+            default_music_player = None
         return {
             "room": room,
             "sources": self.store.room_source_state(room_id),
@@ -120,7 +124,7 @@ class RoomOrchestrator:
             "devices": devices,
             "targets": {
                 "response_player": self.response_player(room_id).as_dict(),
-                "default_music_player": self.music_player(room_id).as_dict(),
+                "default_music_player": default_music_player,
                 "endpoint_device": endpoint_device,
             },
         }

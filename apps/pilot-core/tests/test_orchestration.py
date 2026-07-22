@@ -90,6 +90,11 @@ class OrchestrationTests(unittest.TestCase):
             orchestrator = RoomOrchestrator(Registry.from_settings(disabled), store)
             with self.assertRaisesRegex(ResolutionError, "music is disabled"):
                 orchestrator.music_player("office")
+            self.assertIsNone(
+                orchestrator.room_state("office", set())["targets"][
+                    "default_music_player"
+                ]
+            )
         finally:
             store.close()
 

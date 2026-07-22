@@ -135,6 +135,7 @@ data class DashboardSnapshot(
     val vehicle: DashboardVehicle, val temperatures: List<DashboardTemperature>,
     val history: List<DashboardSeries>, val weather: DashboardWeather,
     val tariff: DashboardTariff, val controls: DashboardControls,
+    val sceneIsDay: Boolean? = null,
 )
 
 data class SurfaceSnapshot(
@@ -463,6 +464,7 @@ internal object PilotJson {
         val tariff = root.optJSONObject("tariff") ?: JSONObject()
         val weather = root.optJSONObject("weather") ?: JSONObject()
         val controls = root.optJSONObject("controls") ?: JSONObject()
+        val scene = root.optJSONObject("scene") ?: JSONObject()
         val chargingMode = controls.optJSONObject("tesla_charging_mode") ?: JSONObject()
         return DashboardSnapshot(
             status = root.optString("status", "partial"),
@@ -532,6 +534,7 @@ internal object PilotJson {
                 mediaRoomAvailable = controls.optJSONObject("media_room_mode")
                     ?.optBoolean("available", false) == true,
             ),
+            sceneIsDay = scene.optNullableBoolean("is_day"),
         )
     }
 

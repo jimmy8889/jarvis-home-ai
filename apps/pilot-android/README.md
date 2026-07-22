@@ -7,8 +7,13 @@ permanently mounted Android tablet.
 
 - Adaptive tablet/phone navigation and a spacious 1024×600 wall layout.
 - Continuous Flow, History, Daily and Climate monitoring with the shared James
-  House scene, directional solar/grid/battery/Tesla/server-rack paths, daily
-  totals, 24-hour chart, Amber pricing, weather and five room temperatures.
+  House scene, four bundled day/night and Tesla-present/away states, smooth
+  power-scaled solar/grid/battery/Tesla/server-rack paths, daily totals,
+  24-hour chart, Amber pricing, weather and five room temperatures. A Tesla
+  remains visibly parked while connected, but its numeric charging flow is
+  suppressed below 100 W. The animated battery shows SOC and charge direction;
+  the local rack artwork adds independent live status lights without network
+  image fetches.
 - Bedroom music is intentionally hidden. The mounted tablet is a home monitor
   and controller, not a playback endpoint.
 - Server-curated Home Assistant presentation with purpose-built lighting,

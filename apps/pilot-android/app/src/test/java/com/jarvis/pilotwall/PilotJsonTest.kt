@@ -45,6 +45,7 @@ class PilotJsonTest {
                       "precipitation_probability": 10
                     }]
                   },
+                  "scene": {"is_day": false},
                   "tariff": {
                     "import_cents_per_kwh": 28.5, "feed_in_cents_per_kwh": 8.2,
                     "feed_in_forecast": [{"at": "2026-07-22T04:00:00Z", "cents_per_kwh": 11.3}]
@@ -68,6 +69,7 @@ class PilotJsonTest {
         assertEquals(26.0, dashboard.weather.forecast.single().highC!!, 0.01)
         assertEquals("Solar", dashboard.controls.chargingMode)
         assertTrue(dashboard.controls.mediaRoomAvailable)
+        assertFalse(dashboard.sceneIsDay!!)
 
         val media = PilotJson.media(
             JSONObject(

@@ -3,15 +3,17 @@
 package com.jarvis.pilotwall
 
 import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
@@ -19,6 +21,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -37,23 +40,40 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import kotlin.math.abs
+import kotlin.math.hypot
 import kotlin.math.max
 import kotlin.math.min
 
 private enum class DashboardPage(val title: String) { Flow("Flow"), History("History"), Daily("Daily"), Climate("Climate") }
+
+internal const val ENERGY_ACTIVITY_THRESHOLD_W = 25.0
+internal const val GRID_ACTIVITY_THRESHOLD_W = 100.0
+internal const val VEHICLE_ACTIVITY_THRESHOLD_W = 100.0
+
+internal fun isDayEnergyScene(solarW: Double?): Boolean = (solarW ?: 0.0) >= GRID_ACTIVITY_THRESHOLD_W
+
+internal fun shouldShowVehicleEnergy(vehicle: DashboardVehicle): Boolean =
+    vehicle.connected == true && abs(vehicle.powerW ?: 0.0) >= VEHICLE_ACTIVITY_THRESHOLD_W
 
 @Composable
 fun PilotEnergyDashboard(state: PilotUiState, model: PilotViewModel) {
@@ -112,26 +132,80 @@ private fun FlowDashboard(value: DashboardSnapshot) {
             colors = CardDefaults.cardColors(containerColor = Color(0xFF030812)),
             shape = RoundedCornerShape(28.dp),
         ) {
-            Box(Modifier.fillMaxSize()) {
+            BoxWithConstraints(Modifier.fillMaxSize()) {
+                val daytime = value.sceneIsDay ?: isDayEnergyScene(value.power.solarW)
+                val carPresent = value.vehicle.connected == true
+                val showVehicleEnergy = shouldShowVehicleEnergy(value.vehicle)
                 Image(
                     painter = painterResource(
-                        if (value.vehicle.connected == true) R.drawable.pilot_house_energy
-                        else R.drawable.pilot_house_no_car,
+                        when {
+                            daytime && carPresent -> R.drawable.pilot_house_energy
+                            daytime -> R.drawable.pilot_house_no_car
+                            carPresent -> R.drawable.pilot_house_night_car
+                            else -> R.drawable.pilot_house_night
+                        },
                     ),
-                    contentDescription = "James House energy model",
-                    modifier = Modifier.fillMaxSize().padding(horizontal = 70.dp),
+                    contentDescription = if (daytime) "James House during the day" else "James House at night",
+                    modifier = Modifier.fillMaxSize().padding(horizontal = 42.dp, vertical = 6.dp),
                     contentScale = ContentScale.Fit,
                 )
                 EnergyFlowCanvas(value.power, value.vehicle, Modifier.fillMaxSize())
-                FlowMetric("PV", watts(value.power.solarW), PilotAmber, Modifier.align(Alignment.TopCenter).padding(top = 6.dp))
-                FlowMetric("Grid", watts(value.power.gridW), PilotCyan, Modifier.align(Alignment.TopEnd).padding(12.dp))
-                FlowMetric("Jarvis", if (value.vehicle.connected == true) watts(value.vehicle.powerW) else "Away", PilotRed, Modifier.align(Alignment.BottomStart).padding(12.dp))
-                FlowMetric("Home", watts(value.power.homeLoadW), PilotMint, Modifier.align(Alignment.BottomCenter).padding(8.dp))
-                Column(Modifier.align(Alignment.BottomEnd).padding(10.dp), horizontalAlignment = Alignment.End) {
-                    FlowMetric("Server rack", watts(value.power.serverRackW), Color(0xFFB49BFF), Modifier)
-                    Spacer(Modifier.height(6.dp))
-                    FlowMetric("Battery ${value.power.batterySocPercent?.let { "${it.toInt()}%" } ?: ""}", watts(value.power.batteryW), PilotMint, Modifier)
+                HomeEnergyNode(
+                    Modifier
+                        .offset(x = maxWidth * .48f, y = maxHeight * .47f)
+                        .size(62.dp),
+                )
+                AnimatedBatteryTower(
+                    soc = value.power.batterySocPercent,
+                    powerW = value.power.batteryW,
+                    direction = value.power.batteryDirection,
+                    modifier = Modifier
+                        .offset(x = maxWidth * .69f, y = maxHeight * .60f)
+                        .size(width = 72.dp, height = 116.dp),
+                )
+                ServerRackVisual(
+                    powerW = value.power.serverRackW,
+                    modifier = Modifier
+                        .offset(x = maxWidth * .84f, y = maxHeight * .53f)
+                        .size(width = 76.dp, height = 116.dp),
+                )
+                FlowMetric(
+                    "PV",
+                    watts(value.power.solarW),
+                    PilotAmber,
+                    Modifier.align(Alignment.TopCenter).padding(top = 8.dp),
+                    detail = if ((value.power.solarW ?: 0.0) >= ENERGY_ACTIVITY_THRESHOLD_W) "Producing" else "Idle",
+                )
+                FlowMetric(
+                    "Grid",
+                    watts(value.power.gridW),
+                    PilotCyan,
+                    Modifier.align(Alignment.TopEnd).padding(end = 18.dp, top = 20.dp),
+                    detail = if (value.power.gridDirection == "exporting") "Export" else "Import",
+                )
+                if (carPresent) {
+                    FlowMetric(
+                        "Jarvis",
+                        if (showVehicleEnergy) watts(value.vehicle.powerW) else "Plugged in",
+                        PilotRed,
+                        Modifier.align(Alignment.BottomStart).padding(start = 18.dp, bottom = 22.dp),
+                        detail = if (showVehicleEnergy) "Charging" else "Ready",
+                    )
                 }
+                FlowMetric(
+                    "Home",
+                    watts(value.power.homeLoadW),
+                    PilotMint,
+                    Modifier.align(Alignment.BottomCenter).padding(bottom = 14.dp),
+                    detail = "Consuming",
+                )
+                FlowMetric(
+                    "Server rack",
+                    watts(value.power.serverRackW),
+                    ServerViolet,
+                    Modifier.align(Alignment.BottomEnd).padding(end = 12.dp, bottom = 16.dp),
+                    detail = "Always on",
+                )
             }
         }
     }
@@ -143,29 +217,303 @@ private fun EnergyFlowCanvas(power: DashboardPower, vehicle: DashboardVehicle, m
         abs(power.solarW ?: 0.0), abs(power.gridW ?: 0.0), abs(power.batteryW ?: 0.0),
         abs(vehicle.powerW ?: 0.0), abs(power.serverRackW ?: 0.0), 1.0,
     )
-    val duration = (2200 - min(1500.0, maximum / 5)).toInt().coerceAtLeast(650)
+    val duration = (3900 - min(2500.0, maximum / 3)).toInt().coerceAtLeast(900)
     val phase by rememberInfiniteTransition(label = "power-flow").animateFloat(
         initialValue = 0f, targetValue = 1f,
         animationSpec = infiniteRepeatable(tween(duration, easing = LinearEasing)), label = "phase",
     )
     Canvas(modifier) {
-        fun flow(from: Offset, to: Offset, watts: Double?, color: Color, active: Boolean, reverse: Boolean = false) {
+        fun flow(
+            anchors: List<Offset>,
+            watts: Double?,
+            color: Color,
+            active: Boolean,
+            reverse: Boolean = false,
+            showInactiveTrack: Boolean = true,
+        ) {
             val magnitude = abs(watts ?: 0.0)
-            drawLine(Color.White.copy(alpha = .08f), from, to, strokeWidth = 6f, cap = StrokeCap.Round)
+            val points = roundedRoute(anchors)
+            if (showInactiveTrack) drawRoute(points, Color.White.copy(alpha = .09f), 5f)
             if (!active) return
-            val intensity = (.35f + min(1.0, magnitude / 7000).toFloat() * .65f)
-            val start = if (reverse) to else from
-            val end = if (reverse) from else to
-            drawLine(color.copy(alpha = intensity * .46f), start, end, strokeWidth = 4f + intensity * 4f, cap = StrokeCap.Round)
-            val point = Offset(start.x + (end.x - start.x) * phase, start.y + (end.y - start.y) * phase)
-            drawCircle(color, 5f + intensity * 3f, point)
+            val intensity = (.30f + min(1.0, magnitude / 7000).toFloat() * .70f)
+            drawRoute(points, color.copy(alpha = .24f + intensity * .28f), 3.5f + intensity * 4.5f)
+            listOf(0f, .5f).forEach { offset ->
+                val start = (phase + offset) % 1f
+                val end = start + .10f + intensity * .04f
+                drawGlow(points, start, min(1f, end), color, reverse, intensity)
+                if (end > 1f) drawGlow(points, 0f, end - 1f, color, reverse, intensity)
+            }
         }
-        val centre = Offset(size.width * .51f, size.height * .55f)
-        flow(Offset(size.width * .5f, size.height * .07f), centre, power.solarW, PilotAmber, (power.solarW ?: 0.0) >= 25)
-        flow(Offset(size.width * .92f, size.height * .19f), centre, power.gridW, PilotCyan, power.gridFlowActive, reverse = power.gridDirection == "exporting")
-        flow(Offset(size.width * .88f, size.height * .88f), centre, power.batteryW, PilotMint, abs(power.batteryW ?: 0.0) >= 25, reverse = power.batteryDirection == "charging")
-        flow(centre, Offset(size.width * .13f, size.height * .86f), vehicle.powerW, PilotRed, vehicle.connected == true && (vehicle.powerW ?: 0.0) >= 100)
-        flow(centre, Offset(size.width * .91f, size.height * .57f), power.serverRackW, Color(0xFFB49BFF), (power.serverRackW ?: 0.0) >= 25)
+        val centre = Offset(size.width * .54f, size.height * .51f)
+        flow(
+            listOf(Offset(size.width * .52f, size.height * .15f), Offset(size.width * .66f, size.height * .15f), centre),
+            power.solarW,
+            PilotAmber,
+            (power.solarW ?: 0.0) >= ENERGY_ACTIVITY_THRESHOLD_W,
+        )
+        flow(
+            listOf(Offset(size.width * .93f, size.height * .26f), Offset(size.width * .77f, size.height * .26f), centre),
+            power.gridW,
+            PilotCyan,
+            power.gridFlowActive && abs(power.gridW ?: 0.0) >= GRID_ACTIVITY_THRESHOLD_W,
+            reverse = power.gridDirection == "exporting",
+        )
+        flow(
+            listOf(Offset(size.width * .72f, size.height * .70f), Offset(size.width * .72f, size.height * .57f), centre),
+            power.batteryW,
+            PilotMint,
+            abs(power.batteryW ?: 0.0) >= ENERGY_ACTIVITY_THRESHOLD_W,
+            reverse = power.batteryDirection == "charging",
+        )
+        flow(
+            listOf(centre, Offset(size.width * .23f, size.height * .51f), Offset(size.width * .23f, size.height * .72f)),
+            vehicle.powerW,
+            PilotRed,
+            shouldShowVehicleEnergy(vehicle),
+            showInactiveTrack = false,
+        )
+        flow(
+            listOf(centre, Offset(size.width * .81f, size.height * .51f), Offset(size.width * .86f, size.height * .62f)),
+            power.serverRackW,
+            ServerViolet,
+            abs(power.serverRackW ?: 0.0) >= ENERGY_ACTIVITY_THRESHOLD_W,
+        )
+        flow(
+            listOf(centre, Offset(size.width * .50f, size.height * .60f)),
+            power.homeLoadW,
+            PilotMint,
+            abs(power.homeLoadW ?: 0.0) >= ENERGY_ACTIVITY_THRESHOLD_W,
+        )
+    }
+}
+
+private val ServerViolet = Color(0xFFB49BFF)
+
+private fun androidx.compose.ui.graphics.drawscope.DrawScope.roundedRoute(anchors: List<Offset>): List<Offset> {
+    if (anchors.size < 3) return anchors
+    val result = mutableListOf(anchors.first())
+    anchors.indices.drop(1).dropLast(1).forEach { index ->
+        val previous = anchors[index - 1]
+        val corner = anchors[index]
+        val next = anchors[index + 1]
+        val incoming = hypot((corner.x - previous.x).toDouble(), (corner.y - previous.y).toDouble()).toFloat()
+        val outgoing = hypot((next.x - corner.x).toDouble(), (next.y - corner.y).toDouble()).toFloat()
+        if (incoming == 0f || outgoing == 0f) return@forEach
+        val radius = min(18f, min(incoming * .35f, outgoing * .35f))
+        val before = Offset(
+            corner.x - (corner.x - previous.x) / incoming * radius,
+            corner.y - (corner.y - previous.y) / incoming * radius,
+        )
+        val after = Offset(
+            corner.x + (next.x - corner.x) / outgoing * radius,
+            corner.y + (next.y - corner.y) / outgoing * radius,
+        )
+        result += before
+        (1..6).forEach { step ->
+            val t = step / 6f
+            val inverse = 1 - t
+            result += Offset(
+                inverse * inverse * before.x + 2 * inverse * t * corner.x + t * t * after.x,
+                inverse * inverse * before.y + 2 * inverse * t * corner.y + t * t * after.y,
+            )
+        }
+    }
+    result += anchors.last()
+    return result
+}
+
+private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawRoute(points: List<Offset>, color: Color, width: Float) {
+    if (points.isEmpty()) return
+    val path = Path().apply {
+        moveTo(points.first().x, points.first().y)
+        points.drop(1).forEach { lineTo(it.x, it.y) }
+    }
+    drawPath(path, color, style = Stroke(width = width, cap = StrokeCap.Round, join = StrokeJoin.Round))
+}
+
+private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawGlow(
+    points: List<Offset>,
+    start: Float,
+    end: Float,
+    color: Color,
+    reverse: Boolean,
+    intensity: Float,
+) {
+    if (end <= start || points.size < 2) return
+    val samples = (0..9).map { step ->
+        val progress = start + (end - start) * step / 9f
+        pointOnRoute(points, if (reverse) 1f - progress else progress)
+    }
+    drawRoute(samples, color.copy(alpha = .12f + intensity * .11f), 15f + intensity * 5f)
+    drawRoute(samples, color.copy(alpha = .42f + intensity * .30f), 7f + intensity * 3f)
+    drawRoute(samples, Color.White.copy(alpha = .82f + intensity * .16f), 2.2f)
+}
+
+private fun pointOnRoute(points: List<Offset>, progress: Float): Offset {
+    val lengths = points.zipWithNext { first, second -> (second - first).getDistance() }
+    val total = lengths.sum().coerceAtLeast(.001f)
+    var distance = progress.coerceIn(0f, 1f) * total
+    lengths.forEachIndexed { index, length ->
+        if (distance <= length) {
+            val ratio = if (length == 0f) 0f else distance / length
+            return points[index] + (points[index + 1] - points[index]) * ratio
+        }
+        distance -= length
+    }
+    return points.last()
+}
+
+@Composable
+private fun HomeEnergyNode(modifier: Modifier) {
+    Canvas(modifier.semantics { contentDescription = "Home energy junction" }) {
+        drawCircle(Color(0xE6030812), radius = size.minDimension * .46f)
+        drawCircle(PilotMint.copy(alpha = .82f), radius = size.minDimension * .46f, style = Stroke(3f))
+        val centre = Offset(size.width / 2, size.height * .55f)
+        val roof = Path().apply {
+            moveTo(size.width * .22f, size.height * .48f)
+            lineTo(size.width * .50f, size.height * .24f)
+            lineTo(size.width * .78f, size.height * .48f)
+            lineTo(size.width * .70f, size.height * .48f)
+            lineTo(size.width * .70f, size.height * .75f)
+            lineTo(size.width * .30f, size.height * .75f)
+            lineTo(size.width * .30f, size.height * .48f)
+            close()
+        }
+        drawPath(roof, PilotMint)
+        drawCircle(Color.White.copy(alpha = .85f), radius = 2.5f, center = centre)
+    }
+}
+
+@Composable
+private fun AnimatedBatteryTower(soc: Double?, powerW: Double?, direction: String, modifier: Modifier) {
+    val targetSoc = ((soc ?: 0.0) / 100.0).toFloat().coerceIn(0f, 1f)
+    val animatedSoc by animateFloatAsState(targetSoc, tween(900), label = "battery-soc")
+    val active = abs(powerW ?: 0.0) >= ENERGY_ACTIVITY_THRESHOLD_W
+    val charging = direction == "charging"
+    val transition = rememberInfiniteTransition(label = "battery-motion")
+    val sweep by transition.animateFloat(
+        0f,
+        1f,
+        infiniteRepeatable(tween(1250, easing = LinearEasing)),
+        label = "battery-sweep",
+    )
+    val pulse by transition.animateFloat(
+        .25f,
+        1f,
+        infiniteRepeatable(tween(850), RepeatMode.Reverse),
+        label = "battery-pulse",
+    )
+    Box(
+        modifier
+            .graphicsLayer {
+                scaleX = 1f + if (active) pulse * .018f else 0f
+                scaleY = 1f + if (active) pulse * .018f else 0f
+            }
+            .semantics {
+                contentDescription = "Home battery ${soc?.toInt() ?: 0} percent, ${direction.ifBlank { "idle" }}"
+            },
+        contentAlignment = Alignment.Center,
+    ) {
+        Canvas(Modifier.fillMaxSize()) {
+            val bodyLeft = size.width * .12f
+            val bodyTop = size.height * .09f
+            val bodyWidth = size.width * .76f
+            val bodyHeight = size.height * .82f
+            val radius = CornerRadius(12f, 12f)
+            if (active) {
+                drawRoundRect(
+                    PilotMint.copy(alpha = pulse * .12f),
+                    topLeft = Offset(bodyLeft - 7f, bodyTop - 7f),
+                    size = Size(bodyWidth + 14f, bodyHeight + 14f),
+                    cornerRadius = CornerRadius(17f, 17f),
+                )
+            }
+            drawRoundRect(Color(0xFF101A21), Offset(bodyLeft, bodyTop), Size(bodyWidth, bodyHeight), radius)
+            drawRoundRect(
+                if (active) PilotMint.copy(alpha = .45f + pulse * .4f) else Color.White.copy(alpha = .22f),
+                Offset(bodyLeft, bodyTop),
+                Size(bodyWidth, bodyHeight),
+                radius,
+                style = Stroke(if (active) 3.5f else 2f),
+            )
+            val inset = 7f
+            val innerHeight = bodyHeight - inset * 2
+            val filledHeight = innerHeight * animatedSoc
+            val fillTop = bodyTop + inset + innerHeight - filledHeight
+            drawRoundRect(
+                brush = Brush.verticalGradient(
+                    if (charging) listOf(PilotCyan, PilotMint) else listOf(PilotMint, Color(0xFF2C936F)),
+                    startY = fillTop,
+                    endY = bodyTop + bodyHeight - inset,
+                ),
+                topLeft = Offset(bodyLeft + inset, fillTop),
+                size = Size(bodyWidth - inset * 2, filledHeight.coerceAtLeast(1f)),
+                cornerRadius = CornerRadius(7f, 7f),
+                alpha = .82f,
+            )
+            if (active && filledHeight > 2f) {
+                val travel = innerHeight * sweep
+                val y = if (charging) bodyTop + bodyHeight - inset - travel else bodyTop + inset + travel
+                if (y in fillTop..(bodyTop + bodyHeight - inset)) {
+                    drawLine(Color.White.copy(alpha = .85f), Offset(bodyLeft + inset + 3f, y), Offset(bodyLeft + bodyWidth - inset - 3f, y), 3f, StrokeCap.Round)
+                    drawLine(PilotMint.copy(alpha = .24f), Offset(bodyLeft + inset, y), Offset(bodyLeft + bodyWidth - inset, y), 11f, StrokeCap.Round)
+                }
+            }
+            repeat(3) { index ->
+                val y = bodyTop + bodyHeight * (index + 1) / 4f
+                drawLine(Color.White.copy(alpha = .10f), Offset(bodyLeft + inset, y), Offset(bodyLeft + bodyWidth - inset, y), 1f)
+            }
+        }
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(if (!active) "—" else if (charging) "↓" else "↑", color = Color.White, fontWeight = FontWeight.Bold)
+            Text(soc?.let { "${it.toInt()}%" } ?: "—", color = Color.White, fontWeight = FontWeight.Bold)
+        }
+    }
+}
+
+@Composable
+private fun ServerRackVisual(powerW: Double?, modifier: Modifier) {
+    val active = abs(powerW ?: 0.0) >= ENERGY_ACTIVITY_THRESHOLD_W
+    val transition = rememberInfiniteTransition(label = "rack-lights")
+    val blink by transition.animateFloat(
+        .18f,
+        1f,
+        infiniteRepeatable(tween(720), RepeatMode.Reverse),
+        label = "rack-blink-a",
+    )
+    val alternateBlink by transition.animateFloat(
+        1f,
+        .12f,
+        infiniteRepeatable(tween(940), RepeatMode.Reverse),
+        label = "rack-blink-b",
+    )
+    Box(
+        modifier.semantics {
+            contentDescription = "Server rack using ${watts(powerW)}"
+        },
+    ) {
+        Image(
+            painter = painterResource(R.drawable.pilot_server_rack),
+            contentDescription = null,
+            modifier = Modifier.fillMaxSize(),
+            contentScale = ContentScale.Crop,
+        )
+        Canvas(Modifier.fillMaxSize()) {
+            val ledPoints = listOf(
+                Offset(size.width * .46f, size.height * .34f),
+                Offset(size.width * .53f, size.height * .40f),
+                Offset(size.width * .48f, size.height * .48f),
+                Offset(size.width * .56f, size.height * .55f),
+                Offset(size.width * .47f, size.height * .63f),
+                Offset(size.width * .55f, size.height * .72f),
+            )
+            ledPoints.forEachIndexed { index, point ->
+                val color = if (index % 3 == 0) PilotCyan else PilotMint
+                val alpha = if (!active) .12f else if (index % 2 == 0) blink else alternateBlink
+                drawCircle(color.copy(alpha = alpha * .22f), 8f, point)
+                drawCircle(color.copy(alpha = alpha), 2.5f, point)
+            }
+        }
     }
 }
 
@@ -295,11 +643,16 @@ private fun ClimateDashboard(value: DashboardSnapshot) {
     }
 }
 
-@Composable private fun FlowMetric(label: String, value: String, tint: Color, modifier: Modifier) {
-    Card(modifier, colors = CardDefaults.cardColors(containerColor = Color(0xE8101722)), shape = RoundedCornerShape(15.dp)) {
-        Column(Modifier.padding(horizontal = 13.dp, vertical = 8.dp)) {
+@Composable private fun FlowMetric(label: String, value: String, tint: Color, modifier: Modifier, detail: String? = null) {
+    Card(
+        modifier,
+        colors = CardDefaults.cardColors(containerColor = Color(0xE8101722)),
+        shape = RoundedCornerShape(15.dp),
+    ) {
+        Column(Modifier.padding(horizontal = 13.dp, vertical = 7.dp), horizontalAlignment = Alignment.CenterHorizontally) {
             Text(label.uppercase(), color = tint, style = MaterialTheme.typography.labelSmall)
             Text(value, fontWeight = FontWeight.Bold)
+            detail?.let { Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall) }
         }
     }
 }

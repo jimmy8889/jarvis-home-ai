@@ -95,13 +95,17 @@ Energy and monitoring are supplied by the device-scoped `pilot.energy.v1` and
 `pilot.dashboard.v1` contracts. The app does not invent sensor values or
 connect directly to Home Assistant. The phone uses a dedicated bottom control
 surface: the mini-player is a separate row above Pilot's navigation buttons,
-so neither can overlap the other and both remain stable across screens.
+so neither can overlap the other and both remain stable across screens. The
+compact shell does not instantiate a system `TabView`; Pilot's own bar is the
+only bottom navigation surface. The bundled Pilot mark is used in navigation
+identity and the application icon.
 
 `This iPhone` uses the official SendspinKit client. Its stable player identity
 is derived from the paired Pilot device ID, while playback commands travel
 through `/v1/devices/{device_id}/media/local`. Pilot Core derives the matching
-Music Assistant queue ID server-side and records the action; the app never
-receives the Music Assistant token. The default endpoint is
+Music Assistant output ID server-side, resolves any Universal Player wrapper
+published for that Sendspin transport, and records the action; the app never
+receives the Music Assistant token or chooses an arbitrary queue. The default endpoint is
 `ws://10.0.2.72:8927/sendspin`; older installs that stored the port-8095 web UI
 address are migrated automatically. Connection failures remain visible in the
 Music screen with an explicit retry action.

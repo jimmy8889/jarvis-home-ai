@@ -111,8 +111,8 @@ Music streams: TCP 8097
 Sendspin server: TCP 8927
 Pilot Core: 10.0.1.64:8770
 Pilot Core host: debian-docker / Debian 12
-Pilot Core target image: jarvis-home-ai/pilot-core:core-0.28.0-20260723.1
-Pilot Core deployed commit: a1b9fc5c972902f51ad42d0af022f4079fafdf24
+Pilot Core target image: jarvis-home-ai/pilot-core:core-0.28.1-20260723.1
+Pilot Core deployed commit: de1ea9a347c13ed4cfca69d2b2ea7e98ad7f6608
 ```
 
 That image is the deployed production baseline. Pilot Core 0.28 retains the
@@ -1136,3 +1136,13 @@ deployed integration, hardware boundary, or milestone status changes.
   a cold rollback archive, preserved persistent state and secrets, and passed
   readiness plus Home Assistant, Music Assistant and TTS diagnostics without
   issuing an audible command.
+- **4.6** — Promoted commit `de1ea9a` as immutable Pilot Core 0.28.1 image
+  `core-0.28.1-20260723.1`. Native iPhone playback now resolves its
+  authenticated Sendspin output through Music Assistant's Universal Player
+  wrapper before issuing queue commands. The release also removes the residual
+  system iOS tab chrome and adds the branded Pilot app icon. The guarded deploy
+  created rollback archive
+  `pilot-core-20260722T210937Z-pre-deploy-core-0.28.1-20260723.1.tar.gz` with
+  SHA-256 `ebd46c9f36bd7c78b907999194f9e1151a3fe12f1c6d101321646f091c97126e`;
+  readiness, Home Assistant, Music Assistant and TTS diagnostics passed with
+  zero container restarts and no audible action.

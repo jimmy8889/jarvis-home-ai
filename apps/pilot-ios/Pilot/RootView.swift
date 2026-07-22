@@ -122,18 +122,27 @@ struct RootView: View {
             .navigationSplitViewStyle(.balanced)
         } else {
             VStack(spacing: 0) {
-                TabView(selection: Binding(
-                    get: { section ?? .home },
-                    set: { section = $0 }
-                )) {
-                    ForEach(PilotSection.allCases) { item in
-                        NavigationStack {
-                            destination(item)
+                NavigationStack {
+                    destination(section ?? .home)
+                        .toolbar {
+                            ToolbarItem(placement: .principal) {
+                                HStack(spacing: 8) {
+                                    PilotMark(size: 27)
+                                    Text("PILOT")
+                                        .font(
+                                            .system(
+                                                .headline,
+                                                design: .rounded,
+                                                weight: .bold
+                                            )
+                                        )
+                                        .tracking(1.8)
+                                }
+                                .accessibilityElement(children: .combine)
+                                .accessibilityLabel("Pilot")
+                            }
                         }
-                        .tag(item)
-                    }
                 }
-                .toolbar(.hidden, for: .tabBar)
                 .frame(maxHeight: .infinity)
 
                 PhoneBottomChrome(

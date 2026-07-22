@@ -1216,6 +1216,56 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
         except IntegrationRequestFailed as error:
             raise HTTPException(status_code=502, detail=str(error)) from None
 
+    async def local_music_assistant_player_id(device_id: str) -> str:
+        """Resolve a device-owned Sendspin output to its controllable MA player.
+
+        Music Assistant may wrap a Sendspin transport in a Universal Player.
+        The raw Sendspin ID remains visible in ``output_protocols`` while queue
+        and playback commands must target the Universal Player's ``player_id``.
+        """
+
+        output_id = f"pilot-native-{device_id}"
+        for attempt in range(8):
+            players = await integrations.music_assistant("players/all", {})
+            if not isinstance(players, list):
+                raise IntegrationRequestFailed(
+                    "Music Assistant returned an invalid player list"
+                )
+            direct_match: str | None = None
+            wrapped_match: str | None = None
+            for player in players:
+                if not isinstance(player, dict):
+                    continue
+                if player.get("available") is False:
+                    continue
+                player_id = player.get("player_id")
+                if not isinstance(player_id, str) or not player_id:
+                    continue
+                if player_id == output_id:
+                    direct_match = player_id
+                    break
+                protocols = player.get("output_protocols")
+                if not isinstance(protocols, list):
+                    continue
+                for protocol in protocols:
+                    if (
+                        isinstance(protocol, dict)
+                        and protocol.get("output_protocol_id") == output_id
+                    ):
+                        wrapped_match = player_id
+                        break
+                if wrapped_match:
+                    break
+            resolved = direct_match or wrapped_match
+            if resolved:
+                return resolved
+            if attempt < 7:
+                await asyncio.sleep(0.25)
+        raise IntegrationRequestFailed(
+            "This iPhone is connected to Sendspin but its Music Assistant queue "
+            "has not appeared yet"
+        )
+
     async def browse_music(request: MediaBrowseRequest) -> dict[str, Any]:
         """Resolve one Music Assistant item into a small client-facing detail page."""
 
@@ -3144,7 +3194,12 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
                 detail="action is not supported for local device playback",
             )
 
-        queue_id = f"pilot-native-{device_id}"
+        try:
+            queue_id = await local_music_assistant_player_id(device_id)
+        except IntegrationUnavailable as error:
+            raise HTTPException(status_code=503, detail=str(error)) from None
+        except IntegrationRequestFailed as error:
+            raise HTTPException(status_code=502, detail=str(error)) from None
         command_map: dict[str, tuple[str, dict[str, Any]]] = {
             "play": ("players/cmd/play", {"player_id": queue_id}),
             "pause": ("players/cmd/pause", {"player_id": queue_id}),

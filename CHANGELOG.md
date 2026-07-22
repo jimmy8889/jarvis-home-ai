@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.28.1 — 2026-07-23
+
+- Fixed native iPhone playback against Music Assistant's Universal Player
+  provider. Pilot Core now resolves the authenticated phone's derived Sendspin
+  output ID through `output_protocols` and targets the published controllable
+  queue, with bounded registration retries and no client-supplied player ID.
+- Removed the residual system `TabView` from the compact iPhone shell. Pilot's
+  single custom navigation bar is now the only bottom navigation surface.
+- Integrated the generated Pilot mark into the navigation title and added a
+  reproducible, opaque 1024-pixel branded application icon.
+
 ## 0.28.0 — 2026-07-23
 
 - Corrected native iPhone playback to use Music Assistant's Sendspin port 8927

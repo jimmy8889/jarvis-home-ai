@@ -403,11 +403,30 @@ class DisplayNodeApiTests(unittest.TestCase):
         )
 
     def test_local_media_queue_is_derived_from_authenticated_device(self) -> None:
+        async def request(_integration: Integrations, command: str, args: dict) -> object:
+            if command == "players/all":
+                return [
+                    {
+                        "player_id": "up-pilot-bedroom",
+                        "provider": "universal_player",
+                        "output_protocols": [
+                            {
+                                "output_protocol_id": "pilot-native-pilot-bedroom-display",
+                                "protocol_domain": "sendspin",
+                            }
+                        ],
+                    }
+                ]
+            if command == "player_queues/play_media":
+                self.assertEqual(args["queue_id"], "up-pilot-bedroom")
+                return {"accepted": True}
+            self.fail(f"unexpected command {command}")
+
         with patch.object(
             Integrations,
             "music_assistant",
-            new=AsyncMock(return_value={"accepted": True}),
-        ) as music_assistant:
+            new=request,
+        ):
             response = self.client.post(
                 "/v1/devices/pilot-bedroom-display/media/local",
                 headers=self.headers,
@@ -417,14 +436,35 @@ class DisplayNodeApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(
             response.json()["queue_id"],
-            "pilot-native-pilot-bedroom-display",
+            "up-pilot-bedroom",
         )
-        music_assistant.assert_awaited_once_with(
-            "player_queues/play_media",
-            {
-                "queue_id": "pilot-native-pilot-bedroom-display",
-                "media": "tidal://track/123",
-            },
+
+    def test_local_media_accepts_direct_sendspin_player_id(self) -> None:
+        calls: list[tuple[str, dict]] = []
+
+        async def request(_integration: Integrations, command: str, args: dict) -> object:
+            calls.append((command, args))
+            if command == "players/all":
+                return [{"player_id": "pilot-native-pilot-bedroom-display"}]
+            return {"accepted": True}
+
+        with patch.object(Integrations, "music_assistant", new=request):
+            response = self.client.post(
+                "/v1/devices/pilot-bedroom-display/media/local",
+                headers=self.headers,
+                json={"action": "pause"},
+            )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(
+            calls,
+            [
+                ("players/all", {}),
+                (
+                    "players/cmd/pause",
+                    {"player_id": "pilot-native-pilot-bedroom-display"},
+                ),
+            ],
         )
 
     def test_media_browse_returns_artist_albums_and_tracks(self) -> None:

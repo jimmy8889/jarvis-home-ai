@@ -1,7 +1,7 @@
 package com.jarvis.pilotwall
 
-import android.app.Activity
 import android.os.SystemClock
+import androidx.activity.compose.LocalActivity
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -29,7 +29,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -52,7 +51,7 @@ fun PilotIdleGuard(
             delay(1_000)
         }
     }
-    val activity = LocalContext.current as? Activity
+    val activity = LocalActivity.current
     DisposableEffect(dimmed, activity) {
         val window = activity?.window
         val previous = window?.attributes?.screenBrightness ?: -1f

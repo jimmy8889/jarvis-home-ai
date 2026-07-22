@@ -36,11 +36,15 @@ if [[ ! "$remote_path" =~ ^/[a-zA-Z0-9_./-]+$ ]] || [[ "$remote_path" == "/" ]];
 fi
 
 commit="$(git -C "$repo_root" rev-parse HEAD)"
+staging_dir="$(mktemp -d "${TMPDIR:-/tmp}/pilot-core-sync.XXXXXX")"
+trap 'rm -rf "$staging_dir"' EXIT
+git -C "$repo_root" archive "$commit" | tar -x -C "$staging_dir"
 ssh "$remote_host" "mkdir -p '$remote_path'"
 rsync_args=(
   --archive
   --compress
   --delete
+  --filter=':- .gitignore'
   --exclude=.git/
   --exclude=.venv/
   --exclude=.artifacts/
@@ -55,7 +59,7 @@ rsync_args=(
 if [[ "$dry_run" == true ]]; then
   rsync_args+=(--dry-run --itemize-changes)
 fi
-rsync "${rsync_args[@]}" "${repo_root}/" "${remote_host}:${remote_path}/"
+rsync "${rsync_args[@]}" "${staging_dir}/" "${remote_host}:${remote_path}/"
 if [[ "$dry_run" != true ]]; then
   printf '%s\n' "$commit" |
     ssh "$remote_host" "install -m 0644 /dev/stdin '$remote_path/.deployed-commit'"

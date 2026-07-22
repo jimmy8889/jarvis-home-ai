@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.27.1 — 2026-07-22
+
+- Fixed Home Assistant `minimal_response` history parsing so all states in each
+  requested series retain their entity identity. The 24-hour Home, Battery and
+  Solar graphs now receive their complete bounded series instead of a single
+  first point; malformed or cross-entity responses fail closed.
+- Added the missing Linux junction-to-Home flow leg, making Battery-to-Home
+  discharge explicit on the Pi and N150 as it already was on Android and iOS.
+- Added a Raspberry Pi rendering profile that keeps directional power motion,
+  battery state and rack LEDs while using solid SVG strokes, a bounded 10 Hz
+  dash repaint rate, and no hidden-page or reduced-motion animation.
+- Fixed Android display policy so the selected idle timeout is authoritative,
+  added a persisted 5–100 percent brightness control with first-touch wake, and
+  disabled continuous visual loops when system animations are off.
+
 ## 0.27.0 — 2026-07-22
 
 - Rebuilt the shared energy scene around four bundled day/night and

@@ -13,6 +13,7 @@ from .integrations import IntegrationRequestFailed, IntegrationUnavailable, Inte
 
 FLOW_IDLE_WATTS = 25.0
 GRID_FLOW_IDLE_WATTS = 100.0
+VEHICLE_FLOW_IDLE_WATTS = 100.0
 DASHBOARD_CACHE_SECONDS = 10.0
 
 
@@ -70,6 +71,7 @@ class DashboardService:
             "generated_at": datetime.now(UTC).isoformat(),
             "status": "ok" if not missing else "partial" if state_by_id else "unavailable",
             "power": self._power(state_by_id),
+            "scene": self._scene(state_by_id),
             "daily": self._daily(state_by_id),
             "vehicle": self._vehicle(state_by_id),
             "tariff": self._tariff(state_by_id),
@@ -96,6 +98,7 @@ class DashboardService:
             self.settings.energy_vehicle_connected_entity_id,
             self.settings.energy_vehicle_power_entity_id,
             self.settings.energy_vehicle_soc_entity_id,
+            self.settings.sun_entity_id,
             *self.settings.energy_solar_today_entity_ids,
             self.settings.energy_home_today_entity_id,
             self.settings.energy_grid_export_today_entity_id,
@@ -181,7 +184,11 @@ class DashboardService:
             "directions": {
                 "grid": self._direction(grid, "importing", "exporting", GRID_FLOW_IDLE_WATTS),
                 "battery": self._direction(battery, "discharging", "charging", FLOW_IDLE_WATTS),
-                "vehicle": "charging" if vehicle is not None and vehicle >= GRID_FLOW_IDLE_WATTS else "idle",
+                "vehicle": (
+                    "charging"
+                    if vehicle is not None and vehicle >= VEHICLE_FLOW_IDLE_WATTS
+                    else "idle"
+                ),
                 "server_rack": "consuming" if server is not None and server >= FLOW_IDLE_WATTS else "idle",
             },
             "flow_active": {
@@ -190,8 +197,28 @@ class DashboardService:
                 "battery": battery is not None and abs(battery) >= FLOW_IDLE_WATTS,
                 "home": home is not None and home >= FLOW_IDLE_WATTS,
                 "server_rack": server is not None and server >= FLOW_IDLE_WATTS,
-                "vehicle": vehicle is not None and vehicle >= GRID_FLOW_IDLE_WATTS,
+                "vehicle": vehicle is not None and vehicle >= VEHICLE_FLOW_IDLE_WATTS,
             },
+        }
+
+    def _scene(self, states: dict[str, dict[str, Any]]) -> dict[str, Any]:
+        state = states.get(self.settings.sun_entity_id, {})
+        sun_state = self._text(state.get("state"))
+        normalized = sun_state.casefold() if sun_state else None
+        is_day = (
+            True
+            if normalized == "above_horizon"
+            else False
+            if normalized == "below_horizon"
+            else None
+        )
+        attributes = state.get("attributes") or {}
+        return {
+            "is_day": is_day,
+            "sun_state": sun_state,
+            "solar_elevation_degrees": self._number(attributes.get("elevation")),
+            "next_rising": self._text(attributes.get("next_rising")),
+            "next_setting": self._text(attributes.get("next_setting")),
         }
 
     def _daily(self, states: dict[str, dict[str, Any]]) -> dict[str, Any]:
@@ -216,7 +243,9 @@ class DashboardService:
         return {
             "name": "Jarvis",
             "connected": connected,
-            "charging": bool(connected and power is not None and power >= GRID_FLOW_IDLE_WATTS),
+            "charging": bool(
+                connected and power is not None and power >= VEHICLE_FLOW_IDLE_WATTS
+            ),
             "power_w": power,
             "state_of_charge_percent": self._percent_state(
                 states, self.settings.energy_vehicle_soc_entity_id

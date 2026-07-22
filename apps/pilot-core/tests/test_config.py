@@ -190,6 +190,25 @@ temperature_history_hours = 24
         with self.assertRaisesRegex(ValueError, "must be a sensor entity"):
             self._load(invalid)
 
+    def test_validates_optional_sun_scene_entity(self) -> None:
+        configured = VALID_CONFIG.replace(
+            "[[rooms]]",
+            """[integrations]
+sun_entity_id = "sun.sun"
+
+[[rooms]]""",
+            1,
+        )
+        self.assertEqual(self._load(configured).integrations.sun_entity_id, "sun.sun")
+
+        with self.assertRaisesRegex(ValueError, "must be a sun entity"):
+            self._load(
+                configured.replace(
+                    'sun_entity_id = "sun.sun"',
+                    'sun_entity_id = "sensor.sun"',
+                )
+            )
+
     def test_validates_display_energy_sensors(self) -> None:
         configured = VALID_CONFIG.replace(
             "[[rooms]]",

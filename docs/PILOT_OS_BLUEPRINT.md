@@ -1107,3 +1107,13 @@ deployed integration, hardware boundary, or milestone status changes.
   and kiosk services, zero restart loops, an intact two-release rollback pair,
   and Sendspin installed but disabled until its USB DAC is attached. Physical
   touch, brightness and sound acceptance remain separate.
+- **4.3** — Built Pilot Core 0.27 and the cross-client energy-scene polish:
+  authoritative Home Assistant sun state, four bundled day/night and
+  Tesla-presence scenes, a shared 100 W vehicle deadband, power-scaled
+  travelling glow pulses, directional battery state, and generated server-rack
+  artwork with native LED overlays. Android 0.3 packages every visual locally;
+  iOS and Linux use the same visual contract. Linux display routing now binds a
+  fixed-room device to that room's output, arbitrates competing now-playing
+  updates, exposes QWERTY touch search without reserving hidden keyboard space,
+  and provides a first-class N150 media-console profile. Production Core,
+  Raspberry Pi and N150 deployment/physical acceptance remain distinct gates.

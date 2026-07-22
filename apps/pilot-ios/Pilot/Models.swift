@@ -454,6 +454,7 @@ struct DashboardSnapshot: Codable, Equatable, Sendable {
     let generatedAt: String?
     let status: String
     let power: DashboardPower
+    let scene: DashboardScene?
     let daily: DashboardDaily
     let vehicle: DashboardVehicle
     let tariff: DashboardTariff
@@ -463,7 +464,7 @@ struct DashboardSnapshot: Codable, Equatable, Sendable {
     let controls: DashboardControls
 
     enum CodingKeys: String, CodingKey {
-        case status, power, daily, vehicle, tariff, temperatures, history, weather, controls
+        case status, power, scene, daily, vehicle, tariff, temperatures, history, weather, controls
         case schemaVersion = "schema_version"
         case generatedAt = "generated_at"
     }
@@ -473,6 +474,7 @@ struct DashboardSnapshot: Codable, Equatable, Sendable {
         generatedAt: nil,
         status: "unavailable",
         power: .empty,
+        scene: nil,
         daily: .empty,
         vehicle: .empty,
         tariff: .empty,
@@ -481,6 +483,18 @@ struct DashboardSnapshot: Codable, Equatable, Sendable {
         weather: .empty,
         controls: .empty
     )
+}
+
+struct DashboardScene: Codable, Equatable, Sendable {
+    let isDay: Bool?
+    let sunState: String?
+    let solarElevationDegrees: Double?
+
+    enum CodingKeys: String, CodingKey {
+        case isDay = "is_day"
+        case sunState = "sun_state"
+        case solarElevationDegrees = "solar_elevation_degrees"
+    }
 }
 
 struct DashboardPower: Codable, Equatable, Sendable {

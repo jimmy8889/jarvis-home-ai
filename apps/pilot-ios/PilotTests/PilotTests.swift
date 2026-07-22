@@ -57,6 +57,28 @@ final class PilotTests: XCTestCase {
         XCTAssertNotNil(EnergySnapshot.awaitingBackend.detail)
     }
 
+    func testEnergySceneUsesAuthoritativeSunAndTeslaDeadband() {
+        XCTAssertFalse(EnergyScenePolicy.vehicleIsDrawingPower(1.6))
+        XCTAssertFalse(EnergyScenePolicy.vehicleIsDrawingPower(99.9))
+        XCTAssertTrue(EnergyScenePolicy.vehicleIsDrawingPower(100))
+        XCTAssertEqual(
+            EnergyScenePolicy.houseAsset(
+                isDay: true,
+                solarWatts: 0,
+                vehicleConnected: true
+            ),
+            "SolarHouseTeslaDay"
+        )
+        XCTAssertEqual(
+            EnergyScenePolicy.houseAsset(
+                isDay: false,
+                solarWatts: 8_000,
+                vehicleConnected: false
+            ),
+            "SolarHouse"
+        )
+    }
+
     func testPortableEnergyContractMapsPartialSnapshot() throws {
         let data = Data(
             """
@@ -86,6 +108,8 @@ final class PilotTests: XCTestCase {
                 "battery_soc_percent":77,"home_load_w":5610,"server_rack_w":312,
                 "vehicle_w":4540,"directions":{"grid":"exporting","battery":"charging"},
                 "flow_active":{"grid":false,"battery":true}},
+              "scene":{"is_day":true,"sun_state":"above_horizon",
+                "solar_elevation_degrees":31.4},
               "daily":{"solar_generated_kwh":66.3,"home_used_kwh":32.9,
                 "grid_exported_kwh":5.5},
               "vehicle":{"name":"Jarvis","connected":true,"charging":true,
@@ -110,6 +134,8 @@ final class PilotTests: XCTestCase {
         XCTAssertEqual(value.power.serverRackWatts, 312)
         XCTAssertEqual(value.power.flowActive["grid"], false)
         XCTAssertEqual(value.power.directions["battery"], "charging")
+        XCTAssertEqual(value.scene?.isDay, true)
+        XCTAssertEqual(value.scene?.solarElevationDegrees, 31.4)
         XCTAssertTrue(value.vehicle.charging)
         XCTAssertEqual(value.history.series.first?.points.first?.value, 8820)
         XCTAssertEqual(value.weather.forecast.first?.highTemperatureCelsius, 26)

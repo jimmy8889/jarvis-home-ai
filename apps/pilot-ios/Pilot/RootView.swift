@@ -57,11 +57,15 @@ enum EnergyScenePolicy {
     static let vehicleFlowDeadbandWatts = 100.0
 
     static func vehicleIsDrawingPower(_ watts: Double?) -> Bool {
-        abs(watts ?? 0) > vehicleFlowDeadbandWatts
+        abs(watts ?? 0) >= vehicleFlowDeadbandWatts
     }
 
-    static func houseAsset(solarWatts: Double?, vehicleConnected: Bool) -> String {
-        let daytime = (solarWatts ?? 0) > 100
+    static func houseAsset(
+        isDay: Bool?,
+        solarWatts: Double?,
+        vehicleConnected: Bool
+    ) -> String {
+        let daytime = isDay ?? ((solarWatts ?? 0) >= 100)
         switch (daytime, vehicleConnected) {
         case (true, true): return "SolarHouseTeslaDay"
         case (true, false): return "SolarHouseDay"
@@ -555,6 +559,7 @@ private struct EnergyFlowPage: View {
 
     private var houseAsset: String {
         EnergyScenePolicy.houseAsset(
+            isDay: snapshot.scene?.isDay,
             solarWatts: snapshot.power.solarWatts,
             vehicleConnected: snapshot.vehicle.connected == true
         )
@@ -790,7 +795,7 @@ private struct EnergyFlowLines: View {
     }
 
     private func flowIsActive(_ key: String, watts: Double?, threshold: Double) -> Bool {
-        let aboveDeadband = abs(watts ?? 0) > threshold
+        let aboveDeadband = abs(watts ?? 0) >= threshold
         return aboveDeadband && (power.flowActive[key] ?? aboveDeadband)
     }
 

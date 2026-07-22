@@ -25,6 +25,7 @@ home_assistant_assist_pipeline_id = "01kxkqhhw28z558e2b99nwzk0z"
 home_assistant_assist_language = "en"
 home_assistant_assist_timeout_seconds = 60
 weather_entity_id = "weather.geebung"
+sun_entity_id = "sun.sun"
 outdoor_temperature_entity_id = "sensor.gw1100c_outdoor_temperature"
 indoor_temperature_entity_id = "sensor.temp3_temperature"
 temperature_history_hours = 24

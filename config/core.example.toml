@@ -26,6 +26,8 @@ home_assistant_assist_language = "en"
 home_assistant_assist_timeout_seconds = 60
 # Set this to the Home Assistant weather entity used by room displays.
 weather_entity_id = ""
+# Optional source for exact day/night artwork. Home Assistant normally uses sun.sun.
+sun_entity_id = ""
 # Optional rolling temperature pages for embedded room displays.
 outdoor_temperature_entity_id = ""
 indoor_temperature_entity_id = ""

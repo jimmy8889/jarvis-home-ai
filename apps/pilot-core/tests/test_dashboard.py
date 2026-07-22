@@ -20,6 +20,7 @@ class DashboardServiceTests(unittest.IsolatedAsyncioTestCase):
     async def test_builds_bounded_energy_vehicle_tariff_and_climate_contract(self) -> None:
         settings = IntegrationSettings(
             weather_entity_id="weather.home",
+            sun_entity_id="sun.sun",
             outdoor_temperature_entity_id="sensor.outdoor",
             energy_solar_power_entity_id="sensor.solar",
             energy_grid_power_entity_id="sensor.grid",
@@ -75,6 +76,16 @@ class DashboardServiceTests(unittest.IsolatedAsyncioTestCase):
             "sensor.bedroom": state("sensor.bedroom", 22.5, "°C"),
             "sensor.media": state("sensor.media", 22.3, "°C"),
             "sensor.outdoor": state("sensor.outdoor", 21.0, "°C"),
+            "sun.sun": {
+                "entity_id": "sun.sun",
+                "state": "above_horizon",
+                "last_updated": "2026-07-22T04:00:00+00:00",
+                "attributes": {
+                    "elevation": 31.4,
+                    "next_rising": "2026-07-22T20:30:00+00:00",
+                    "next_setting": "2026-07-22T07:10:00+00:00",
+                },
+            },
         }
         integrations.home_assistant_selected_states.return_value = states
         integrations.home_assistant_history.return_value = {
@@ -113,6 +124,8 @@ class DashboardServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(result["power"]["flow_active"]["grid"])
         self.assertEqual(result["power"]["directions"]["grid"], "idle")
         self.assertEqual(result["power"]["directions"]["battery"], "charging")
+        self.assertTrue(result["scene"]["is_day"])
+        self.assertEqual(result["scene"]["solar_elevation_degrees"], 31.4)
         self.assertTrue(result["vehicle"]["connected"])
         self.assertTrue(result["vehicle"]["charging"])
         self.assertEqual(result["vehicle"]["state_of_charge_percent"], 52)
@@ -131,6 +144,45 @@ class DashboardServiceTests(unittest.IsolatedAsyncioTestCase):
         service.invalidate()
         await service.snapshot()
         self.assertEqual(integrations.home_assistant_selected_states.await_count, 2)
+
+    async def test_tesla_flow_uses_one_hundred_watt_deadband_without_hiding_presence(self) -> None:
+        settings = IntegrationSettings(
+            energy_vehicle_connected_entity_id="binary_sensor.car",
+            energy_vehicle_power_entity_id="sensor.car_power",
+        )
+        integrations = AsyncMock()
+        integrations.home_assistant_selected_states.return_value = {
+            "binary_sensor.car": state("binary_sensor.car", "on"),
+            "sensor.car_power": state("sensor.car_power", 1.6, "W"),
+        }
+        integrations.home_assistant_history.return_value = {}
+        integrations.home_assistant_weather.return_value = {
+            "entity_id": "",
+            "current": {},
+            "forecast_response": {},
+        }
+
+        result = await DashboardService(settings, integrations).snapshot()
+
+        self.assertTrue(result["vehicle"]["connected"])
+        self.assertFalse(result["vehicle"]["charging"])
+        self.assertEqual(result["vehicle"]["power_w"], 1.6)
+        self.assertFalse(result["power"]["flow_active"]["vehicle"])
+        self.assertEqual(result["power"]["directions"]["vehicle"], "idle")
+
+    def test_scene_falls_back_to_unknown_when_sun_is_not_configured(self) -> None:
+        service = DashboardService(IntegrationSettings(), AsyncMock())
+
+        self.assertEqual(
+            service._scene({}),
+            {
+                "is_day": None,
+                "sun_state": None,
+                "solar_elevation_degrees": None,
+                "next_rising": None,
+                "next_setting": None,
+            },
+        )
 
 
 if __name__ == "__main__":

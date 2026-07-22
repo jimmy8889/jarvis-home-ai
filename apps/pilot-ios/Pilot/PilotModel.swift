@@ -1081,6 +1081,11 @@ final class PilotModel {
                 flowActive: ["solar": true, "grid": false, "battery": true,
                              "home": true, "server_rack": true, "vehicle": true]
             ),
+            scene: DashboardScene(
+                isDay: true,
+                sunState: "above_horizon",
+                solarElevationDegrees: 32.4
+            ),
             daily: DashboardDaily(
                 solarGeneratedKWh: 66.3, homeUsedKWh: 32.9, gridExportedKWh: 5.5
             ),

@@ -1324,6 +1324,11 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
             "app.js": "text/javascript",
             "house-energy.png": "image/png",
             "house-no-car.png": "image/png",
+            "house-day.png": "image/png",
+            "house-day-tesla.png": "image/png",
+            "house-night.png": "image/png",
+            "house-night-tesla.png": "image/png",
+            "server-rack.png": "image/png",
         }
         media_type = allowed.get(asset_name)
         if media_type is None:

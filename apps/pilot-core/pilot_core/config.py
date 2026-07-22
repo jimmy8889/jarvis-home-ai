@@ -36,6 +36,7 @@ class IntegrationSettings:
     home_assistant_assist_language: str = "en"
     home_assistant_assist_timeout_seconds: int = 60
     weather_entity_id: str = ""
+    sun_entity_id: str = ""
     outdoor_temperature_entity_id: str = ""
     indoor_temperature_entity_id: str = ""
     temperature_history_hours: int = 24
@@ -356,6 +357,7 @@ def load_settings(path: str | Path) -> Settings:
             integration_values.get("home_assistant_assist_timeout_seconds", 60)
         ),
         weather_entity_id=str(integration_values.get("weather_entity_id", "")).strip(),
+        sun_entity_id=str(integration_values.get("sun_entity_id", "")).strip(),
         outdoor_temperature_entity_id=str(
             integration_values.get("outdoor_temperature_entity_id", "")
         ).strip(),
@@ -540,6 +542,8 @@ def load_settings(path: str | Path) -> Settings:
         "weather."
     ):
         raise ValueError("integrations.weather_entity_id must be a weather entity")
+    if integrations.sun_entity_id and not integrations.sun_entity_id.startswith("sun."):
+        raise ValueError("integrations.sun_entity_id must be a sun entity")
     for setting_name, entity_id in (
         ("outdoor_temperature_entity_id", integrations.outdoor_temperature_entity_id),
         ("indoor_temperature_entity_id", integrations.indoor_temperature_entity_id),

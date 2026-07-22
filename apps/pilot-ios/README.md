@@ -9,8 +9,11 @@ The polished v1 application provides:
 - a premium home surface with explainable Core-curated room controls, live energy,
   explicit offline/stale handling, and cached last-known state;
 - matching Flow, History, Daily and Climate monitoring pages with the James
-  House energy scene, dynamic directional paths, Tesla and server-rack loads,
-  daily totals, Amber pricing, weather and five room temperatures;
+  House energy scene, four local day/night and Tesla-present variants, smooth
+  power-scaled directional paths, a SOC-accurate animated battery and a locally
+  packaged server rack with native LED activity, daily totals, Amber pricing,
+  weather and five room temperatures. Car presence follows the connector while
+  charging power is deliberately suppressed below 100 W;
 - a persistent mini-player and full now-playing surface with normalized artwork,
   queue/progress, seek, previous/next, mute, volume, and room transfer controls;
 - grouped Music Assistant search for tracks, albums, artists, playlists, radio,

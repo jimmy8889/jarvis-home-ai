@@ -336,6 +336,16 @@ class ApiTests(unittest.TestCase):
         script = self.client.get("/dashboard/assets/app.js")
         self.assertEqual(script.status_code, 200)
         self.assertIn("sessionStorage", script.text)
+        for asset_name in (
+            "house-day.png",
+            "house-day-tesla.png",
+            "house-night.png",
+            "house-night-tesla.png",
+            "server-rack.png",
+        ):
+            asset = self.client.get(f"/dashboard/assets/{asset_name}")
+            self.assertEqual(asset.status_code, 200)
+            self.assertEqual(asset.headers["content-type"], "image/png")
         self.assertEqual(
             self.client.get("/dashboard/assets/not-allowed.js").status_code,
             404,
@@ -350,7 +360,7 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.headers["cache-control"], "no-store")
         payload = response.json()
-        self.assertEqual(payload["deployment"]["version"], "0.26.0")
+        self.assertEqual(payload["deployment"]["version"], "0.27.0")
         self.assertEqual(payload["summary"]["room_count"], 2)
         self.assertEqual(payload["summary"]["device_count"], 0)
         self.assertEqual(payload["summary"]["armed_room_count"], 0)

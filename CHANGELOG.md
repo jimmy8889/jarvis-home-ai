@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.27.0 — 2026-07-22
+
+- Rebuilt the shared energy scene around four bundled day/night and
+  Tesla-present/absent house states. Pilot Core now projects an optional,
+  bounded `sun.sun` scene signal so displays do not mistake an overcast day for
+  night; clients retain a solar-production fallback while older Core versions
+  remain in service.
+- Standardized Tesla presentation across clients: connection controls whether
+  the car is parked in the scene, while charging power and animation remain
+  suppressed below 100 W. A plugged-in idle vehicle therefore never appears as
+  a misleading `1.6 W` load.
+- Replaced mechanical dashed motion with rounded, power-scaled travelling glow
+  pulses, added the missing directional home-battery route and truthful SOC
+  animation, and introduced a shared transparent server-rack illustration with
+  independently animated native status LEDs.
+- Advanced the Android wall dashboard to 0.3 with entirely local scene assets
+  and motion-aware animation. Advanced Pilot Linux Display with fixed-room
+  output resolution, stable now-playing arbitration, QWERTY touch input and a
+  dedicated N150 media-console presentation.
+- Added threshold, scene, asset, output-routing and stale-update regression
+  coverage. Physical Pi touch/audio and N150 HDMI/video acceptance remain
+  separate from source completion.
+
 ## 0.26.0 — 2026-07-22
 
 - Added the shared `pilot.dashboard.v1` monitoring contract for iOS, Android

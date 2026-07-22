@@ -283,6 +283,9 @@ class CoreStatusTests(unittest.TestCase):
         self.assertIn("display_node_audio_services_enabled: false", defaults)
         self.assertIn("Assert display audio ownership is explicit", tasks)
         self.assertIn("when: display_node_audio_services_enabled | bool", tasks)
+        self.assertIn("Mask display-user audio services when Room Agent owns audio", tasks)
+        self.assertIn("systemctl --user mask --now", tasks)
+        self.assertIn("when: not (display_node_audio_services_enabled | bool)", tasks)
         self.assertIn("display_node_audio_services_enabled: false", inventory)
         self.assertIn("display_node_sendspin_enabled: false", inventory)
 

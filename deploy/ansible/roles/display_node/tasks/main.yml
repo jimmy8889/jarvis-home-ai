@@ -87,6 +87,23 @@
     name: "user@{{ display_node_uid.stdout }}.service"
     state: started
 
+- name: Unmask display-user audio services when this role owns audio
+  ansible.builtin.command:
+    cmd: >-
+      runuser -u {{ display_node_user }} -- env
+      HOME=/var/lib/pilot-display
+      XDG_RUNTIME_DIR=/run/user/{{ display_node_uid.stdout }}
+      DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{{ display_node_uid.stdout }}/bus
+      systemctl --user unmask {{ item }}
+  changed_when: false
+  loop:
+    - pipewire.service
+    - pipewire.socket
+    - pipewire-pulse.service
+    - pipewire-pulse.socket
+    - wireplumber.service
+  when: display_node_audio_services_enabled | bool
+
 - name: Enable display-user PipeWire services
   ansible.builtin.command:
     cmd: >-
@@ -100,6 +117,23 @@
     - pipewire-pulse.socket
     - wireplumber.service
   when: display_node_audio_services_enabled | bool
+
+- name: Mask display-user audio services when Room Agent owns audio
+  ansible.builtin.command:
+    cmd: >-
+      runuser -u {{ display_node_user }} -- env
+      HOME=/var/lib/pilot-display
+      XDG_RUNTIME_DIR=/run/user/{{ display_node_uid.stdout }}
+      DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{{ display_node_uid.stdout }}/bus
+      systemctl --user mask --now {{ item }}
+  changed_when: false
+  loop:
+    - pipewire.service
+    - pipewire.socket
+    - pipewire-pulse.service
+    - pipewire-pulse.socket
+    - wireplumber.service
+  when: not (display_node_audio_services_enabled | bool)
 
 - name: Create display appliance directories
   ansible.builtin.file:

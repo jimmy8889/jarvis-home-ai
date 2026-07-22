@@ -41,8 +41,10 @@ confirmation-gated security controls. It shares its model and Pilot Core
 contracts with the native Android wall-tablet client. See
 [HOME_DIGITAL_TWIN.md](HOME_DIGITAL_TWIN.md).
 
-The app never connects directly to Home Assistant, Music Assistant, Ollama,
-Denon, or room endpoints.
+The app never receives Home Assistant, Music Assistant API, Ollama, Denon, or
+room-endpoint credentials. Native phone audio makes one direct LAN WebSocket
+connection to Music Assistant's Sendspin endpoint; every playback command and
+queue mutation still travels through authenticated Pilot Core.
 
 ## Build
 
@@ -91,14 +93,18 @@ origin is required before remote access is enabled.
 
 Energy and monitoring are supplied by the device-scoped `pilot.energy.v1` and
 `pilot.dashboard.v1` contracts. The app does not invent sensor values or
-connect directly to Home Assistant. The mini-player is inset once above the
-phone tab bar so it cannot obscure navigation and remains stable across tabs.
+connect directly to Home Assistant. The phone uses a dedicated bottom control
+surface: the mini-player is a separate row above Pilot's navigation buttons,
+so neither can overlap the other and both remain stable across screens.
 
 `This iPhone` uses the official SendspinKit client. Its stable player identity
 is derived from the paired Pilot device ID, while playback commands travel
 through `/v1/devices/{device_id}/media/local`. Pilot Core derives the matching
 Music Assistant queue ID server-side and records the action; the app never
-receives the Music Assistant token.
+receives the Music Assistant token. The default endpoint is
+`ws://10.0.2.72:8927/sendspin`; older installs that stored the port-8095 web UI
+address are migrated automatically. Connection failures remain visible in the
+Music screen with an explicit retry action.
 
 Pilot iOS now includes the first device-scoped meeting recorder and review
 surface. It records AAC only after an explicit tap, supports iOS background

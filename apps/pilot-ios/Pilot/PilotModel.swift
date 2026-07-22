@@ -127,7 +127,9 @@ final class PilotModel {
             ["playing", "buffering"].contains(
                 $0.effective.playbackState?.lowercased() ?? ""
             )
-        }) ?? selectedPlayer
+        }) ?? selectedPlayer.flatMap { state in
+            state.effective.media == nil ? nil : state
+        }
     }
 
     var groupedSearchResults: [(MusicResultKind, [MusicSearchResult])] {
@@ -160,15 +162,28 @@ final class PilotModel {
     func selectThisIPhoneForMusic() {
         musicPlaysOnThisIPhone = true
         UserDefaults.standard.set(true, forKey: "pilot.musicPlaysOnThisIPhone")
-        Task { await preparePhonePlaybackIfNeeded() }
+        Task {
+            let ready = await preparePhonePlaybackIfNeeded()
+            mediaError = ready ? nil : phonePlayback.status.label
+        }
     }
 
-    func preparePhonePlaybackIfNeeded() async {
-        guard musicPlaysOnThisIPhone else { return }
-        let musicAssistantURL = UserDefaults.standard.string(
-            forKey: "pilot.musicAssistantURL"
-        ) ?? "http://10.0.2.72:8095"
-        await phonePlayback.connect(baseURL: musicAssistantURL, deviceID: deviceID)
+    @discardableResult
+    func preparePhonePlaybackIfNeeded() async -> Bool {
+        guard musicPlaysOnThisIPhone else { return true }
+        let defaults = UserDefaults.standard
+        let sendspinURL: String
+        if let configured = defaults.string(forKey: "pilot.sendspinURL"),
+           !configured.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            sendspinURL = configured
+        } else {
+            let legacy = defaults.string(forKey: "pilot.musicAssistantURL")
+                ?? "http://10.0.2.72:8095"
+            sendspinURL = (try? PhonePlaybackController.normalizedSendspinURL(from: legacy))?
+                .absoluteString ?? "ws://10.0.2.72:8927/sendspin"
+            defaults.set(sendspinURL, forKey: "pilot.sendspinURL")
+        }
+        return await phonePlayback.connect(serverURL: sendspinURL, deviceID: deviceID)
     }
 
     var musicDestinationTitle: String {
@@ -540,7 +555,10 @@ final class PilotModel {
                 muted: muted
             )
             if musicPlaysOnThisIPhone {
-                await preparePhonePlaybackIfNeeded()
+                guard await preparePhonePlaybackIfNeeded() else {
+                    mediaError = phonePlayback.status.label
+                    return
+                }
                 try await api().sendToLocalPlayer(mediaCommand)
             } else {
                 guard selectedPlayer != nil else { return }

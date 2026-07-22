@@ -2,6 +2,13 @@
 
 ## 0.28.0 — 2026-07-23
 
+- Corrected native iPhone playback to use Music Assistant's Sendspin port 8927
+  instead of deriving a WebSocket on the port-8095 web UI. Added legacy-setting
+  migration, registration readiness, reconnect recovery, visible failure/retry
+  state and endpoint tests.
+- Replaced the system tab-bar inset with dedicated Pilot bottom chrome. The
+  mini-player now occupies its own row above navigation, never covers a tab,
+  and remains hidden when there is no meaningful now-playing state.
 - Replaced the embedded Music Assistant browser handoff on iPhone with an
   in-app, background-capable Sendspin player. `This iPhone` is now a normal
   destination in Pilot's music interface, keeps playing across tabs and uses a

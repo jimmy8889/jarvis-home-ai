@@ -39,12 +39,32 @@ final class PhonePlaybackController {
     @ObservationIgnored private var eventsTask: Task<Void, Never>?
     @ObservationIgnored private var progressTask: Task<Void, Never>?
     @ObservationIgnored private var activeIdentity: String?
+    @ObservationIgnored private var activeServerURL: URL?
 
     var hasMedia: Bool { title != nil || isPlaying }
+    var isReady: Bool {
+        switch status {
+        case .connected, .streaming: true
+        default: false
+        }
+    }
 
-    func connect(baseURL: String, deviceID: String) async {
+    @discardableResult
+    func connect(serverURL: String, deviceID: String) async -> Bool {
         let identity = "pilot-native-\(deviceID)"
-        guard activeIdentity != identity || client == nil else { return }
+        let targetURL: URL
+        do {
+            targetURL = try Self.normalizedSendspinURL(from: serverURL)
+        } catch {
+            status = .failed("Enter a valid Sendspin endpoint")
+            return false
+        }
+        if activeIdentity == identity,
+           activeServerURL == targetURL,
+           client != nil {
+            if isReady { return true }
+            if status == .connecting { return await waitForRegistration() }
+        }
         await disconnect()
         status = .connecting
 
@@ -71,16 +91,31 @@ final class PhonePlaybackController {
             )
             client = player
             activeIdentity = identity
+            activeServerURL = targetURL
             observe(player)
-            try await player.connect(to: try Self.sendspinURL(from: baseURL))
+            try await player.connect(to: targetURL)
+            guard await waitForRegistration() else {
+                throw ConnectionError.registrationTimedOut
+            }
+            // Music Assistant publishes the newly registered player into its
+            // queue registry asynchronously. Give that bounded hand-off a
+            // moment before Pilot Core sends the first play command.
+            try await Task.sleep(for: .milliseconds(250))
+            return true
         } catch {
-            status = .failed(Self.message(error))
-            client = nil
-            activeIdentity = nil
+            let message = Self.message(error)
+            await tearDown(clearPlayback: false)
+            status = .failed(message)
+            return false
         }
     }
 
     func disconnect() async {
+        await tearDown(clearPlayback: true)
+        status = .idle
+    }
+
+    private func tearDown(clearPlayback: Bool) async {
         eventsTask?.cancel()
         progressTask?.cancel()
         eventsTask = nil
@@ -88,8 +123,16 @@ final class PhonePlaybackController {
         if let client { await client.disconnect() }
         client = nil
         activeIdentity = nil
-        status = .idle
+        activeServerURL = nil
         isPlaying = false
+        if clearPlayback {
+            title = nil
+            artist = nil
+            album = nil
+            artworkURL = nil
+            positionSeconds = 0
+            durationSeconds = 0
+        }
     }
 
     private func observe(_ player: SendspinClient) {
@@ -125,6 +168,9 @@ final class PhonePlaybackController {
                 case .disconnected:
                     isPlaying = false
                     status = .idle
+                    client = nil
+                    activeIdentity = nil
+                    activeServerURL = nil
                 default:
                     break
                 }
@@ -160,13 +206,38 @@ final class PhonePlaybackController {
         try session.setActive(true)
     }
 
-    private static func sendspinURL(from value: String) throws -> URL {
-        guard var components = URLComponents(string: value) else {
+    private func waitForRegistration() async -> Bool {
+        for _ in 0..<100 {
+            if isReady { return true }
+            if case .failed = status { return false }
+            try? await Task.sleep(for: .milliseconds(50))
+        }
+        return false
+    }
+
+    nonisolated static func normalizedSendspinURL(from value: String) throws -> URL {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        let candidate = trimmed.contains("://") ? trimmed : "ws://\(trimmed)"
+        guard !trimmed.isEmpty, var components = URLComponents(string: candidate) else {
             throw URLError(.badURL)
         }
-        components.scheme = components.scheme == "https" ? "wss" : "ws"
+        switch components.scheme?.lowercased() {
+        case "https", "wss": components.scheme = "wss"
+        case "http", "ws": components.scheme = "ws"
+        default: throw URLError(.unsupportedURL)
+        }
+        guard components.host?.isEmpty == false else { throw URLError(.badURL) }
+        // Music Assistant's UI/API commonly runs on 8095 while native
+        // Sendspin clients connect to 8927. Migrate the former automatically
+        // so existing Pilot installs start working without manual repair.
+        if components.port == nil || components.port == 8095 {
+            components.port = 8927
+        }
         let basePath = components.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-        components.path = basePath.isEmpty ? "/sendspin" : "/\(basePath)/sendspin"
+        components.path = basePath.isEmpty || basePath == "sendspin"
+            ? "/sendspin" : "/\(basePath)/sendspin"
+        components.query = nil
+        components.fragment = nil
         guard let url = components.url else { throw URLError(.badURL) }
         return url
     }
@@ -174,5 +245,13 @@ final class PhonePlaybackController {
     private static func message(_ error: Error) -> String {
         let text = error.localizedDescription.trimmingCharacters(in: .whitespacesAndNewlines)
         return text.isEmpty ? "This iPhone player is unavailable" : text
+    }
+
+    private enum ConnectionError: LocalizedError {
+        case registrationTimedOut
+
+        var errorDescription: String? {
+            "Music Assistant did not register this iPhone. Check the Sendspin endpoint."
+        }
     }
 }

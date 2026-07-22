@@ -349,6 +349,27 @@ final class PilotTests: XCTestCase {
         XCTAssertEqual(meeting.actionItems[0].task, "Publish notes")
     }
 
+    func testSendspinURLMigratesMusicAssistantWebPort() throws {
+        let url = try PhonePlaybackController.normalizedSendspinURL(
+            from: "http://10.0.2.72:8095"
+        )
+        XCTAssertEqual(url.absoluteString, "ws://10.0.2.72:8927/sendspin")
+    }
+
+    func testSendspinURLPreservesExplicitEndpoint() throws {
+        let url = try PhonePlaybackController.normalizedSendspinURL(
+            from: "wss://music.example.test:9443/audio"
+        )
+        XCTAssertEqual(url.absoluteString, "wss://music.example.test:9443/audio/sendspin")
+    }
+
+    func testSendspinURLAcceptsHostWithoutScheme() throws {
+        let url = try PhonePlaybackController.normalizedSendspinURL(
+            from: "10.0.2.72:8927"
+        )
+        XCTAssertEqual(url.absoluteString, "ws://10.0.2.72:8927/sendspin")
+    }
+
     @MainActor
     func testPreviewModelHasAdaptiveProductContent() {
         let model = PilotModel.preview()

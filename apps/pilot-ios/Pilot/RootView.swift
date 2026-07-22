@@ -121,22 +121,69 @@ struct RootView: View {
             }
             .navigationSplitViewStyle(.balanced)
         } else {
-            TabView(selection: Binding(
-                get: { section ?? .home },
-                set: { section = $0 }
-            )) {
-                ForEach(PilotSection.allCases) { item in
-                    NavigationStack {
-                        destination(item)
+            VStack(spacing: 0) {
+                TabView(selection: Binding(
+                    get: { section ?? .home },
+                    set: { section = $0 }
+                )) {
+                    ForEach(PilotSection.allCases) { item in
+                        NavigationStack {
+                            destination(item)
+                        }
+                        .tag(item)
                     }
-                    .tag(item)
-                    .tabItem { Label(item.title, systemImage: item.symbol) }
                 }
+                .toolbar(.hidden, for: .tabBar)
+                .frame(maxHeight: .infinity)
+
+                PhoneBottomChrome(
+                    selection: Binding(
+                        get: { section ?? .home },
+                        set: { section = $0 }
+                    ),
+                    showingNowPlaying: $showingNowPlaying
+                )
             }
-            .safeAreaInset(edge: .bottom, spacing: 6) {
+            .background(PilotTheme.background.ignoresSafeArea())
+        }
+    }
+
+    private struct PhoneBottomChrome: View {
+        @Binding var selection: PilotSection
+        @Binding var showingNowPlaying: Bool
+
+        var body: some View {
+            VStack(spacing: 6) {
                 MiniPlayerBar(showingNowPlaying: $showingNowPlaying)
                     .padding(.horizontal, 10)
+
+                HStack(spacing: 0) {
+                    ForEach(PilotSection.allCases) { item in
+                        Button {
+                            selection = item
+                            PilotHaptics.selection()
+                        } label: {
+                            VStack(spacing: 3) {
+                                Image(systemName: item.symbol)
+                                    .font(.system(size: 17, weight: .semibold))
+                                Text(item.title)
+                                    .font(.system(size: 10, weight: .semibold))
+                            }
+                            .foregroundStyle(selection == item ? PilotTheme.cyan : .secondary)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 45)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(item.title)
+                        .accessibilityAddTraits(selection == item ? .isSelected : [])
+                    }
+                }
+                .padding(.horizontal, 5)
             }
+            .padding(.top, 6)
+            .background(.ultraThinMaterial)
+            .overlay(alignment: .top) { Divider().opacity(0.4) }
         }
     }
 
@@ -1839,6 +1886,9 @@ private struct MusicView: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 22) {
                     RoomSelector()
+                    if let mediaError = model.mediaError {
+                        MediaErrorBanner(message: mediaError)
+                    }
                     NowPlayingHero {
                         showingNowPlaying = true
                     }
@@ -1847,7 +1897,7 @@ private struct MusicView: View {
                 }
                 .frame(maxWidth: 900)
                 .padding(18)
-                .padding(.bottom, 100)
+                .padding(.bottom, 24)
                 .frame(maxWidth: .infinity)
             }
         }
@@ -1891,6 +1941,39 @@ private struct MusicView: View {
                     }
                 }
             }
+        }
+    }
+}
+
+private struct MediaErrorBanner: View {
+    @Environment(PilotModel.self) private var model
+    let message: String
+
+    var body: some View {
+        HStack(spacing: 11) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(PilotTheme.amber)
+            Text(message)
+                .font(.subheadline)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 4)
+            if model.musicPlaysOnThisIPhone {
+                Button("Retry") { model.selectThisIPhoneForMusic() }
+                    .font(.subheadline.weight(.semibold))
+            }
+            Button {
+                model.mediaError = nil
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .foregroundStyle(.secondary)
+            }
+            .accessibilityLabel("Dismiss playback error")
+        }
+        .padding(13)
+        .background(PilotTheme.amber.opacity(0.10), in: RoundedRectangle(cornerRadius: 16))
+        .overlay {
+            RoundedRectangle(cornerRadius: 16)
+                .stroke(PilotTheme.amber.opacity(0.22))
         }
     }
 }
@@ -1982,6 +2065,12 @@ private struct NowPlayingHero: View {
     private var duration: Double {
         model.musicPlaysOnThisIPhone ? phone.durationSeconds : (state?.effective.durationSeconds ?? 0)
     }
+    private var subtitle: String {
+        if model.musicPlaysOnThisIPhone {
+            return media?.artist ?? phone.status.label
+        }
+        return media?.artist ?? state?.player.name ?? "Choose a room"
+    }
 
     var body: some View {
         VStack(spacing: 22) {
@@ -1995,9 +2084,16 @@ private struct NowPlayingHero: View {
                     Text(media?.title ?? "Ready to play")
                         .font(.title2.weight(.bold))
                         .lineLimit(2)
-                    Text(media?.artist ?? state?.player.name ?? phone.status.label)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
+                    HStack(spacing: 6) {
+                        if model.musicPlaysOnThisIPhone {
+                            Circle()
+                                .fill(phone.isReady ? PilotTheme.mint : PilotTheme.amber)
+                                .frame(width: 7, height: 7)
+                        }
+                        Text(subtitle)
+                    }
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
                     Text(model.musicDestinationTitle)
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(PilotTheme.cyan)
@@ -3143,7 +3239,9 @@ private struct NowPlayingView: View {
                         }
                         .accessibilityLabel("Move music to another room")
 
-                        if let queue = state?.effective.queue, !queue.items.isEmpty {
+                        if !model.musicPlaysOnThisIPhone,
+                           let queue = state?.effective.queue,
+                           !queue.items.isEmpty {
                             VStack(alignment: .leading, spacing: 10) {
                                 SectionTitle(eyebrow: "UP NEXT", title: "Queue", trailing: "\(queue.items.count)")
                                 ForEach(queue.items.prefix(20)) { item in
@@ -3208,7 +3306,9 @@ private struct MiniPlayerBar: View {
     @Environment(PilotModel.self) private var model
     @Binding var showingNowPlaying: Bool
 
-    private var state: PilotPlayerState? { model.activePlayer }
+    private var state: PilotPlayerState? {
+        model.musicPlaysOnThisIPhone ? nil : model.activePlayer
+    }
 
     var body: some View {
         if model.phonePlayback.hasMedia && model.musicPlaysOnThisIPhone {
@@ -3303,7 +3403,7 @@ private struct MiniPlayerBar: View {
 
 private struct SettingsView: View {
     @Environment(PilotModel.self) private var model
-    @AppStorage("pilot.musicAssistantURL") private var musicAssistantURL = "http://10.0.2.72:8095"
+    @AppStorage("pilot.sendspinURL") private var sendspinURL = "ws://10.0.2.72:8927/sendspin"
     var isInitialSetup = false
     @State private var validationResult: Bool?
 
@@ -3391,11 +3491,21 @@ private struct SettingsView: View {
                     .listRowBackground(Color.white.opacity(0.06))
 
                     Section("Phone music output") {
-                        TextField("Music Assistant URL", text: $musicAssistantURL)
+                        TextField("Sendspin endpoint", text: $sendspinURL)
                             .textInputAutocapitalization(.never)
                             .autocorrectionDisabled()
                             .keyboardType(.URL)
-                        Text("Used by Pilot's native Sendspin player when you choose This iPhone. Music controls and credentials remain scoped through Pilot Core.")
+                        HStack {
+                            Text(model.phonePlayback.status.label)
+                                .foregroundStyle(
+                                    model.phonePlayback.isReady ? PilotTheme.mint : .secondary
+                                )
+                            Spacer()
+                            Button("Connect") {
+                                model.selectThisIPhoneForMusic()
+                            }
+                        }
+                        Text("The native Music Assistant player uses Sendspin directly. Playback commands and credentials remain scoped through Pilot Core.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }

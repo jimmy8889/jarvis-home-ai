@@ -92,7 +92,7 @@ fun PilotEnergyDashboard(state: PilotUiState, model: PilotViewModel) {
             when (page) {
                 DashboardPage.Flow -> FlowDashboard(dashboard)
                 DashboardPage.History -> HistoryDashboard(dashboard)
-                DashboardPage.Daily -> DailyDashboard(dashboard, model)
+                DashboardPage.Daily -> DailyDashboard(dashboard, state.actionInFlight, model)
                 DashboardPage.Climate -> ClimateDashboard(dashboard)
             }
         }
@@ -207,7 +207,11 @@ private fun DashboardLineChart(series: List<DashboardSeries>, modifier: Modifier
 }
 
 @Composable
-private fun DailyDashboard(value: DashboardSnapshot, model: PilotViewModel) {
+private fun DailyDashboard(
+    value: DashboardSnapshot,
+    actionInFlight: Boolean,
+    model: PilotViewModel,
+) {
     LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item {
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -228,7 +232,7 @@ private fun DailyDashboard(value: DashboardSnapshot, model: PilotViewModel) {
                         if (value.controls.chargingMode == mode) Button(onClick = {}) { Text(mode) }
                         else OutlinedButton(
                             onClick = { model.dashboardAction("set_tesla_charging_mode", mode) },
-                            enabled = !model.state.value.actionInFlight,
+                            enabled = !actionInFlight,
                         ) { Text(mode) }
                         Spacer(Modifier.width(8.dp))
                     }

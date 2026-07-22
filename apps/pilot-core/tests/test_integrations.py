@@ -373,6 +373,142 @@ class IntegrationDiagnosticTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(result["history"][0]), 2)
         self.assertEqual(len(requests), 2)
 
+    async def test_energy_history_carries_entity_id_across_minimal_response_series(
+        self,
+    ) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            self.assertEqual(request.method, "GET")
+            self.assertTrue(request.url.path.startswith("/api/history/period/"))
+            self.assertEqual(
+                request.url.params["filter_entity_id"],
+                "sensor.home_load,sensor.solar_power",
+            )
+            self.assertIn("minimal_response", request.url.params)
+            self.assertIn("no_attributes", request.url.params)
+            return httpx.Response(
+                200,
+                json=[
+                    [
+                        {
+                            "entity_id": "sensor.home_load",
+                            "state": "1020",
+                            "last_changed": "2026-07-21T00:00:00+00:00",
+                        },
+                        {
+                            "state": "1180",
+                            "last_changed": "2026-07-21T00:05:00+00:00",
+                        },
+                        {
+                            "state": "1250",
+                            "last_changed": "2026-07-21T00:10:00+00:00",
+                        },
+                    ],
+                    [
+                        {
+                            "entity_id": "sensor.solar_power",
+                            "state": "4010",
+                            "last_changed": "2026-07-21T00:00:00+00:00",
+                        },
+                        {
+                            "state": "4260",
+                            "last_changed": "2026-07-21T00:05:00+00:00",
+                        },
+                    ],
+                ],
+            )
+
+        integrations = Integrations(
+            IntegrationSettings(home_assistant_url="http://ha.local:8123"),
+            httpx.MockTransport(handler),
+        )
+        result = await integrations.home_assistant_history(
+            ("sensor.home_load", "sensor.solar_power"),
+            hours=24,
+        )
+        self.assertEqual(
+            [state["state"] for state in result["sensor.home_load"]],
+            ["1020", "1180", "1250"],
+        )
+        self.assertEqual(
+            [state["state"] for state in result["sensor.solar_power"]],
+            ["4010", "4260"],
+        )
+
+    async def test_energy_history_discards_malformed_series_without_cross_assignment(
+        self,
+    ) -> None:
+        def handler(_request: httpx.Request) -> httpx.Response:
+            return httpx.Response(
+                200,
+                json=[
+                    [
+                        {
+                            "state": "1000",
+                            "last_changed": "2026-07-21T00:00:00+00:00",
+                        },
+                        {
+                            "entity_id": "sensor.home_load",
+                            "state": "1100",
+                            "last_changed": "2026-07-21T00:05:00+00:00",
+                        },
+                    ],
+                    [
+                        {
+                            "entity_id": "sensor.home_load",
+                            "state": "1200",
+                            "last_changed": "2026-07-21T00:10:00+00:00",
+                        },
+                        {
+                            "entity_id": "sensor.solar_power",
+                            "state": "4200",
+                            "last_changed": "2026-07-21T00:15:00+00:00",
+                        },
+                    ],
+                    [
+                        {
+                            "entity_id": "sensor.not_requested",
+                            "state": "9999",
+                            "last_changed": "2026-07-21T00:20:00+00:00",
+                        }
+                    ],
+                    [
+                        {
+                            "entity_id": "sensor.home_load",
+                            "state": "1300",
+                            "last_changed": "2026-07-21T00:25:00+00:00",
+                        },
+                        "not-a-state",
+                    ],
+                    [
+                        {
+                            "entity_id": "sensor.solar_power",
+                            "state": "4300",
+                            "last_changed": "2026-07-21T00:30:00+00:00",
+                        },
+                        {
+                            "state": "4400",
+                            "last_changed": "2026-07-21T00:35:00+00:00",
+                        },
+                    ],
+                    {"entity_id": "sensor.home_load"},
+                    [],
+                ],
+            )
+
+        integrations = Integrations(
+            IntegrationSettings(home_assistant_url="http://ha.local:8123"),
+            httpx.MockTransport(handler),
+        )
+        result = await integrations.home_assistant_history(
+            ("sensor.home_load", "sensor.solar_power"),
+            hours=24,
+        )
+        self.assertEqual(result["sensor.home_load"], [])
+        self.assertEqual(
+            [state["state"] for state in result["sensor.solar_power"]],
+            ["4300", "4400"],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

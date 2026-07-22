@@ -629,14 +629,34 @@ class Integrations:
             )
         history: dict[str, list[dict[str, Any]]] = {entity_id: [] for entity_id in unique}
         for series in raw:
-            if not isinstance(series, list):
+            if not isinstance(series, list) or not series:
                 continue
+            series_entity_id: str | None = None
+            series_states: list[dict[str, Any]] = []
+            malformed = False
             for state in series:
                 if not isinstance(state, dict):
-                    continue
-                entity_id = str(state.get("entity_id") or "")
-                if entity_id in history:
-                    history[entity_id].append(state)
+                    malformed = True
+                    break
+                if "entity_id" in state:
+                    entity_id = state["entity_id"]
+                    if (
+                        not isinstance(entity_id, str)
+                        or entity_id not in history
+                        or (
+                            series_entity_id is not None
+                            and entity_id != series_entity_id
+                        )
+                    ):
+                        malformed = True
+                        break
+                    series_entity_id = entity_id
+                if series_entity_id is None:
+                    malformed = True
+                    break
+                series_states.append(state)
+            if not malformed and series_entity_id is not None:
+                history[series_entity_id].extend(series_states)
         return history
 
     async def diagnostics(self) -> dict[str, Any]:

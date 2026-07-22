@@ -53,6 +53,24 @@ enum PilotTheme {
     )
 }
 
+enum EnergyScenePolicy {
+    static let vehicleFlowDeadbandWatts = 100.0
+
+    static func vehicleIsDrawingPower(_ watts: Double?) -> Bool {
+        abs(watts ?? 0) > vehicleFlowDeadbandWatts
+    }
+
+    static func houseAsset(solarWatts: Double?, vehicleConnected: Bool) -> String {
+        let daytime = (solarWatts ?? 0) > 100
+        switch (daytime, vehicleConnected) {
+        case (true, true): return "SolarHouseTeslaDay"
+        case (true, false): return "SolarHouseDay"
+        case (false, true): return "SolarHouseTesla"
+        case (false, false): return "SolarHouse"
+        }
+    }
+}
+
 struct RootView: View {
     @Environment(PilotModel.self) private var model
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
@@ -512,7 +530,7 @@ private struct PilotEnergyDashboardCard: View {
 
             Group {
                 switch page {
-                case .flow: EnergyFlowPage(snapshot: model.dashboard, coreURL: model.coreURL)
+                case .flow: EnergyFlowPage(snapshot: model.dashboard)
                 case .history: EnergyHistoryPage(snapshot: model.dashboard)
                 case .daily: DailyEnergyPage(snapshot: model.dashboard)
                 case .climate: ClimatePage(snapshot: model.dashboard)
@@ -532,13 +550,33 @@ private struct PilotEnergyDashboardCard: View {
 }
 
 private struct EnergyFlowPage: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let snapshot: DashboardSnapshot
-    let coreURL: String
 
-    private var imageURL: URL? {
-        let name = snapshot.vehicle.connected == true ? "house-energy.png" : "house-no-car.png"
-        return URL(string: coreURL.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-                   + "/dashboard/assets/\(name)")
+    private var houseAsset: String {
+        EnergyScenePolicy.houseAsset(
+            solarWatts: snapshot.power.solarWatts,
+            vehicleConnected: snapshot.vehicle.connected == true
+        )
+    }
+
+    private var vehiclePower: Double? {
+        snapshot.vehicle.powerWatts ?? snapshot.power.vehicleWatts
+    }
+
+    private var vehicleDrawingPower: Bool {
+        EnergyScenePolicy.vehicleIsDrawingPower(vehiclePower)
+    }
+
+    private var gridExporting: Bool {
+        snapshot.power.directions["grid"] == "exporting" || (snapshot.power.gridWatts ?? 0) < -100
+    }
+
+    private var batteryStatus: String {
+        guard abs(snapshot.power.batteryWatts ?? 0) > 25 else { return "Idle" }
+        return snapshot.power.directions["battery"] == "charging" || (snapshot.power.batteryWatts ?? 0) < -25
+            ? "Charging"
+            : "Supplying"
     }
 
     var body: some View {
@@ -555,35 +593,72 @@ private struct EnergyFlowPage: View {
 
             GeometryReader { proxy in
                 ZStack {
-                    AsyncImage(url: imageURL) { image in
-                        image.resizable().scaledToFit()
-                    } placeholder: {
-                        RoundedRectangle(cornerRadius: 20)
-                            .fill(Color.black.opacity(0.20))
-                            .overlay { ProgressView() }
-                    }
-                    .frame(width: proxy.size.width, height: proxy.size.height)
-                    .clipShape(RoundedRectangle(cornerRadius: 20))
+                    RoundedRectangle(cornerRadius: 20)
+                        .fill(Color.black.opacity(0.20))
 
-                    EnergyFlowLines(power: snapshot.power)
-                    EnergyNode("PV", snapshot.power.solarWatts, PilotTheme.amber, "sun.max.fill")
+                    Image(houseAsset)
+                        .interpolation(.high)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: proxy.size.width * 1.04)
+                        .position(x: proxy.size.width * 0.50, y: proxy.size.height * 0.46)
+                        .id(houseAsset)
+                        .transition(.opacity)
+                        .accessibilityHidden(true)
+
+                    LinearGradient(
+                        colors: [.black.opacity(0.10), .clear, .black.opacity(0.24)],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+
+                    EnergyFlowLines(power: snapshot.power, vehiclePower: vehiclePower)
+                    EnergySceneMetric(
+                        title: "PV",
+                        value: Self.power(snapshot.power.solarWatts),
+                        detail: abs(snapshot.power.solarWatts ?? 0) > 25 ? "Producing" : "Idle",
+                        color: PilotTheme.amber,
+                        symbol: "sun.max.fill"
+                    )
                         .position(x: proxy.size.width * 0.52, y: proxy.size.height * 0.08)
-                    EnergyNode(
-                        snapshot.power.directions["grid"] == "exporting" ? "EXPORT" : "GRID",
-                        snapshot.power.gridWatts.map(abs), PilotTheme.cyan, "transmission"
+                    EnergySceneMetric(
+                        title: "GRID",
+                        value: Self.power(snapshot.power.gridWatts.map(abs)),
+                        detail: gridExporting ? "Export" : "Import",
+                        color: PilotTheme.cyan,
+                        symbol: "transmission"
                     )
                     .position(x: proxy.size.width * 0.88, y: proxy.size.height * 0.18)
-                    EnergyNode("HOME", snapshot.power.homeLoadWatts, PilotTheme.mint, "house.fill")
+                    EnergySceneMetric(
+                        title: "HOME",
+                        value: Self.power(snapshot.power.homeLoadWatts),
+                        detail: "Consuming",
+                        color: PilotTheme.mint,
+                        symbol: "house.fill"
+                    )
                         .position(x: proxy.size.width * 0.56, y: proxy.size.height * 0.82)
-                    EnergyNode("BATTERY", snapshot.power.batteryWatts.map(abs), PilotTheme.mint, "battery.75percent")
-                        .position(x: proxy.size.width * 0.77, y: proxy.size.height * 0.63)
+                    AnimatedHomeBatteryNode(
+                        stateOfCharge: snapshot.power.batteryStateOfCharge,
+                        powerWatts: snapshot.power.batteryWatts,
+                        direction: snapshot.power.directions["battery"]
+                    )
+                    .position(x: proxy.size.width * 0.76, y: proxy.size.height * 0.65)
                     if snapshot.vehicle.connected == true {
-                        EnergyNode("TESLA", snapshot.vehicle.powerWatts, .red, "car.fill")
+                        EnergySceneMetric(
+                            title: "TESLA",
+                            value: vehicleDrawingPower ? Self.power(vehiclePower) : "Plugged in",
+                            detail: vehicleDrawingPower ? "Charging" : nil,
+                            color: .red,
+                            symbol: "car.fill"
+                        )
                             .position(x: proxy.size.width * 0.18, y: proxy.size.height * 0.72)
                     }
-                    EnergyNode("RACK", snapshot.power.serverRackWatts, PilotTheme.violet, "server.rack")
+                    AnimatedServerRackNode(powerWatts: snapshot.power.serverRackWatts)
                         .position(x: proxy.size.width * 0.91, y: proxy.size.height * 0.76)
                 }
+                .clipShape(RoundedRectangle(cornerRadius: 20))
+                .overlay { RoundedRectangle(cornerRadius: 20).stroke(.white.opacity(0.08)) }
+                .animation(reduceMotion ? nil : .easeInOut(duration: 0.45), value: houseAsset)
             }
             .frame(height: 360)
 
@@ -595,7 +670,7 @@ private struct EnergyFlowPage: View {
                     Text(snapshot.vehicle.stateOfCharge.map { "\(Int($0))%" } ?? "—")
                         .font(.title2.monospacedDigit().bold())
                     Text(snapshot.vehicle.connected == true
-                         ? (snapshot.vehicle.charging ? "Plugged in · charging" : "Plugged in")
+                         ? (vehicleDrawingPower ? "Plugged in · charging" : "Plugged in")
                          : "Not plugged in")
                         .font(.caption).foregroundStyle(.secondary)
                 }
@@ -606,75 +681,244 @@ private struct EnergyFlowPage: View {
                             .font(.caption.weight(.bold)).foregroundStyle(PilotTheme.mint)
                         Text("\(Int(soc))%")
                             .font(.title2.monospacedDigit().bold())
-                        Text(snapshot.power.directions["battery"]?.capitalized ?? "Idle")
+                        Text(batteryStatus)
                             .font(.caption).foregroundStyle(.secondary)
                     }
                 }
             }
         }
     }
+
+    private static func power(_ watts: Double?) -> String {
+        guard let watts else { return "—" }
+        return abs(watts) >= 1_000
+            ? String(format: "%.2f kW", abs(watts) / 1_000)
+            : String(format: "%.0f W", abs(watts))
+    }
 }
 
 private struct EnergyFlowLines: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let power: DashboardPower
+    let vehiclePower: Double?
 
+    @ViewBuilder
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1 / 24)) { timeline in
-            Canvas { context, size in
-                let phase = timeline.date.timeIntervalSinceReferenceDate * -45
-                draw(context: &context, size: size, from: CGPoint(x: 0.52, y: 0.25), to: CGPoint(x: 0.56, y: 0.72),
-                     value: power.solarWatts, color: PilotTheme.amber, phase: phase, active: power.flowActive["solar"] == true)
-                draw(context: &context, size: size, from: CGPoint(x: 0.84, y: 0.27), to: CGPoint(x: 0.60, y: 0.72),
-                     value: power.gridWatts, color: PilotTheme.cyan, phase: phase,
-                     active: power.flowActive["grid"] == true,
-                     reverse: power.directions["grid"] == "exporting")
-                draw(context: &context, size: size, from: CGPoint(x: 0.76, y: 0.59), to: CGPoint(x: 0.61, y: 0.74),
-                     value: power.batteryWatts, color: PilotTheme.mint, phase: phase,
-                     active: power.flowActive["battery"] == true,
-                     reverse: power.directions["battery"] == "charging")
-                draw(context: &context, size: size, from: CGPoint(x: 0.22, y: 0.68), to: CGPoint(x: 0.51, y: 0.76),
-                     value: power.vehicleWatts, color: .red, phase: phase,
-                     active: power.flowActive["vehicle"] == true, reverse: true)
-                draw(context: &context, size: size, from: CGPoint(x: 0.86, y: 0.72), to: CGPoint(x: 0.62, y: 0.76),
-                     value: power.serverRackWatts, color: PilotTheme.violet, phase: phase,
-                     active: power.flowActive["server_rack"] == true, reverse: true)
+        Group {
+            if reduceMotion {
+                Canvas { context, size in
+                    render(context: &context, size: size, date: nil)
+                }
+            } else {
+                TimelineView(.animation(minimumInterval: 1 / 30)) { timeline in
+                    Canvas { context, size in
+                        render(context: &context, size: size, date: timeline.date)
+                    }
+                }
             }
         }
         .allowsHitTesting(false)
+        .accessibilityHidden(true)
     }
 
-    private func draw(
+    private func render(context: inout GraphicsContext, size: CGSize, date: Date?) {
+        let hub = (0.59, 0.68)
+        drawFlow(
+            context: &context,
+            points: route([(0.52, 0.17), (0.59, 0.17), hub], size: size),
+            color: PilotTheme.amber,
+            watts: power.solarWatts,
+            threshold: 25,
+            active: flowIsActive("solar", watts: power.solarWatts, threshold: 25),
+            forward: true,
+            date: date
+        )
+        drawFlow(
+            context: &context,
+            points: route([hub, (0.86, 0.68), (0.86, 0.27)], size: size),
+            color: PilotTheme.cyan,
+            watts: power.gridWatts,
+            threshold: 100,
+            active: flowIsActive("grid", watts: power.gridWatts, threshold: 100),
+            forward: power.directions["grid"] == "exporting" || (power.gridWatts ?? 0) < -100,
+            date: date
+        )
+        drawFlow(
+            context: &context,
+            points: route([hub, (0.56, 0.76)], size: size),
+            color: PilotTheme.mint,
+            watts: power.homeLoadWatts,
+            threshold: 25,
+            active: flowIsActive("home", watts: power.homeLoadWatts, threshold: 25),
+            forward: true,
+            date: date
+        )
+        drawFlow(
+            context: &context,
+            points: route([hub, (0.75, 0.68), (0.75, 0.57)], size: size),
+            color: PilotTheme.mint,
+            watts: power.batteryWatts,
+            threshold: 25,
+            active: flowIsActive("battery", watts: power.batteryWatts, threshold: 25),
+            forward: power.directions["battery"] == "charging" || (power.batteryWatts ?? 0) < -25,
+            date: date
+        )
+        drawFlow(
+            context: &context,
+            points: route([hub, (0.22, 0.68)], size: size),
+            color: .red,
+            watts: vehiclePower,
+            threshold: EnergyScenePolicy.vehicleFlowDeadbandWatts,
+            active: flowIsActive(
+                "vehicle",
+                watts: vehiclePower,
+                threshold: EnergyScenePolicy.vehicleFlowDeadbandWatts
+            ),
+            forward: true,
+            date: date
+        )
+        drawFlow(
+            context: &context,
+            points: route([hub, (0.88, 0.68)], size: size),
+            color: PilotTheme.violet,
+            watts: power.serverRackWatts,
+            threshold: 25,
+            active: flowIsActive("server_rack", watts: power.serverRackWatts, threshold: 25),
+            forward: true,
+            date: date
+        )
+    }
+
+    private func flowIsActive(_ key: String, watts: Double?, threshold: Double) -> Bool {
+        let aboveDeadband = abs(watts ?? 0) > threshold
+        return aboveDeadband && (power.flowActive[key] ?? aboveDeadband)
+    }
+
+    private func route(_ coordinates: [(Double, Double)], size: CGSize) -> [CGPoint] {
+        let anchors = coordinates.map { CGPoint(x: size.width * $0.0, y: size.height * $0.1) }
+        guard anchors.count > 2 else { return anchors }
+        var result = [anchors[0]]
+        for index in 1..<(anchors.count - 1) {
+            let previous = anchors[index - 1]
+            let corner = anchors[index]
+            let next = anchors[index + 1]
+            let incoming = hypot(corner.x - previous.x, corner.y - previous.y)
+            let outgoing = hypot(next.x - corner.x, next.y - corner.y)
+            guard incoming > 0, outgoing > 0 else { continue }
+            let radius = min(12, incoming * 0.35, outgoing * 0.35)
+            let before = CGPoint(
+                x: corner.x - (corner.x - previous.x) / incoming * radius,
+                y: corner.y - (corner.y - previous.y) / incoming * radius
+            )
+            let after = CGPoint(
+                x: corner.x + (next.x - corner.x) / outgoing * radius,
+                y: corner.y + (next.y - corner.y) / outgoing * radius
+            )
+            result.append(before)
+            for step in 1...6 {
+                let t = Double(step) / 6
+                let mt = 1 - t
+                result.append(CGPoint(
+                    x: mt * mt * before.x + 2 * mt * t * corner.x + t * t * after.x,
+                    y: mt * mt * before.y + 2 * mt * t * corner.y + t * t * after.y
+                ))
+            }
+        }
+        if let last = anchors.last { result.append(last) }
+        return result
+    }
+
+    private func drawFlow(
         context: inout GraphicsContext,
-        size: CGSize,
-        from: CGPoint,
-        to: CGPoint,
-        value: Double?,
+        points: [CGPoint],
         color: Color,
-        phase: Double,
+        watts: Double?,
+        threshold: Double,
         active: Bool,
-        reverse: Bool = false
+        forward: Bool,
+        date: Date?
     ) {
+        guard let first = points.first else { return }
         var path = Path()
-        let start = reverse ? to : from
-        let end = reverse ? from : to
-        path.move(to: CGPoint(x: size.width * start.x, y: size.height * start.y))
-        path.addLine(to: CGPoint(x: size.width * end.x, y: size.height * end.y))
-        let strength = min(1, max(0.2, abs(value ?? 0) / 8_000))
-        context.stroke(path, with: .color(color.opacity(active ? 0.25 + strength * 0.55 : 0.10)),
-                       style: StrokeStyle(lineWidth: active ? 2.5 + strength * 4 : 1.5,
-                                          lineCap: .round, dash: active ? [5, 10] : [], dashPhase: phase))
+        path.move(to: first)
+        for point in points.dropFirst() { path.addLine(to: point) }
+        let magnitude = abs(watts ?? 0)
+        let strength = min(1, max(0.16, magnitude / 7_500))
+        context.stroke(
+            path,
+            with: .color(color.opacity(active ? 0.25 + strength * 0.28 : 0.10)),
+            style: StrokeStyle(
+                lineWidth: active ? 2.1 + strength * 1.8 : 1.4,
+                lineCap: .round,
+                lineJoin: .round
+            )
+        )
+        guard active, magnitude > threshold, let date else { return }
+        let speed = min(1.25, max(0.22, magnitude / 5_000))
+        let period = 3.2 / speed
+        let phase = date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: period) / period
+        for offset in [0.0, 0.5] {
+            let start = (phase + offset).truncatingRemainder(dividingBy: 1)
+            let end = start + 0.09
+            drawGlow(context: &context, points: points, color: color, from: start, to: min(1, end), forward: forward)
+            if end > 1 {
+                drawGlow(context: &context, points: points, color: color, from: 0, to: end - 1, forward: forward)
+            }
+        }
+    }
+
+    private func drawGlow(
+        context: inout GraphicsContext,
+        points: [CGPoint],
+        color: Color,
+        from start: Double,
+        to end: Double,
+        forward: Bool
+    ) {
+        guard end > start else { return }
+        let samples = (0...8).map { step -> CGPoint in
+            let progress = start + (end - start) * Double(step) / 8
+            return point(on: points, progress: forward ? progress : 1 - progress)
+        }
+        guard let first = samples.first else { return }
+        var glow = Path()
+        glow.move(to: first)
+        for sample in samples.dropFirst() { glow.addLine(to: sample) }
+        context.stroke(glow, with: .color(color.opacity(0.14)), style: StrokeStyle(lineWidth: 12, lineCap: .round, lineJoin: .round))
+        context.stroke(glow, with: .color(color.opacity(0.52)), style: StrokeStyle(lineWidth: 6, lineCap: .round, lineJoin: .round))
+        context.stroke(glow, with: .color(.white.opacity(0.92)), style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
+    }
+
+    private func point(on points: [CGPoint], progress: Double) -> CGPoint {
+        let lengths = zip(points, points.dropFirst()).map { hypot($1.x - $0.x, $1.y - $0.y) }
+        let total = lengths.reduce(0, +)
+        guard total > 0 else { return points.first ?? .zero }
+        var distance = min(1, max(0, progress)) * total
+        for (index, length) in lengths.enumerated() {
+            if distance <= length {
+                let ratio = length == 0 ? 0 : distance / length
+                return CGPoint(
+                    x: points[index].x + (points[index + 1].x - points[index].x) * ratio,
+                    y: points[index].y + (points[index + 1].y - points[index].y) * ratio
+                )
+            }
+            distance -= length
+        }
+        return points.last ?? .zero
     }
 }
 
-private struct EnergyNode: View {
+private struct EnergySceneMetric: View {
     let title: String
-    let watts: Double?
+    let value: String
+    let detail: String?
     let color: Color
     let symbol: String
 
-    init(_ title: String, _ watts: Double?, _ color: Color, _ symbol: String) {
+    init(title: String, value: String, detail: String?, color: Color, symbol: String) {
         self.title = title
-        self.watts = watts
+        self.value = value
+        self.detail = detail
         self.color = color
         self.symbol = symbol
     }
@@ -683,12 +927,168 @@ private struct EnergyNode: View {
         VStack(spacing: 2) {
             Label(title, systemImage: symbol)
                 .font(.caption2.weight(.bold)).foregroundStyle(color)
-            Text(Self.power(watts))
+            Text(value)
                 .font(.caption.monospacedDigit().weight(.heavy))
+                .lineLimit(1)
+                .minimumScaleFactor(0.72)
+            if let detail {
+                Text(detail)
+                    .font(.system(size: 8, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
         }
         .padding(.horizontal, 9).padding(.vertical, 6)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 11))
+        .background(Color.black.opacity(0.68), in: RoundedRectangle(cornerRadius: 11))
         .overlay { RoundedRectangle(cornerRadius: 11).stroke(color.opacity(0.35)) }
+        .accessibilityElement(children: .combine)
+    }
+}
+
+private struct AnimatedHomeBatteryNode: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    let stateOfCharge: Double?
+    let powerWatts: Double?
+    let direction: String?
+
+    private var magnitude: Double { abs(powerWatts ?? 0) }
+    private var active: Bool { magnitude > 25 }
+    private var charging: Bool {
+        active && (direction == "charging" || (powerWatts ?? 0) < -25)
+    }
+    private var discharging: Bool {
+        active && !charging
+    }
+    private var status: String {
+        if charging { return "Charging" }
+        if discharging { return "Supplying" }
+        return "Idle"
+    }
+
+    @ViewBuilder
+    var body: some View {
+        if reduceMotion || !active {
+            content(phase: 0.5)
+        } else {
+            TimelineView(.animation(minimumInterval: 1 / 24)) { timeline in
+                content(phase: timeline.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 1.6) / 1.6)
+            }
+        }
+    }
+
+    private func content(phase: Double) -> some View {
+        let soc = max(0, min(100, stateOfCharge ?? 0))
+        let pulse = active ? 0.52 + (sin(phase * .pi * 2) + 1) * 0.16 : 0.30
+        return VStack(spacing: 3) {
+            Capsule()
+                .fill(.white.opacity(0.34))
+                .frame(width: 19, height: 4)
+            ZStack(alignment: .bottom) {
+                RoundedRectangle(cornerRadius: 9)
+                    .fill(Color.black.opacity(0.78))
+                GeometryReader { geometry in
+                    ZStack(alignment: .bottom) {
+                        LinearGradient(
+                            colors: charging
+                                ? [PilotTheme.mint, PilotTheme.cyan]
+                                : [PilotTheme.mint.opacity(0.65), PilotTheme.mint],
+                            startPoint: .bottom,
+                            endPoint: .top
+                        )
+                        .frame(height: geometry.size.height * soc / 100)
+
+                        if active {
+                            Image(systemName: charging ? "chevron.up.2" : "chevron.down.2")
+                                .font(.system(size: 11, weight: .black))
+                                .foregroundStyle(.white.opacity(0.88))
+                                .offset(y: charging ? 22 - phase * 44 : -22 + phase * 44)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+                    .clipShape(RoundedRectangle(cornerRadius: 7))
+                    .padding(4)
+                }
+                Text(stateOfCharge.map { "\(Int($0.rounded()))%" } ?? "—")
+                    .font(.caption2.monospacedDigit().weight(.black))
+                    .foregroundStyle(.white)
+                    .padding(.bottom, 6)
+                    .shadow(color: .black, radius: 2)
+            }
+            .frame(width: 45, height: 68)
+            .overlay {
+                RoundedRectangle(cornerRadius: 9)
+                    .stroke(PilotTheme.mint.opacity(pulse), lineWidth: active ? 2 : 1)
+            }
+            .shadow(color: PilotTheme.mint.opacity(active ? pulse * 0.55 : 0), radius: 9)
+
+            Text(Self.power(powerWatts))
+                .font(.system(size: 10, weight: .heavy, design: .monospaced))
+            Text(status)
+                .font(.system(size: 8, weight: .semibold))
+                .foregroundStyle(charging ? PilotTheme.cyan : discharging ? PilotTheme.mint : .secondary)
+        }
+        .padding(5)
+        .background(Color.black.opacity(0.62), in: RoundedRectangle(cornerRadius: 11))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Home battery, \(Int(soc.rounded())) percent, \(status), \(Self.power(powerWatts))")
+    }
+
+    private static func power(_ watts: Double?) -> String {
+        guard let watts else { return "—" }
+        return abs(watts) >= 1_000
+            ? String(format: "%.2f kW", abs(watts) / 1_000)
+            : String(format: "%.0f W", abs(watts))
+    }
+}
+
+private struct AnimatedServerRackNode: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    let powerWatts: Double?
+
+    @ViewBuilder
+    var body: some View {
+        if reduceMotion {
+            content(phase: 0.35)
+        } else {
+            TimelineView(.animation(minimumInterval: 1 / 12)) { timeline in
+                content(phase: timeline.date.timeIntervalSinceReferenceDate)
+            }
+        }
+    }
+
+    private func content(phase: Double) -> some View {
+        VStack(spacing: 0) {
+            ZStack {
+                Image("PilotServerRack")
+                    .interpolation(.high)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 69, height: 69)
+                VStack(spacing: 3) {
+                    rackLED(.green, phase: phase, offset: 0.0)
+                    rackLED(PilotTheme.cyan, phase: phase, offset: 1.6)
+                    rackLED(PilotTheme.amber, phase: phase, offset: 3.1)
+                }
+                .offset(x: 12, y: 4)
+            }
+            Text(Self.power(powerWatts))
+                .font(.system(size: 9, weight: .heavy, design: .monospaced))
+            Text("SERVER RACK")
+                .font(.system(size: 7, weight: .bold))
+                .foregroundStyle(PilotTheme.violet)
+        }
+        .padding(3)
+        .background(Color.black.opacity(0.55), in: RoundedRectangle(cornerRadius: 10))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Server rack using \(Self.power(powerWatts))")
+    }
+
+    private func rackLED(_ color: Color, phase: Double, offset: Double) -> some View {
+        let brightness = reduceMotion ? 0.75 : 0.24 + (sin(phase * 3.8 + offset) + 1) * 0.34
+        return Circle()
+            .fill(color.opacity(brightness))
+            .frame(width: 3.5, height: 3.5)
+            .shadow(color: color.opacity(brightness), radius: 3)
     }
 
     private static func power(_ watts: Double?) -> String {

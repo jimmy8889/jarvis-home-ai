@@ -22,6 +22,8 @@ UtmpMode=user
 Environment=XDG_RUNTIME_DIR=/run/user/{{ display_node_uid.stdout }}
 Environment=XDG_SESSION_TYPE=wayland
 Environment=LIBSEAT_BACKEND=logind
+Environment=XKB_DEFAULT_LAYOUT={{ display_node_keyboard_layout }}
+Environment=XKB_DEFAULT_MODEL={{ display_node_keyboard_model }}
 ExecStart=/usr/bin/dbus-run-session -- /usr/bin/cage -s -- /usr/bin/chromium \
   --kiosk \
   --no-first-run \
@@ -36,6 +38,8 @@ ExecStart=/usr/bin/dbus-run-session -- /usr/bin/cage -s -- /usr/bin/chromium \
   --ozone-platform=wayland \
   --enable-features=UseOzonePlatform \
   --touch-events=enabled \
+  --disable-pinch \
+  --overscroll-history-navigation=0 \
   --hide-scrollbars \
   --autoplay-policy=no-user-gesture-required \
   --disk-cache-size={{ display_node_chromium_disk_cache_bytes }} \

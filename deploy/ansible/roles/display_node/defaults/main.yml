@@ -8,7 +8,13 @@ display_node_device_token_source_file: ""
 display_node_mode: display
 display_node_listen_host: 127.0.0.1
 display_node_listen_port: 8780
-display_node_kiosk_url: "http://127.0.0.1:{{ display_node_listen_port }}/"
+display_node_start_page: "{{ 'media' if display_node_mode == 'media-console' else 'home' }}"
+display_node_kiosk_url: "http://127.0.0.1:{{ display_node_listen_port }}/#{{ display_node_start_page }}"
+display_node_keyboard_layout: us
+display_node_keyboard_model: pc105
+display_node_artwork_cache_dir: /var/lib/pilot-display/artwork
+display_node_artwork_hosts:
+  - resources.tidal.com
 display_node_resolution: 1024x600
 display_node_refresh_rate: 60
 display_node_hdmi_connector: HDMI-A-1

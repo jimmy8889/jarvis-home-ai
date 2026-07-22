@@ -30,7 +30,10 @@
             <div><span>Exported</span><strong id="daily-export">—</strong></div>
           </div>
           <div id="energy-flow" class="energy-flow house-flow" role="img" aria-label="Waiting for live energy flow">
-            <img class="energy-house" src="/assets/house-energy.png" alt="James House with solar, Tesla and grid">
+            <div class="energy-house-scenes" aria-hidden="true">
+              <img class="energy-house active" data-scene="house-day" src="/assets/house-day.png" alt="">
+              <img class="energy-house" data-scene="" src="/assets/house-day.png" alt="">
+            </div>
             <svg class="flow-lines" viewBox="0 0 1000 430" aria-hidden="true">
               <defs>
                 <linearGradient id="solar-gradient"><stop stop-color="#ffd35d"></stop><stop offset="1" stop-color="#ff9f43"></stop></linearGradient>
@@ -59,7 +62,7 @@
             <article id="node-home" class="flow-node home-node"><span class="node-icon">⌂</span><div><small>Home load</small><strong id="energy-home">—</strong></div></article>
             <article id="node-battery" class="flow-node battery-node"><span class="node-icon">▰</span><div><small>Battery</small><strong id="energy-battery">—</strong><em id="energy-battery-direction">Waiting</em></div><div class="battery-soc"><span id="energy-soc">—</span><div class="soc-track"><i id="soc-fill"></i></div></div></article>
             <article id="node-vehicle" class="flow-node vehicle-node"><span class="node-icon">◆</span><div><small>Jarvis</small><strong id="energy-vehicle">—</strong><em id="vehicle-state">Away</em></div></article>
-            <article id="node-server" class="flow-node server-node"><span class="server-rack-icon" aria-hidden="true"><i></i><i></i><i></i></span><div><small>Server rack</small><strong id="energy-server">—</strong></div></article>
+            <article id="node-server" class="flow-node server-node"><span class="server-rack-visual" aria-hidden="true"><img src="/assets/server-rack.png" alt=""><i></i><i></i><i></i></span><div><small>Server rack</small><strong id="energy-server">—</strong></div></article>
           </div>
         </section>
 
@@ -95,7 +98,7 @@
           <div class="music-toolbar">
             <label class="music-search">
               <span>Search TIDAL and library</span>
-              <input id="music-query" type="search" placeholder="Artist, album or track" autocomplete="off">
+              <input id="music-query" type="search" placeholder="Artist, album or track" autocomplete="off" inputmode="none" enterkeyhint="search" spellcheck="false">
             </label>
             <button id="music-search-button" type="button">Search</button>
             <label class="music-room">
@@ -115,18 +118,35 @@
         </section>
 
         <section class="page console-only" data-page="media" aria-label="Media room console">
-          <div class="media-console-hero">
-            <div class="media-brand"><span class="eyebrow">Pilot Media Room</span><h1>Everything, beautifully connected.</h1><p>Music Assistant, local video, the Shield and your home in one ten-foot interface.</p></div>
-            <div id="console-now-playing" class="console-now-playing"><span class="media-disc">♪</span><div><small>NOW PLAYING</small><strong id="console-track">Ready</strong><span id="console-artist">Choose music or video</span></div></div>
+          <div class="console-topline">
+            <div class="media-brand"><span class="eyebrow">Pilot · Media Room</span><strong>Home media</strong></div>
+            <div class="console-weather"><span id="console-weather-icon">☀</span><div><strong id="console-weather-temperature">—</strong><small id="console-weather-condition">Weather</small></div></div>
+            <div class="console-clock"><time id="console-clock">--:--</time><span id="console-date">Starting…</span></div>
+          </div>
+          <div class="media-console-stage">
+            <section class="console-welcome">
+              <span class="eyebrow">Your room, ready</span>
+              <h1>Everything,<br><em>beautifully connected.</em></h1>
+              <p>Music Assistant, local video, the Shield and your live home in one calm ten-foot interface.</p>
+              <div class="console-energy-row" aria-label="Live house energy">
+                <div><span>Solar</span><strong id="console-energy-solar">—</strong></div>
+                <div><span>Home</span><strong id="console-energy-home">—</strong></div>
+                <div><span>Battery</span><strong id="console-energy-battery">—</strong><small id="console-energy-soc">—</small></div>
+              </div>
+            </section>
+            <section id="console-now-playing" class="console-now-playing">
+              <div class="console-artwork-wrap"><span class="media-disc">♪</span><img id="console-artwork" alt="" hidden></div>
+              <div class="console-playing-copy"><small>NOW PLAYING</small><strong id="console-track">Ready for music</strong><span id="console-artist">Choose an album, video or the Shield</span><div class="console-progress"><i id="console-progress-fill"></i></div><div class="console-transport"><button type="button" data-console-media-action="previous" aria-label="Previous track">‹</button><button id="console-play-toggle" type="button" data-console-media-action="play" aria-label="Play">▶</button><button type="button" data-console-media-action="next" aria-label="Next track">›</button></div></div>
+            </section>
           </div>
           <div class="media-console-actions">
-            <button type="button" data-console-target="music"><span>♪</span><strong>Music</strong><small>TIDAL &amp; local library</small></button>
-            <button type="button" data-console-target="home"><span>ϟ</span><strong>House</strong><small>Energy and climate</small></button>
-            <button type="button" data-console-target="video"><span>▶</span><strong>Local video</strong><small>Supervised mpv playback</small></button>
-            <button type="button" data-console-target="shield"><span>▣</span><strong>NVIDIA Shield</strong><small>Dolby Vision &amp; streaming</small></button>
+            <button type="button" data-console-target="music"><span>♪</span><strong>Music</strong><small>TIDAL &amp; local library</small><b>Browse</b></button>
+            <button type="button" data-console-target="home"><span>ϟ</span><strong>House</strong><small>Energy and climate</small><b>View</b></button>
+            <button type="button" data-console-target="video"><span>▶</span><strong>Local video</strong><small>Supervised mpv playback</small><b>Open</b></button>
+            <button type="button" data-console-target="shield"><span>▣</span><strong>NVIDIA Shield</strong><small>Dolby Vision &amp; streaming</small><b>Switch</b></button>
           </div>
           <div id="console-video-panel" class="console-video-panel" hidden>
-            <label><span>Local/Jellyfin media identifier</span><input id="console-video-input" type="text" placeholder="Films/Movie.mkv" autocomplete="off"></label>
+            <label><span>Local/Jellyfin media identifier</span><input id="console-video-input" type="text" placeholder="Films/Movie.mkv" autocomplete="off" spellcheck="false"></label>
             <button id="console-video-play" type="button">Play video</button>
             <button id="console-video-pause" type="button">Pause</button>
             <button id="console-video-stop" type="button">Stop</button>
@@ -186,7 +206,7 @@
         <span>Type a music search</span>
         <button id="keyboard-close" type="button" aria-label="Close keyboard">Close</button>
       </div>
-      <div id="keyboard-keys" class="keyboard-keys"></div>
+      <div id="keyboard-keys" class="keyboard-keys" role="group" aria-label="QWERTY keys"></div>
       <div class="keyboard-actions">
         <button id="keyboard-space" type="button">Space</button>
         <button id="keyboard-delete" type="button">Delete</button>

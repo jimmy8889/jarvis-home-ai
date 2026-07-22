@@ -42,7 +42,7 @@ The node deliberately avoids a full desktop:
   Assistant credential is installed on the node or browser.
 - SSH remains enabled for administration.
 
-The deployed 0.4 touch surface provides:
+The deployed touch surface provides:
 
 - Brisbane time and date
 - live solar, home load, grid direction, battery power/direction, and battery SOC
@@ -68,25 +68,39 @@ Assistant, or Pilot administrator credentials.
 
 ## Current source release
 
-Pilot Linux Display 0.5 now also implements:
+Pilot Linux Display 0.6 now also implements:
 
 - a configurable `display` or `media-console` presentation mode;
 - the shared Flow, History, Daily and Climate monitoring surfaces, including
   Tesla connection/charging, the server-rack load, Amber pricing, daily totals,
   five temperatures and seven-day weather;
-- local James House artwork, smooth watt-scaled directional paths, a visible
-  battery charge/discharge direction and a 100 W grid animation deadband;
+- four local James House scenes selected from Home Assistant's day/night state
+  and Tesla presence, with a 450 ms crossfade that never waits on the network;
+  smooth watt-scaled directional paths, a visible battery charge/discharge
+  direction, and 100 W grid and vehicle animation deadbands;
 - a persistent selected room/output stored in browser-local presentation
   state, without persisting a credential in the browser;
-- five-second local status/media refresh and a device-authenticated product
-  snapshot refresh through the loopback proxy;
+- one sequenced media-state arbiter: the five-second legacy surface, full media
+  poll and fast event snapshot no longer compete to rebuild the same cards;
+- keyed now-playing cards and locally advancing progress, so provider polling
+  cannot make the player flash, reset a volume slider, or jump backwards when
+  an older response completes late;
 - stale-state indication and visual de-emphasis rather than silently showing
   old data as live;
 - now-playing progress and an up-next queue hint;
-- an on-screen touch keyboard for music search;
+- a four-row US QWERTY touch keyboard with a number row; opening it shrinks the
+  kiosk viewport instead of hiding the result pane, and closing it applies
+  `hidden` plus `inert`, releases focus and restores the full 1024 x 600 layout;
 - a loopback-only client-event snapshot proxy and assistant response overlay
   driven by `pilot.assistant.completed.v1` events.
 - artwork-led Music Assistant search plus artist, album and playlist drill-down;
+- device-room-bound output selection. The Office display now defaults only to
+  `office-music`; it cannot silently select the alphabetically earlier Media
+  Room player and then fail Pilot Core's fixed-room authorization check;
+- a loopback artwork cache. TIDAL artwork is fetched only from explicitly
+  allow-listed HTTPS hosts, validated as a bounded raster image and cached in
+  `/var/lib/pilot-display/artwork`; provider URLs and credentials never reach
+  durable browser storage;
 - an optional pinned Sendspin 7.5.0 player so the Pi can become a Music
   Assistant output through a USB DAC.
 
@@ -124,10 +138,14 @@ Configure the host under the `pilot_display_nodes` inventory group and run:
 cd deploy/ansible
 ../../.venv/bin/ansible-playbook \
   -i inventory/hosts.yml \
-  site.yml \
+  display-node.yml \
   --limit pilot-display-pi \
   --ask-become-pass
 ```
+
+The dedicated playbook changes only the display role. It is safe to use when
+the same host is also a room endpoint and avoids needlessly replaying its audio
+and voice role.
 
 The role validates Debian 13, ARM64, Raspberry Pi hardware, and a private
 mode-0600 controller copy of the device credential before making changes. A
@@ -138,6 +156,9 @@ Use the standard wall-display experience by leaving:
 
 ```yaml
 display_node_mode: display
+display_node_keyboard_layout: us
+display_node_artwork_hosts:
+  - resources.tidal.com
 ```
 
 The same service can seed an N150 television shell with
@@ -179,8 +200,11 @@ The previously deployed Pi release passed:
 - no current or historical thermal throttling
 - two-way application rollback
 
-After promoting the 0.5 source release, repeat those checks and also
+After promoting the 0.6 source release, repeat those checks and also
 verify output persistence, the touch keyboard, progress/queue updates, stale
-recovery, the monitoring pages and a real assistant-completion overlay. USB-DAC
-playback has a separate audible acceptance gate. Until that run is recorded,
-the new UI behavior is **built and tested in source but awaiting Pi acceptance**.
+recovery, the monitoring pages, cached artwork, and a real
+assistant-completion overlay. Search for a known TIDAL artist, start a track in
+Office, close the keyboard and confirm the content immediately regains the
+entire display. USB-DAC playback has a separate audible acceptance gate. Until
+that run is recorded, the new UI behavior is **built and tested in source but
+awaiting Pi acceptance**.

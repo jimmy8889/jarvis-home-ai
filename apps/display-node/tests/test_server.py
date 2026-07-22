@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import tempfile
 import unittest
 from unittest.mock import MagicMock, patch
 
@@ -9,10 +10,55 @@ from pilot_display_node.server import (
     _core_device_request,
     _core_status,
     _core_surface,
+    _cached_artwork,
+    _artwork_url_allowed,
 )
 
 
 class CoreStatusTests(unittest.TestCase):
+    def test_artwork_proxy_allows_only_configured_https_hosts(self) -> None:
+        hosts = ("resources.tidal.com",)
+        self.assertTrue(
+            _artwork_url_allowed(
+                "https://resources.tidal.com/images/example/750x750.jpg", hosts
+            )
+        )
+        self.assertTrue(
+            _artwork_url_allowed("https://cdn.resources.tidal.com/art.jpg", hosts)
+        )
+        self.assertFalse(
+            _artwork_url_allowed("http://resources.tidal.com/art.jpg", hosts)
+        )
+        self.assertFalse(
+            _artwork_url_allowed("https://resources.tidal.com.example/art.jpg", hosts)
+        )
+        self.assertFalse(_artwork_url_allowed("https://127.0.0.1/admin", hosts))
+
+    @patch("pilot_display_node.server.urlopen")
+    def test_artwork_is_validated_and_cached_locally(self, urlopen: MagicMock) -> None:
+        png = b"\x89PNG\r\n\x1a\n" + (b"image" * 32)
+        response = MagicMock()
+        response.__enter__.return_value = response
+        response.geturl.return_value = "https://resources.tidal.com/images/cover.png"
+        response.read.return_value = png
+        urlopen.return_value = response
+
+        with tempfile.TemporaryDirectory() as directory:
+            first = _cached_artwork(
+                "https://resources.tidal.com/images/cover.png",
+                Path(directory),
+                ("resources.tidal.com",),
+            )
+            second = _cached_artwork(
+                "https://resources.tidal.com/images/cover.png",
+                Path(directory),
+                ("resources.tidal.com",),
+            )
+
+        self.assertEqual(first, (png, "image/png"))
+        self.assertEqual(second, first)
+        urlopen.assert_called_once()
+
     def test_rejects_non_http_core_url(self) -> None:
         self.assertEqual(
             _core_status("file:///etc/passwd"),
@@ -135,9 +181,16 @@ class CoreStatusTests(unittest.TestCase):
         self.assertIn("cursor: none !important", styles)
         self.assertIn(".flow-particles.reverse .particles-reverse", styles)
         self.assertIn('id="onscreen-keyboard"', html)
+        self.assertIn('aria-label="QWERTY keys"', html)
+        self.assertIn('["1234567890", "QWERTYUIOP", "ASDFGHJKL", "ZXCVBNM"]', script)
+        self.assertIn(".onscreen-keyboard[hidden]", styles)
+        self.assertIn("body.keyboard-open main", styles)
         self.assertIn("pilot-display-selected-output", script)
         self.assertIn("lastSuccessfulUpdate", script)
         self.assertIn("effective.position_seconds", script)
+        self.assertIn("observedAt < lastMediaObservedAt", script)
+        self.assertIn("room.id === deviceRoomId", script)
+        self.assertNotIn("renderNowPlaying(value.surface", script)
         self.assertIn(".onscreen-keyboard", styles)
         self.assertIn("Showing the last known state", styles)
 
@@ -145,15 +198,38 @@ class CoreStatusTests(unittest.TestCase):
         static = Path(__file__).parents[1] / "pilot_display_node" / "static"
         html = (static / "index.html").read_text(encoding="utf-8")
         script = (static / "app.js").read_text(encoding="utf-8")
+        styles = (static / "styles.css").read_text(encoding="utf-8")
 
-        self.assertGreater((static / "assets" / "house-energy.png").stat().st_size, 100_000)
-        self.assertGreater((static / "assets" / "house-no-car.png").stat().st_size, 100_000)
+        for scene in (
+            "house-day.png",
+            "house-day-tesla.png",
+            "house-night.png",
+            "house-night-tesla.png",
+        ):
+            self.assertGreater((static / "assets" / scene).stat().st_size, 100_000)
+            self.assertIn(f'"/assets/{scene}"', script)
+        server = (static.parent / "server.py").read_text(encoding="utf-8")
+        for scene in (
+            "house-day.png",
+            "house-day-tesla.png",
+            "house-night.png",
+            "house-night-tesla.png",
+        ):
+            self.assertIn(f'"/assets/{scene}"', server)
+        self.assertIn("value.scene?.is_day", script)
+        self.assertIn("power.solar_w >= 100", script)
+        self.assertIn("transition: opacity 450ms ease", styles)
         self.assertIn('data-page="media"', html)
         self.assertIn('id="music-results"', html)
         self.assertIn('id="console-video-input"', html)
+        self.assertIn('id="console-artwork"', html)
+        self.assertIn('id="console-energy-solar"', html)
+        self.assertIn('data-console-media-action="previous"', html)
         self.assertIn('postJSON("/api/media/browse"', script)
         self.assertIn('postJSON("/api/video"', script)
         self.assertIn("resultArtwork", script)
+        self.assertIn("/api/artwork?url=", script)
+        self.assertIn(".media-console-stage", styles)
 
 
 if __name__ == "__main__":

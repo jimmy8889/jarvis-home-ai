@@ -45,6 +45,25 @@ all:
           # Prefer an Ansible Vault variable in production. For one-time local
           # enrollment, this may point at a mode-0600 controller file.
           room_endpoint_core_device_token_source_file: ""
+        # The native N150 belongs to both Ansible groups: Room Agent owns
+        # supervised local video/device commands; display_node owns the
+        # fullscreen ten-foot shell. Both use the same Core device identity.
+        pilot-media-console:
+          ansible_host: 192.0.2.41
+          ansible_user: pilot-admin
+          room_endpoint_room_id: media-room
+          room_endpoint_core_reporting_enabled: true
+          room_endpoint_core_commands_enabled: true
+          room_endpoint_core_url: http://192.0.2.30:8770
+          room_endpoint_core_device_id: pilot-media-console
+          room_endpoint_core_device_token_source_file: /secure/pilot-media-console-token
+          room_endpoint_video_install: true
+          room_endpoint_video_enabled: true
+          room_endpoint_video_media_roots:
+            - /srv/media
+          room_endpoint_video_display: "wayland-0"
+          room_endpoint_video_audio_device: auto
+          room_endpoint_video_hwdec: auto-safe
     pilot_display_nodes:
       hosts:
         pilot-display-pi:
@@ -69,6 +88,7 @@ all:
           display_node_device_token_source_file: /secure/pilot-media-console-token
           display_node_mode: media-console
           display_node_force_resolution: false
+          display_node_keyboard_layout: us
           display_node_sendspin_install: true
           display_node_sendspin_enabled: true
           display_node_sendspin_name: Pilot Media Room Music

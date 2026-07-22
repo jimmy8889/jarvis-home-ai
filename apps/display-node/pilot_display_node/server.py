@@ -3,11 +3,13 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import hashlib
 import json
 import os
 from pathlib import Path
 import shutil
 import socket
+import tempfile
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, urlencode, urlsplit
@@ -19,6 +21,9 @@ from . import __version__
 STATIC_ROOT = Path(__file__).with_name("static")
 MAX_CORE_RESPONSE_BYTES = 256_000
 MAX_CLIENT_REQUEST_BYTES = 64_000
+DEFAULT_ARTWORK_HOSTS = ("resources.tidal.com",)
+DEFAULT_ARTWORK_CACHE = Path("/var/lib/pilot-display/artwork")
+MAX_ARTWORK_BYTES = 5_000_000
 
 
 def _bounded_text(path: Path, limit: int = 4096) -> str:
@@ -194,6 +199,76 @@ def _core_device_request(
         return HTTPStatus.BAD_GATEWAY, {"detail": str(error)[:240]}
 
 
+def _artwork_url_allowed(remote_url: str, allowed_hosts: tuple[str, ...]) -> bool:
+    parsed = urlsplit(remote_url)
+    host = (parsed.hostname or "").lower().rstrip(".")
+    if parsed.scheme != "https" or not host or parsed.username or parsed.password:
+        return False
+    return any(
+        host == allowed or host.endswith(f".{allowed}")
+        for allowed in allowed_hosts
+        if allowed
+    )
+
+
+def _image_content_type(content: bytes) -> str | None:
+    if content.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image/png"
+    if content.startswith(b"\xff\xd8\xff"):
+        return "image/jpeg"
+    if content.startswith((b"GIF87a", b"GIF89a")):
+        return "image/gif"
+    if content.startswith(b"RIFF") and content[8:12] == b"WEBP":
+        return "image/webp"
+    return None
+
+
+def _cached_artwork(
+    remote_url: str,
+    cache_root: Path,
+    allowed_hosts: tuple[str, ...],
+) -> tuple[bytes, str]:
+    if not _artwork_url_allowed(remote_url, allowed_hosts):
+        raise ValueError("artwork host is not allowed")
+    cache_key = hashlib.sha256(remote_url.encode()).hexdigest()
+    cache_path = cache_root / cache_key
+    try:
+        cached = cache_path.read_bytes()
+    except OSError:
+        cached = b""
+    cached_type = _image_content_type(cached)
+    if cached_type:
+        return cached, cached_type
+
+    request = Request(
+        remote_url,
+        headers={
+            "Accept": "image/avif,image/webp,image/png,image/jpeg,image/gif",
+            "User-Agent": "pilot-display-node",
+        },
+    )
+    with urlopen(request, timeout=8) as response:  # noqa: S310
+        final_url = response.geturl()
+        if not _artwork_url_allowed(final_url, allowed_hosts):
+            raise ValueError("artwork redirect host is not allowed")
+        content = response.read(MAX_ARTWORK_BYTES + 1)
+    if len(content) > MAX_ARTWORK_BYTES:
+        raise ValueError("artwork response is too large")
+    content_type = _image_content_type(content)
+    if content_type is None:
+        raise ValueError("artwork response is not a supported image")
+
+    cache_root.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(dir=cache_root, delete=False) as temporary:
+        temporary.write(content)
+        temporary_path = Path(temporary.name)
+    try:
+        os.replace(temporary_path, cache_path)
+    finally:
+        temporary_path.unlink(missing_ok=True)
+    return content, content_type
+
+
 def status_payload(
     core_url: str,
     device_id: str = "",
@@ -237,11 +312,12 @@ class DisplayHandler(BaseHTTPRequestHandler):
         content_type: str,
         length: int,
         status: HTTPStatus | int = HTTPStatus.OK,
+        cache_control: str = "no-store",
     ) -> None:
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(length))
-        self.send_header("Cache-Control", "no-store")
+        self.send_header("Cache-Control", cache_control)
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("X-Frame-Options", "DENY")
         self.send_header(
@@ -256,8 +332,9 @@ class DisplayHandler(BaseHTTPRequestHandler):
         content: bytes,
         content_type: str,
         status: HTTPStatus | int = HTTPStatus.OK,
+        cache_control: str = "no-store",
     ) -> None:
-        self._headers(content_type, len(content), status)
+        self._headers(content_type, len(content), status, cache_control)
         self.wfile.write(content)
 
     def _send_json(
@@ -325,12 +402,53 @@ class DisplayHandler(BaseHTTPRequestHandler):
             )
             self._send_json(payload, status)
             return
+        if path == "/api/artwork":
+            values = parse_qs(parsed_path.query)
+            remote_url = values.get("url", [""])[0]
+            if not remote_url or len(remote_url) > 4096:
+                self._send_json(
+                    {"detail": "an artwork URL is required"},
+                    HTTPStatus.BAD_REQUEST,
+                )
+                return
+            try:
+                content, content_type = _cached_artwork(  # type: ignore[attr-defined]
+                    remote_url,
+                    self.server.artwork_cache_root,
+                    self.server.artwork_hosts,
+                )
+            except ValueError as error:
+                self._send_json({"detail": str(error)}, HTTPStatus.BAD_REQUEST)
+                return
+            except (HTTPError, URLError, TimeoutError, OSError) as error:
+                self._send_json(
+                    {"detail": f"artwork unavailable: {str(error)[:160]}"},
+                    HTTPStatus.BAD_GATEWAY,
+                )
+                return
+            self._send(
+                content,
+                content_type,
+                cache_control="public, max-age=86400, stale-if-error=604800",
+            )
+            return
         assets = {
             "/": ("index.html", "text/html; charset=utf-8"),
             "/app.js": ("app.js", "text/javascript; charset=utf-8"),
             "/styles.css": ("styles.css", "text/css; charset=utf-8"),
+            "/assets/house-day.png": ("assets/house-day.png", "image/png"),
+            "/assets/house-day-tesla.png": (
+                "assets/house-day-tesla.png",
+                "image/png",
+            ),
+            "/assets/house-night.png": ("assets/house-night.png", "image/png"),
+            "/assets/house-night-tesla.png": (
+                "assets/house-night-tesla.png",
+                "image/png",
+            ),
             "/assets/house-energy.png": ("assets/house-energy.png", "image/png"),
             "/assets/house-no-car.png": ("assets/house-no-car.png", "image/png"),
+            "/assets/server-rack.png": ("assets/server-rack.png", "image/png"),
         }
         asset = assets.get(path)
         if asset is None:
@@ -342,7 +460,12 @@ class DisplayHandler(BaseHTTPRequestHandler):
         except OSError:
             self.send_error(HTTPStatus.INTERNAL_SERVER_ERROR)
             return
-        self._send(content, content_type)
+        cache_control = (
+            "public, max-age=31536000, immutable"
+            if path.startswith("/assets/")
+            else "no-cache"
+        )
+        self._send(content, content_type, cache_control=cache_control)
 
     def do_POST(self) -> None:  # noqa: N802
         path = self.path.partition("?")[0]
@@ -406,12 +529,16 @@ class DisplayServer(ThreadingHTTPServer):
         device_id: str,
         device_token_file: str,
         mode: str = "display",
+        artwork_cache_root: Path = DEFAULT_ARTWORK_CACHE,
+        artwork_hosts: tuple[str, ...] = DEFAULT_ARTWORK_HOSTS,
     ) -> None:
         super().__init__(address, DisplayHandler)
         self.core_url = core_url
         self.device_id = device_id
         self.device_token_file = device_token_file
         self.mode = mode
+        self.artwork_cache_root = artwork_cache_root
+        self.artwork_hosts = artwork_hosts
 
 
 def main() -> None:
@@ -423,12 +550,24 @@ def main() -> None:
         "PILOT_DEVICE_TOKEN_FILE", "/etc/pilot-display/device-token"
     )
     mode = os.environ.get("PILOT_DISPLAY_MODE", "display")
+    artwork_cache_root = Path(
+        os.environ.get("PILOT_ARTWORK_CACHE_DIR", str(DEFAULT_ARTWORK_CACHE))
+    )
+    artwork_hosts = tuple(
+        host.strip().lower().rstrip(".")
+        for host in os.environ.get(
+            "PILOT_ARTWORK_HOSTS", ",".join(DEFAULT_ARTWORK_HOSTS)
+        ).split(",")
+        if host.strip()
+    )
     server = DisplayServer(
         (host, port),
         core_url,
         device_id,
         device_token_file,
         mode,
+        artwork_cache_root,
+        artwork_hosts,
     )
     try:
         server.serve_forever()

@@ -45,8 +45,10 @@ The reusable software pieces are present, but an N150 media console has not
 yet completed native-HDMI physical acceptance:
 
 - the Linux display service supports `PILOT_DISPLAY_MODE=media-console`, opens
-  on a dedicated ten-foot media home and presents artwork-led now-playing,
-  progress, queue, music, house, local-video and Shield entry points;
+  directly on `#media` and presents a dedicated 16:9 ten-foot home with room
+  weather, live solar/home/battery state, cached artwork-led now-playing,
+  locally advancing progress, previous/play-pause/next controls, music, house,
+  supervised local-video and Shield entry points;
 - selected room/output state is retained locally without putting a Core or
   provider credential in browser storage;
 - the loopback service proxies authenticated product snapshots and client
@@ -71,7 +73,10 @@ resume, subtitles, audio tracks and a clean return to the Pilot shell.
 
 The current reusable shell implements the ten-foot media home, matching house
 Flow/History/Daily/Climate pages, a TIDAL-inspired search/detail experience,
-typed local-video controls, stale/offline state and assistant overlays.
+typed local-video controls, stale/offline state and assistant overlays. It
+starts in the media home even when Pilot Core media discovery is temporarily
+offline because the local status endpoint, not the provider response, selects
+the kiosk mode.
 Weather/alert composition is present through the shared dashboard contract; a
 ten-foot Jellyfin library and unified video-session presentation remain target
 work.
@@ -96,6 +101,55 @@ For this role the display-node Ansible variable is:
 
 ```yaml
 display_node_mode: media-console
+display_node_force_resolution: false
+display_node_keyboard_layout: us
+```
+
+The N150 inventory host must belong to both `pilot_endpoints` and
+`pilot_display_nodes`. The former installs Room Agent and the supervised mpv
+video adapter; the latter installs the loopback display service, Cage/Chromium
+kiosk, artwork cache and optional Sendspin renderer. The example inventory uses
+one `pilot-media-console` host identity in both groups and one Core device
+credential for the `display`, `media-control`, and `video` capabilities. This
+is intentional; installing only the display group produces a beautiful shell
+but no local-video command consumer.
+
+Deploy the complete native role pair with:
+
+```bash
+cd deploy/ansible
+../../.venv/bin/ansible-playbook \
+  -i inventory/hosts.yml \
+  site.yml \
+  --limit pilot-media-console \
+  --ask-become-pass
+```
+
+When Room Agent is already installed and accepted, deploy or update only the
+display role with:
+
+```bash
+cd deploy/ansible
+../../.venv/bin/ansible-playbook \
+  -i inventory/hosts.yml \
+  display-node.yml \
+  --limit pilot-media-console \
+  --ask-become-pass
+```
+
+This is the preferred first kiosk deployment on an existing N150: it leaves
+the accepted PipeWire, wake-word, and room-agent services untouched while
+adding the native HDMI shell.
+
+At boot, `pilot-display-kiosk.service` owns `tty1`, forces the configured US
+XKB layout and opens `http://127.0.0.1:8780/#media`. If the screen remains
+blank, inspect the local contract before changing Core:
+
+```bash
+systemctl status seatd pilot-display-web pilot-display-kiosk pilot-room-agent
+curl -fsS http://127.0.0.1:8780/healthz
+curl -fsS http://127.0.0.1:8780/api/status
+journalctl -b -u pilot-display-kiosk -u pilot-display-web --no-pager
 ```
 
 A local media-agent service validates Pilot commands and translates them into
@@ -154,7 +208,8 @@ administrator token or communicate directly with the N150.
 1. Build the media-console agent, capability, health model, and authenticated
    command contract. **Source complete.**
 2. Build the fullscreen shell with music, assistant-overlay, stale/offline, and
-   recovery states. **Source complete in the reusable Linux display shell.**
+   recovery states. **Source complete in Pilot Linux Display 0.6**, including
+   the direct media-home startup route and 1920 x 1080 visual acceptance.
 3. Add Music Assistant now-playing, progress and queue presentation.
    **Source complete**, including artist/album/playlist drill-down; target
    display acceptance pending.

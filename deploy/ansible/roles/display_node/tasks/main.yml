@@ -111,6 +111,10 @@
       owner: "{{ display_node_user }}"
       group: "{{ display_node_user }}"
       mode: "0750"
+    - path: "{{ display_node_artwork_cache_dir }}"
+      owner: "{{ display_node_user }}"
+      group: "{{ display_node_user }}"
+      mode: "0750"
     - path: "/opt/pilot-display/releases/{{ display_node_release_id }}"
       mode: "0755"
     - { path: /etc/systemd/journald.conf.d, mode: "0755" }

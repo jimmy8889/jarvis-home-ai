@@ -21,7 +21,10 @@ const elements = Object.fromEntries(
     "assistant-overlay", "assistant-room", "assistant-response", "assistant-provider",
     "console-now-playing", "console-track", "console-artist", "console-video-panel",
     "console-video-input", "console-video-play", "console-video-pause",
-    "console-video-stop", "console-video-message",
+    "console-video-stop", "console-video-message", "console-clock", "console-date",
+    "console-weather-icon", "console-weather-temperature", "console-weather-condition",
+    "console-energy-solar", "console-energy-home", "console-energy-battery",
+    "console-energy-soc", "console-artwork", "console-progress-fill", "console-play-toggle",
   ].map((id) => [id.replaceAll("-", "_"), document.querySelector(`#${id}`)]),
 );
 
@@ -40,6 +43,45 @@ let liveSnapshotsSupported = true;
 let lastAssistantEvent = null;
 let assistantOverlayTimer = null;
 let dashboardModel = null;
+let mediaPollPromise = null;
+let lastMediaObservedAt = 0;
+let currentMediaEntries = [];
+let mediaCommandSequence = 0;
+let musicSearchSequence = 0;
+let activeHouseSceneIndex = 0;
+const HOUSE_SCENES = Object.freeze({
+  "house-day": "/assets/house-day.png",
+  "house-day-tesla": "/assets/house-day-tesla.png",
+  "house-night": "/assets/house-night.png",
+  "house-night-tesla": "/assets/house-night-tesla.png",
+});
+
+function renderHouseScene(value, power, vehicle) {
+  const images = [...document.querySelectorAll(".energy-house")];
+  if (images.length !== 2) return;
+  const configuredDay = value.scene?.is_day;
+  const isDay = typeof configuredDay === "boolean"
+    ? configuredDay
+    : (typeof power.solar_w !== "number" || power.solar_w >= 100);
+  const scene = `house-${isDay ? "day" : "night"}${vehicle.connected ? "-tesla" : ""}`;
+  const current = images[activeHouseSceneIndex];
+  if (current?.dataset.scene === scene) return;
+
+  const nextIndex = activeHouseSceneIndex === 0 ? 1 : 0;
+  const next = images[nextIndex];
+  next.dataset.scene = scene;
+  next.src = HOUSE_SCENES[scene];
+  const reveal = () => {
+    if (next.dataset.scene !== scene) return;
+    images.forEach((image, index) => image.classList.toggle("active", index === nextIndex));
+    activeHouseSceneIndex = nextIndex;
+  };
+  if (next.complete && next.naturalWidth > 0) {
+    requestAnimationFrame(reveal);
+  } else {
+    next.addEventListener("load", reveal, { once: true });
+  }
+}
 
 function updateClock() {
   const now = new Date();
@@ -53,6 +95,8 @@ function updateClock() {
     day: "numeric",
     month: "long",
   }).format(now);
+  if (elements.console_clock) elements.console_clock.textContent = elements.clock.textContent;
+  if (elements.console_date) elements.console_date.textContent = elements.date.textContent;
 }
 
 function watts(value, signed = false) {
@@ -195,7 +239,10 @@ function renderDashboard(value = {}) {
   }
   const power = value.power || {};
   const vehicle = value.vehicle || {};
-  elements.energy_vehicle.textContent = watts(vehicle.power_w);
+  const vehicleDrawingPower = typeof vehicle.power_w === "number" && Math.abs(vehicle.power_w) >= 100;
+  elements.energy_vehicle.textContent = vehicleDrawingPower
+    ? watts(vehicle.power_w)
+    : (vehicle.connected ? "Plugged in" : "Away");
   elements.energy_server.textContent = watts(power.server_rack_w);
   elements.vehicle_state.textContent = vehicle.connected
     ? (vehicle.charging ? "Charging" : "Plugged in") : "Not connected";
@@ -209,8 +256,15 @@ function renderDashboard(value = {}) {
   elements.node_vehicle.classList.toggle("connected", vehicle.connected === true);
   elements.node_battery.classList.toggle("charging", power.directions?.battery === "charging");
   elements.node_battery.classList.toggle("discharging", power.directions?.battery === "discharging");
-  const house = document.querySelector(".energy-house");
-  if (house) house.src = vehicle.connected ? "/assets/house-energy.png" : "/assets/house-no-car.png";
+  renderHouseScene(value, power, vehicle);
+  if (elements.console_energy_solar) elements.console_energy_solar.textContent = watts(power.solar_w);
+  if (elements.console_energy_home) elements.console_energy_home.textContent = watts(power.home_load_w);
+  if (elements.console_energy_battery) elements.console_energy_battery.textContent = watts(power.battery_w);
+  if (elements.console_energy_soc) {
+    elements.console_energy_soc.textContent = typeof power.battery_soc_percent === "number"
+      ? `${number.format(power.battery_soc_percent)}% · ${power.directions?.battery || "idle"}`
+      : "State of charge unavailable";
+  }
 
   const history = value.history?.series || [];
   renderLineChart(elements.energy_chart, history, { zeroFloor: true });
@@ -241,6 +295,14 @@ function renderDashboard(value = {}) {
   if (typeof weather.humidity_percent === "number") details.push(`${number.format(weather.humidity_percent)}% humidity`);
   if (typeof weather.wind_speed === "number") details.push(`${number.format(weather.wind_speed)} ${weather.wind_speed_unit || ""} wind`);
   elements.weather_detail.textContent = details.join(" · ") || "Weather station unavailable";
+  if (elements.console_weather_icon) elements.console_weather_icon.textContent = weatherGlyph(weather.condition || "");
+  if (elements.console_weather_temperature) {
+    elements.console_weather_temperature.textContent = typeof weather.temperature_c === "number"
+      ? `${number.format(weather.temperature_c)}°` : "—";
+  }
+  if (elements.console_weather_condition) {
+    elements.console_weather_condition.textContent = weather.condition || "Weather unavailable";
+  }
   elements.temperature_grid.replaceChildren(...(value.temperatures || []).map((item) => {
     const card = textNode("article", "temperature-card", "");
     card.append(textNode("span", "", item.label), textNode("strong", "", typeof item.temperature_c === "number" ? `${number.format(item.temperature_c)}°` : "—"));
@@ -266,69 +328,58 @@ function textNode(tag, className, text) {
   return node;
 }
 
-function renderNowPlaying(nowPlaying = {}) {
-  const items = Array.isArray(nowPlaying.items) ? nowPlaying.items : [];
-  elements.music_state.textContent = nowPlaying.status === "ok"
-    ? `${items.length} active`
-    : "Unavailable";
-  elements.music_state.className = `data-state ${nowPlaying.status === "ok" ? "online" : "offline"}`;
-
-  const first = items[0];
-  elements.now_playing_list.replaceChildren();
-  if (!items.length) {
-    const empty = textNode("article", "empty", "");
-    empty.append(
-      textNode("span", "music-note", "♪"),
-      textNode("strong", "", "Nothing playing"),
-      textNode("small", "", "Active music across the Pilot network will appear here."),
-    );
-    elements.now_playing_list.append(empty);
-    return;
-  }
-
-  for (const item of items) {
-    const card = textNode("article", "track-card", "");
-    const glyph = textNode("div", "track-glyph", item.state === "paused" ? "Ⅱ" : "♪");
-    const copy = textNode("div", "track-copy", "");
-    copy.append(
-      textNode("strong", "", item.title || "Unknown title"),
-      textNode("span", "", item.artist || item.album || "Unknown artist"),
-      textNode("small", "", `${item.player_name || "Unknown player"} · ${item.state}`),
-    );
-    const volume = textNode(
-      "div",
-      "track-volume",
-      typeof item.volume_percent === "number" ? `${item.volume_percent}%` : "",
-    );
-    card.append(glyph, copy, volume);
-    elements.now_playing_list.append(card);
-  }
-}
-
 function musicPlayerEntries(value) {
   const players = value?.media?.players || {};
+  const roomId = value?.room_id || value?.media?.room_id;
   return Object.values(players).filter((item) => (
     item?.player?.kind === "music" &&
     item.player.control_enabled === true &&
     item.player.enabled === true
-  ));
+  )).sort((left, right) => {
+    const leftPlaying = left.effective?.playback_state === "playing" ? 1 : 0;
+    const rightPlaying = right.effective?.playback_state === "playing" ? 1 : 0;
+    if (leftPlaying !== rightPlaying) return rightPlaying - leftPlaying;
+    const leftLocal = left.player?.room_id === roomId ? 1 : 0;
+    const rightLocal = right.player?.room_id === roomId ? 1 : 0;
+    return rightLocal - leftLocal;
+  });
 }
 
-function renderMusicControls(value) {
-  mediaModel = value;
+function artworkURL(raw) {
+  if (typeof raw !== "string" || !raw.startsWith("https://")) return "";
+  return "/api/artwork?url=" + encodeURIComponent(raw);
+}
+
+function effectiveArtwork(effective = {}) {
+  const media = effective.media || {};
+  return artworkURL(
+    effective.artwork_url || media.artwork_url || media.image_url ||
+    media.artwork?.source_url || "",
+  );
+}
+
+function syncMusicOutputs(value) {
   const previous = elements.music_output.value || localStorage.getItem(selectedOutputKey);
   const rooms = Array.isArray(value?.rooms) ? value.rooms : [];
-  elements.music_output.replaceChildren();
-  for (const room of rooms) {
+  const deviceRoomId = value?.room_id || value?.media?.room_id;
+  const available = [];
+  for (const room of rooms.filter((room) => !deviceRoomId || room.id === deviceRoomId)) {
     if (room.music_enabled === false) continue;
     const player = room.players?.find(
       (item) => item.id === room.default_music_player_id && item.control_enabled,
     );
     if (!player) continue;
-    const option = document.createElement("option");
-    option.value = player.id;
-    option.textContent = room.name;
-    elements.music_output.append(option);
+    available.push({ id: player.id, name: room.name });
+  }
+  const signature = JSON.stringify(available);
+  if (elements.music_output.dataset.signature !== signature) {
+    elements.music_output.replaceChildren(...available.map((item) => {
+      const option = document.createElement("option");
+      option.value = item.id;
+      option.textContent = item.name;
+      return option;
+    }));
+    elements.music_output.dataset.signature = signature;
   }
   if ([...elements.music_output.options].some((option) => option.value === previous)) {
     elements.music_output.value = previous;
@@ -339,84 +390,187 @@ function renderMusicControls(value) {
   if (elements.music_output.value) {
     localStorage.setItem(selectedOutputKey, elements.music_output.value);
   }
+}
 
-  const entries = musicPlayerEntries(value);
-  const activeConsole = entries.find((entry) => entry.effective?.playback_state === "playing") ||
-    entries.find((entry) => entry.effective?.media?.title);
-  if (elements.console_track) {
-    elements.console_track.textContent = activeConsole?.effective?.media?.title || "Ready";
-    elements.console_artist.textContent = activeConsole?.effective?.media?.artist || "Choose music or video";
-    elements.console_now_playing.classList.toggle("active", Boolean(activeConsole));
+function makeTrackCard(player) {
+  const card = textNode("article", "track-card control-card", "");
+  card.dataset.playerId = player.id;
+  const artwork = textNode("div", "track-artwork", "");
+  const placeholder = textNode("span", "", "♪");
+  const image = document.createElement("img");
+  image.alt = "";
+  image.hidden = true;
+  image.addEventListener("error", () => { image.hidden = true; placeholder.hidden = false; });
+  artwork.append(placeholder, image);
+  const copy = textNode("div", "track-copy", "");
+  copy.append(
+    textNode("strong", "track-title", player.name),
+    textNode("span", "track-artist", "Ready"),
+    textNode("small", "track-context", player.name),
+  );
+  const progress = textNode("div", "track-progress", "");
+  progress.append(textNode("i", "", ""));
+  copy.append(progress, textNode("small", "up-next", ""));
+  const controls = textNode("div", "track-controls", "");
+  for (const [action, label] of [["play", "▶"], ["pause", "Ⅱ"], ["stop", "■"]]) {
+    const button = textNode("button", "", label);
+    button.type = "button";
+    button.dataset.mediaAction = action;
+    button.ariaLabel = `${action} ${player.name}`;
+    button.addEventListener("click", () => sendMedia(action, { player_id: card.dataset.playerId }));
+    controls.append(button);
   }
-  elements.now_playing_list.replaceChildren();
+  const volume = document.createElement("input");
+  volume.type = "range";
+  volume.min = "0";
+  volume.max = "100";
+  volume.value = "30";
+  volume.ariaLabel = `${player.name} volume`;
+  volume.addEventListener("change", () => sendMedia("set_volume", {
+    player_id: card.dataset.playerId,
+    volume: Number(volume.value),
+  }));
+  card.append(artwork, copy, controls, volume);
+  return card;
+}
+
+function updateProgressNode(node, position, duration, playing) {
+  if (!node) return;
+  node.dataset.position = typeof position === "number" ? String(position) : "0";
+  node.dataset.duration = typeof duration === "number" ? String(duration) : "0";
+  node.dataset.playing = playing ? "true" : "false";
+  node.dataset.observedAt = String(Date.now());
+  updateProgressClock(node);
+}
+
+function updateProgressClock(node) {
+  const duration = Number(node.dataset.duration || 0);
+  let position = Number(node.dataset.position || 0);
+  if (node.dataset.playing === "true") {
+    position += Math.max(0, Date.now() - Number(node.dataset.observedAt || Date.now())) / 1000;
+  }
+  const percent = duration > 0 ? Math.max(0, Math.min(100, position / duration * 100)) : 0;
+  node.style.width = `${percent.toFixed(2)}%`;
+}
+
+function updateTrackCard(card, entry) {
+  const player = entry.player;
+  const effective = entry.effective || {};
+  const media = effective.media || {};
+  card.dataset.playerId = player.id;
+  card.querySelector(".track-title").textContent = media.title || player.name;
+  card.querySelector(".track-artist").textContent = media.artist || media.album || "Ready to play";
+  card.querySelector(".track-context").textContent = `${player.name} · ${effective.playback_state || "unknown"}`;
+  const queueItems = effective.queue?.items || entry.queue?.items || [];
+  const currentIndex = effective.queue?.index ?? entry.queue?.index ?? 0;
+  const next = Array.isArray(queueItems)
+    ? queueItems.find((_item, index) => index > currentIndex)
+    : null;
+  card.querySelector(".up-next").textContent = next
+    ? "Up next · " + (next.title || next.name || "Untitled")
+    : "";
+  const image = card.querySelector(".track-artwork img");
+  const placeholder = card.querySelector(".track-artwork span");
+  const source = effectiveArtwork(effective);
+  if (source && image.dataset.source !== source) {
+    image.dataset.source = source;
+    image.src = source;
+    image.hidden = false;
+    placeholder.hidden = true;
+  } else if (!source) {
+    image.hidden = true;
+    placeholder.hidden = false;
+  }
+  updateProgressNode(
+    card.querySelector(".track-progress i"),
+    effective.position_seconds,
+    effective.duration_seconds,
+    effective.playback_state === "playing",
+  );
+  const volume = card.querySelector('input[type="range"]');
+  if (typeof effective.volume_percent === "number" && document.activeElement !== volume) {
+    volume.value = String(effective.volume_percent);
+  }
+  card.classList.toggle("is-playing", effective.playback_state === "playing");
+}
+
+function renderTrackCards(entries) {
+  const existing = new Map(
+    [...elements.now_playing_list.querySelectorAll("[data-player-id]")]
+      .map((card) => [card.dataset.playerId, card]),
+  );
+  elements.now_playing_list.querySelector(".empty")?.remove();
   if (!entries.length) {
-    elements.now_playing_list.append(
-      textNode("article", "empty compact", "No controllable music players are available."),
+    const empty = textNode("article", "empty compact", "");
+    empty.append(
+      textNode("span", "music-note", "♪"),
+      textNode("strong", "", "No music player available"),
+      textNode("small", "", "Pilot is waiting for the room music endpoint."),
     );
+    elements.now_playing_list.replaceChildren(empty);
     return;
   }
   for (const entry of entries) {
     const player = entry.player;
-    const effective = entry.effective || {};
-    const media = effective.media || {};
-    const card = textNode("article", "track-card control-card", "");
-    const copy = textNode("div", "track-copy", "");
-    copy.append(
-      textNode("strong", "", media.title || player.name),
-      textNode("span", "", media.artist || `${player.name} · ${effective.playback_state || "unknown"}`),
-    );
-    if (
-      typeof effective.position_seconds === "number" &&
-      typeof effective.duration_seconds === "number" &&
-      effective.duration_seconds > 0
-    ) {
-      const progress = textNode("div", "track-progress", "");
-      const fill = textNode("i", "", "");
-      const percent = Math.max(
-        0,
-        Math.min(100, (effective.position_seconds / effective.duration_seconds) * 100),
-      );
-      fill.style.width = percent + "%";
-      progress.append(fill);
-      copy.append(progress);
-    }
-    const queueItems = effective.queue?.items || entry.queue?.items || [];
-    if (Array.isArray(queueItems) && queueItems.length > 1) {
-      const currentIndex = effective.queue?.index ?? entry.queue?.index ?? 0;
-      const next = queueItems.find((_item, index) => index > currentIndex);
-      if (next) {
-        copy.append(
-          textNode(
-            "small",
-            "up-next",
-            "Up next · " + (next.title || next.name || "Untitled"),
-          ),
-        );
-      }
-    }
-    const controls = textNode("div", "track-controls", "");
-    for (const [action, label] of [["play", "▶"], ["pause", "Ⅱ"], ["stop", "■"]]) {
-      const button = textNode("button", "", label);
-      button.type = "button";
-      button.ariaLabel = `${action} ${player.name}`;
-      button.addEventListener("click", () => sendMedia(action, { player_id: player.id }));
-      controls.append(button);
-    }
-    const volume = document.createElement("input");
-    volume.type = "range";
-    volume.min = "0";
-    volume.max = "100";
-    volume.value = typeof effective.volume_percent === "number"
-      ? String(effective.volume_percent)
-      : "30";
-    volume.ariaLabel = `${player.name} volume`;
-    volume.addEventListener("change", () => sendMedia("set_volume", {
-      player_id: player.id,
-      volume: Number(volume.value),
-    }));
-    card.append(copy, controls, volume);
+    const card = existing.get(player.id) || makeTrackCard(player);
+    existing.delete(player.id);
+    updateTrackCard(card, entry);
     elements.now_playing_list.append(card);
   }
+  existing.forEach((card) => card.remove());
+}
+
+function renderConsolePlayer(entries, roomId) {
+  if (!elements.console_track) return;
+  const active = entries.find((entry) => (
+    entry.player?.room_id === roomId && entry.effective?.playback_state === "playing"
+  )) || entries.find((entry) => entry.effective?.playback_state === "playing") ||
+    entries.find((entry) => entry.player?.room_id === roomId && entry.effective?.media?.title);
+  const effective = active?.effective || {};
+  const media = effective.media || {};
+  elements.console_track.textContent = media.title || "Ready for music";
+  elements.console_artist.textContent = media.artist || media.album || "Choose an album, video or the Shield";
+  elements.console_now_playing.classList.toggle("active", Boolean(media.title));
+  elements.console_now_playing.dataset.playerId = active?.player?.id || "";
+  const artwork = effectiveArtwork(effective);
+  if (artwork) {
+    if (elements.console_artwork.dataset.source !== artwork) {
+      elements.console_artwork.dataset.source = artwork;
+      elements.console_artwork.src = artwork;
+    }
+    elements.console_artwork.hidden = false;
+  } else {
+    elements.console_artwork.hidden = true;
+  }
+  const playing = effective.playback_state === "playing";
+  elements.console_play_toggle.textContent = playing ? "Ⅱ" : "▶";
+  elements.console_play_toggle.dataset.consoleMediaAction = playing ? "pause" : "play";
+  elements.console_play_toggle.ariaLabel = playing ? "Pause" : "Play";
+  updateProgressNode(
+    elements.console_progress_fill,
+    effective.position_seconds,
+    effective.duration_seconds,
+    playing,
+  );
+}
+
+function renderMusicControls(value) {
+  mediaModel = value;
+  syncMusicOutputs(value);
+  currentMediaEntries = musicPlayerEntries(value);
+  const roomId = value?.room_id || value?.media?.room_id;
+  const visibleEntries = currentMediaEntries.filter((entry) => (
+    entry.player?.room_id === roomId ||
+    ["playing", "paused"].includes(entry.effective?.playback_state)
+  ));
+  renderTrackCards(visibleEntries);
+  renderConsolePlayer(currentMediaEntries, roomId);
+  const providerOnline = value?.media?.providers?.music_assistant?.status === "ok";
+  const roomPlayers = currentMediaEntries.filter((entry) => entry.player?.room_id === roomId);
+  elements.music_state.textContent = providerOnline
+    ? `${roomPlayers.length} ${roomPlayers.length === 1 ? "room output" : "room outputs"}`
+    : "Music offline";
+  elements.music_state.className = `data-state ${providerOnline ? "online" : "offline"}`;
 }
 
 elements.music_output.addEventListener("change", () => {
@@ -450,37 +604,92 @@ async function postJSON(path, payload) {
   return value;
 }
 
-async function updateMedia() {
-  try {
-    const response = await fetch("/api/media", { cache: "no-store" });
-    const value = await response.json();
-    const firstModeRead = !document.body.dataset.mode;
-    document.body.dataset.mode = value.mode || "display";
-    if (
-      firstModeRead &&
-      value.mode === "media-console" &&
-      !window.location.hash
-    ) {
-      showPage("media");
-    }
-    if (!response.ok) throw new Error(value.detail || `HTTP ${response.status}`);
-    renderMusicControls(value);
-    elements.music_message.textContent = "";
-  } catch (error) {
-    elements.music_message.textContent = String(error);
+function applyDisplayMode(mode) {
+  if (!["display", "media-console"].includes(mode)) return;
+  const normalized = mode === "media-console" ? "media-console" : "display";
+  document.body.dataset.mode = normalized;
+  if (normalized === "media-console" && !window.location.hash) {
+    showPage("media");
   }
+}
+
+function mediaObservedAt(value) {
+  const timestamp = Date.parse(value?.media?.observed_at || "");
+  return Number.isFinite(timestamp) ? timestamp : 0;
+}
+
+function acceptMediaState(value) {
+  const observedAt = mediaObservedAt(value);
+  if (observedAt && observedAt < lastMediaObservedAt) return false;
+  lastMediaObservedAt = Math.max(lastMediaObservedAt, observedAt);
+  const incomingMedia = value?.media || {};
+  const previousMedia = mediaModel?.media || {};
+  const roomScoped = Boolean(incomingMedia.room_id);
+  const merged = {
+    ...(mediaModel || {}),
+    ...value,
+    mode: value.mode || mediaModel?.mode,
+    room_id: value.room_id || mediaModel?.room_id || incomingMedia.room_id,
+    rooms: value.rooms || mediaModel?.rooms || [],
+    media: {
+      ...previousMedia,
+      ...incomingMedia,
+      players: roomScoped
+        ? { ...(previousMedia.players || {}), ...(incomingMedia.players || {}) }
+        : (incomingMedia.players || previousMedia.players || {}),
+    },
+  };
+  if (merged.mode) applyDisplayMode(merged.mode);
+  renderMusicControls(merged);
+  return true;
+}
+
+async function updateMedia(force = false) {
+  if (mediaPollPromise) {
+    if (!force) return mediaPollPromise;
+    await mediaPollPromise;
+  }
+  mediaPollPromise = (async () => {
+    try {
+      const response = await fetch("/api/media", { cache: "no-store" });
+      const value = await response.json();
+      if (!response.ok) throw new Error(value.detail || `HTTP ${response.status}`);
+      acceptMediaState(value);
+    } catch (error) {
+      elements.music_message.textContent = String(error);
+      elements.music_state.textContent = "Music offline";
+      elements.music_state.className = "data-state offline";
+    } finally {
+      mediaPollPromise = null;
+    }
+  })();
+  return mediaPollPromise;
 }
 
 async function sendMedia(action, extra = {}) {
   const playerId = extra.player_id || elements.music_output.value;
-  if (!playerId) return;
+  if (!playerId) {
+    elements.music_message.textContent = "This display has no accepted music output.";
+    return;
+  }
+  const commandSequence = ++mediaCommandSequence;
   elements.music_message.textContent = `${action.replaceAll("_", " ")}…`;
+  document.body.classList.add("media-command-busy");
   try {
     await postJSON("/api/media", { action, player_id: playerId, ...extra });
-    elements.music_message.textContent = "Done";
-    await Promise.all([updateStatus(), updateMedia()]);
+    if (commandSequence === mediaCommandSequence) {
+      elements.music_message.textContent = action === "play_media"
+        ? `Starting in ${elements.music_output.selectedOptions[0]?.textContent || "this room"}…`
+        : "Command accepted";
+    }
+    await new Promise((resolve) => window.setTimeout(resolve, 350));
+    await updateMedia(true);
   } catch (error) {
     elements.music_message.textContent = String(error);
+  } finally {
+    if (commandSequence === mediaCommandSequence) {
+      document.body.classList.remove("media-command-busy");
+    }
   }
 }
 
@@ -520,10 +729,11 @@ function flattenSearchResults(value) {
 }
 
 function resultArtwork(result, className = "result-artwork") {
-  if (!result.image) return textNode("span", `${className} placeholder`, result.kind === "artist" ? "♫" : "♪");
+  const source = artworkURL(result.image);
+  if (!source) return textNode("span", `${className} placeholder`, result.kind === "artist" ? "♫" : "♪");
   const image = document.createElement("img");
   image.className = className;
-  image.src = result.image;
+  image.src = source;
   image.alt = "";
   image.loading = "lazy";
   image.referrerPolicy = "no-referrer";
@@ -599,9 +809,11 @@ async function browseMusic(result) {
 async function searchMusic() {
   const query = elements.music_query.value.trim();
   if (!query) return;
+  const searchSequence = ++musicSearchSequence;
   elements.music_message.textContent = "Searching…";
   try {
     const value = await postJSON("/api/media/search", { query, limit: 12 });
+    if (searchSequence !== musicSearchSequence) return;
     const results = flattenSearchResults(value);
     renderSearchGroups(results);
     elements.music_message.textContent = results.length
@@ -609,7 +821,7 @@ async function searchMusic() {
       : "No results";
     closeKeyboard();
   } catch (error) {
-    elements.music_message.textContent = String(error);
+    if (searchSequence === musicSearchSequence) elements.music_message.textContent = String(error);
   }
 }
 
@@ -652,16 +864,25 @@ elements.console_video_play?.addEventListener("click", () => {
 });
 elements.console_video_pause?.addEventListener("click", () => sendVideo("pause"));
 elements.console_video_stop?.addEventListener("click", () => sendVideo("stop"));
+document.querySelectorAll("[data-console-media-action]").forEach((button) => {
+  button.addEventListener("click", () => {
+    const playerId = elements.console_now_playing.dataset.playerId || elements.music_output.value;
+    const action = button.dataset.consoleMediaAction;
+    if (action) sendMedia(action, { player_id: playerId });
+  });
+});
 
 function openKeyboard() {
+  elements.onscreen_keyboard.inert = false;
   elements.onscreen_keyboard.hidden = false;
   document.body.classList.add("keyboard-open");
 }
 
 function closeKeyboard() {
-  elements.onscreen_keyboard.hidden = true;
   document.body.classList.remove("keyboard-open");
-  elements.music_query.blur();
+  elements.onscreen_keyboard.hidden = true;
+  elements.onscreen_keyboard.inert = true;
+  if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
 }
 
 function renderAssistantEvents(events = []) {
@@ -689,17 +910,26 @@ function renderAssistantEvents(events = []) {
   }, 10000);
 }
 
-for (const key of "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789") {
-  const button = textNode("button", "", key);
-  button.type = "button";
-  button.addEventListener("click", () => {
-    elements.music_query.value += key;
-  });
-  elements.keyboard_keys.append(button);
+function appendSearchKey(key) {
+  elements.music_query.value += key;
+  elements.music_query.dispatchEvent(new Event("input", { bubbles: true }));
 }
+
+for (const keys of ["1234567890", "QWERTYUIOP", "ASDFGHJKL", "ZXCVBNM"]) {
+  const row = textNode("div", "keyboard-row", "");
+  row.dataset.keys = keys;
+  for (const key of keys) {
+    const button = textNode("button", "keyboard-key", key);
+    button.type = "button";
+    button.addEventListener("click", () => appendSearchKey(key));
+    row.append(button);
+  }
+  elements.keyboard_keys.append(row);
+}
+elements.onscreen_keyboard.inert = true;
 elements.music_query.addEventListener("focus", openKeyboard);
 elements.keyboard_space.addEventListener("click", () => {
-  elements.music_query.value += " ";
+  appendSearchKey(" ");
 });
 elements.keyboard_delete.addEventListener("click", () => {
   elements.music_query.value = elements.music_query.value.slice(0, -1);
@@ -763,19 +993,11 @@ async function updateLiveSnapshot() {
       renderEnergy(value.energy);
     }
     if (value.media) {
-      const merged = {
+      acceptMediaState({
         rooms: mediaModel?.rooms || [],
+        room_id: mediaModel?.room_id || value.media.room_id,
         media: value.media,
-      };
-      renderMusicControls(merged);
-      const entries = musicPlayerEntries(merged);
-      const active = entries.find((entry) => entry.effective?.playback_state === "playing") ||
-        entries.find((entry) => entry.effective?.media?.title);
-      const current = active?.effective || {};
-      elements.music_state.textContent = entries.length
-        ? entries.length + " available"
-        : "No players";
-      elements.music_state.className = "data-state " + (entries.length ? "online" : "offline");
+      });
     }
     lastSuccessfulUpdate = Date.now();
     document.body.classList.remove("stale");
@@ -804,6 +1026,7 @@ async function updateStatus() {
     const response = await fetch("/api/status", { cache: "no-store" });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const value = await response.json();
+    applyDisplayMode(value.mode);
     const core = value.core || {};
     const connected = core.connected === true;
     elements.core_state.textContent = connected ? "Core online" : "Core offline";
@@ -826,7 +1049,6 @@ async function updateStatus() {
         : "CPU —";
     elements.storage.textContent = `Storage ${gigabytes(value.disk?.free_bytes)} free`;
     renderEnergy(value.surface?.energy || {});
-    renderNowPlaying(value.surface?.now_playing || {});
     lastSuccessfulUpdate = Date.now();
     document.body.classList.remove("stale");
     elements.updated.textContent = `Updated ${new Date().toLocaleTimeString("en-AU", {
@@ -855,6 +1077,10 @@ updateDashboard();
 updateLiveSnapshot();
 setInterval(updateClock, 1000);
 setInterval(updateStatus, 5000);
-setInterval(updateMedia, 5000);
+setInterval(updateMedia, 10000);
 setInterval(updateDashboard, 30000);
 setInterval(updateLiveSnapshot, 2500);
+setInterval(() => {
+  document.querySelectorAll(".track-progress i, #console-progress-fill")
+    .forEach(updateProgressClock);
+}, 1000);

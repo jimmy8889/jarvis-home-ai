@@ -1,5 +1,38 @@
 # Changelog
 
+## 0.26.0 — 2026-07-22
+
+- Added the shared `pilot.dashboard.v1` monitoring contract for iOS, Android
+  wall tablets and Linux displays. It projects live solar, grid, battery,
+  whole-home, Tesla and server-rack power; daily energy totals; 24-hour chart
+  series; Amber prices; weather and five room temperatures without exposing a
+  Home Assistant credential to any client.
+- Added scalable, directional energy animation with a 100 W grid-flow deadband,
+  explicit battery charge/discharge motion, Tesla connected/charging state and
+  a dedicated server-rack branch. The supplied James House artwork is packaged
+  locally so every display retains the same visual identity when offline.
+- Added typed dashboard actions for Grid/Solar Tesla charging mode and Movie
+  Mode On/Off. Successful actions invalidate the ten-second dashboard cache;
+  concurrent displays otherwise share one bounded Home Assistant projection.
+- Rebuilt Pilot Wall around continuous Flow, History, Daily and Climate pages,
+  removed bedroom music, and added touch-to-wake dimming without an ambient
+  screensaver.
+- Added matching native iPhone/iPad monitoring surfaces, fixed the phone
+  mini-player safe-area overlap, added a phone-output Music Assistant web-player
+  handoff, Media Room mode, Amber price presentation, Tesla controls, weather
+  and room temperatures.
+- Expanded Music Assistant discovery into artwork-led artist, album, playlist
+  and song surfaces. Artist pages expose albums and songs; album and playlist
+  pages expose their tracks through device-scoped Pilot Core APIs.
+- Upgraded the 10-inch Raspberry Pi surface with the shared monitoring pages,
+  touch keyboard and optional pinned Sendspin player for a future USB DAC. The
+  player is installed but remains disabled until the physical DAC is attached
+  and its stable PipeWire sink is accepted.
+- Added the N150 media-console ten-foot home, music, local-video and Shield
+  launch surface plus reproducible Debian 13 x86-64 provisioning. Native HDMI,
+  Denon input recovery, video decode and couch-distance usability remain
+  hardware acceptance items.
+
 ## 0.25.0 — 2026-07-22
 
 - Added the versioned Pilot client product contract: the device-scoped

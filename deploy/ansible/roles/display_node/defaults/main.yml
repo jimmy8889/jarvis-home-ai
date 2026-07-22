@@ -17,6 +17,24 @@ display_node_release_id: "{{ ansible_facts['date_time']['iso8601_basic_short'] }
 display_node_project_root: "{{ role_path }}/../../../.."
 display_node_chromium_disk_cache_bytes: 52428800
 display_node_chromium_media_cache_bytes: 10485760
+display_node_sendspin_install: false
+display_node_sendspin_enabled: false
+display_node_sendspin_version: 7.5.0
+display_node_sendspin_name: "Pilot Office Display Music"
+display_node_sendspin_id: "pilot-office-display"
+display_node_sendspin_server_url: ""
+display_node_sendspin_server_port: 8927
+display_node_sendspin_audio_device: default
+display_node_sendspin_interface: "{{ ansible_facts['default_ipv4']['address'] }}"
+display_node_sendspin_packages:
+  - alsa-utils
+  - ffmpeg
+  - libportaudio2
+  - pipewire
+  - pipewire-alsa
+  - pipewire-bin
+  - pipewire-pulse
+  - wireplumber
 display_node_packages:
   - ca-certificates
   - cage

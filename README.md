@@ -114,11 +114,12 @@ reproducible builds, and factory-image rollback, is documented in
 [firmware/pilot-display-node/README.md](firmware/pilot-display-node/README.md).
 
 The Raspberry Pi 4 large-format touch display appliance, minimal Wayland kiosk,
-storage controls, interactive Music Assistant surface, deployment, acceptance,
-and rollback are documented in
+storage controls, shared energy/climate dashboard, interactive Music Assistant
+surface, optional USB-DAC Sendspin endpoint, deployment, acceptance, and
+rollback are documented in
 [docs/RASPBERRY_PI_DISPLAY_NODE.md](docs/RASPBERRY_PI_DISPLAY_NODE.md).
 
-The native-HDMI N150 Media Console, fullscreen music/video shell, supervised
+The native-HDMI N150 Media Console, ten-foot music/video shell, supervised
 mpv/Jellyfin playback, Shield boundary, and iOS remote contract are documented
 in [docs/N150_MEDIA_CONSOLE.md](docs/N150_MEDIA_CONSOLE.md).
 

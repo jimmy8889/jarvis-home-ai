@@ -45,8 +45,8 @@ The reusable software pieces are present, but an N150 media console has not
 yet completed native-HDMI physical acceptance:
 
 - the Linux display service supports `PILOT_DISPLAY_MODE=media-console`, opens
-  on the music surface and presents richer now-playing, progress and queue
-  information;
+  on a dedicated ten-foot media home and presents artwork-led now-playing,
+  progress, queue, music, house, local-video and Shield entry points;
 - selected room/output state is retained locally without putting a Core or
   provider credential in browser storage;
 - the loopback service proxies authenticated product snapshots and client
@@ -69,8 +69,10 @@ queue, volume, grouping and handoff state from Music Assistant. For video it
 provides a ten-foot library, continue watching, full-screen playback, seeking,
 resume, subtitles, audio tracks and a clean return to the Pilot shell.
 
-The current reusable shell implements the music-first, energy, system,
-stale/offline and assistant-overlay subset. Weather/alert composition, a
+The current reusable shell implements the ten-foot media home, matching house
+Flow/History/Daily/Climate pages, a TIDAL-inspired search/detail experience,
+typed local-video controls, stale/offline state and assistant overlays.
+Weather/alert composition is present through the shared dashboard contract; a
 ten-foot Jellyfin library and unified video-session presentation remain target
 work.
 
@@ -154,7 +156,8 @@ administrator token or communicate directly with the N150.
 2. Build the fullscreen shell with music, assistant-overlay, stale/offline, and
    recovery states. **Source complete in the reusable Linux display shell.**
 3. Add Music Assistant now-playing, progress and queue presentation.
-   **Source complete; target display acceptance pending.**
+   **Source complete**, including artist/album/playlist drill-down; target
+   display acceptance pending.
 4. Add supervised mpv playback for a known-good local test library.
    **Software complete:** configured-root containment, extension allowlist,
    fixed mpv arguments, private JSON IPC, bounded seeking/track selection,
@@ -165,6 +168,7 @@ administrator token or communicate directly with the N150.
    **Core and client control paths are implemented; physical iOS acceptance is
    pending.**
 7. Add HDMI/CEC/Denon source and power coordination.
+   **Denon control contract exists; native-HDMI recovery remains pending.**
 8. Test HDR10, HD-audio passthrough, suspend, reboot recovery, and rollback.
 9. Add N150/Shield engine selection and handoff while retaining Shield for
    Dolby Vision and DRM services.

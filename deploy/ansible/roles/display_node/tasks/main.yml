@@ -3,15 +3,24 @@
   ansible.builtin.slurp:
     src: /proc/device-tree/model
   register: display_node_model
+  failed_when: false
 
 - name: Assert supported Raspberry Pi platform
   ansible.builtin.assert:
     that:
       - ansible_facts.distribution == "Debian"
       - ansible_facts.distribution_major_version == "13"
-      - ansible_facts.architecture == "aarch64"
-      - "'Raspberry Pi' in (display_node_model.content | b64decode)"
-    fail_msg: "The display role supports 64-bit Debian 13 on Raspberry Pi only."
+      - >-
+        (
+          ansible_facts.architecture == "aarch64" and
+          'Raspberry Pi' in ((display_node_model.content | default('')) | b64decode)
+        ) or (
+          ansible_facts.architecture == "x86_64" and
+          display_node_mode == "media-console"
+        )
+    fail_msg: >-
+      The display role supports Debian 13 ARM64 Raspberry Pi displays and
+      Debian 13 x86_64 N150 media consoles.
 
 - name: Install minimal display appliance packages
   ansible.builtin.apt:
@@ -19,6 +28,12 @@
     state: present
     update_cache: true
     cache_valid_time: 3600
+
+- name: Install optional display audio-player packages
+  ansible.builtin.apt:
+    name: "{{ display_node_sendspin_packages }}"
+    state: present
+  when: display_node_sendspin_install | bool
 
 - name: Set appliance hostname
   ansible.builtin.hostname:
@@ -53,6 +68,26 @@
   ansible.builtin.command: "id -u {{ display_node_user }}"
   register: display_node_uid
   changed_when: false
+
+- name: Start display user manager for audio services
+  ansible.builtin.systemd_service:
+    name: "user@{{ display_node_uid.stdout }}.service"
+    state: started
+  when: display_node_sendspin_install | bool
+
+- name: Enable display-user PipeWire services
+  ansible.builtin.command:
+    cmd: >-
+      runuser -u {{ display_node_user }} -- env
+      XDG_RUNTIME_DIR=/run/user/{{ display_node_uid.stdout }}
+      DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{{ display_node_uid.stdout }}/bus
+      systemctl --user enable --now {{ item }}
+  changed_when: false
+  loop:
+    - pipewire.socket
+    - pipewire-pulse.socket
+    - wireplumber.service
+  when: display_node_sendspin_install | bool
 
 - name: Create display appliance directories
   ansible.builtin.file:
@@ -127,6 +162,7 @@
   loop:
     - /boot/firmware/config.txt
     - /boot/firmware/cmdline.txt
+  when: display_node_force_resolution | bool
 
 - name: Read kernel command line
   ansible.builtin.slurp:
@@ -195,6 +231,33 @@
     owner: root
     group: root
     mode: preserve
+
+- name: Create display Sendspin directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ display_node_user }}"
+    group: "{{ display_node_user }}"
+    mode: "0750"
+  loop:
+    - /opt/pilot-display/vendor
+    - /var/lib/pilot-display/sendspin
+  when: display_node_sendspin_install | bool
+
+- name: Create pinned display Sendspin environment
+  ansible.builtin.command:
+    cmd: >-
+      python3 -m venv
+      /opt/pilot-display/vendor/sendspin-{{ display_node_sendspin_version }}
+    creates: >-
+      /opt/pilot-display/vendor/sendspin-{{ display_node_sendspin_version }}/bin/python
+  when: display_node_sendspin_install | bool
+
+- name: Install pinned display Sendspin client
+  ansible.builtin.pip:
+    name: "sendspin=={{ display_node_sendspin_version }}"
+    virtualenv: "/opt/pilot-display/vendor/sendspin-{{ display_node_sendspin_version }}"
+  when: display_node_sendspin_install | bool
 
 - name: Create display application virtual environment
   ansible.builtin.command:
@@ -297,6 +360,18 @@
     - Reload systemd
     - Restart Pilot display kiosk
 
+- name: Install display Sendspin service
+  ansible.builtin.template:
+    src: pilot-display-sendspin.service.j2
+    dest: /etc/systemd/system/pilot-display-sendspin.service
+    owner: root
+    group: root
+    mode: "0644"
+  when: display_node_sendspin_install | bool
+  notify:
+    - Reload systemd
+    - Restart Pilot display Sendspin
+
 - name: Install display rollback command
   ansible.builtin.copy:
     src: "{{ display_node_project_root }}/deploy/scripts/pilot-display-rollback"
@@ -321,6 +396,14 @@
     - seatd.service
     - pilot-display-web.service
     - pilot-display-kiosk.service
+
+- name: Configure display Sendspin service state
+  ansible.builtin.systemd_service:
+    name: pilot-display-sendspin.service
+    enabled: "{{ display_node_sendspin_enabled | bool }}"
+    state: "{{ 'started' if display_node_sendspin_enabled | bool else 'stopped' }}"
+    daemon_reload: true
+  when: display_node_sendspin_install | bool
 
 - name: Flush handlers before validation
   ansible.builtin.meta: flush_handlers

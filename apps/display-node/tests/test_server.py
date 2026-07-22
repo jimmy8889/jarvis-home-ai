@@ -141,6 +141,20 @@ class CoreStatusTests(unittest.TestCase):
         self.assertIn(".onscreen-keyboard", styles)
         self.assertIn("Showing the last known state", styles)
 
+    def test_dashboard_assets_and_media_console_are_packaged(self) -> None:
+        static = Path(__file__).parents[1] / "pilot_display_node" / "static"
+        html = (static / "index.html").read_text(encoding="utf-8")
+        script = (static / "app.js").read_text(encoding="utf-8")
+
+        self.assertGreater((static / "assets" / "house-energy.png").stat().st_size, 100_000)
+        self.assertGreater((static / "assets" / "house-no-car.png").stat().st_size, 100_000)
+        self.assertIn('data-page="media"', html)
+        self.assertIn('id="music-results"', html)
+        self.assertIn('id="console-video-input"', html)
+        self.assertIn('postJSON("/api/media/browse"', script)
+        self.assertIn('postJSON("/api/video"', script)
+        self.assertIn("resultArtwork", script)
+
 
 if __name__ == "__main__":
     unittest.main()

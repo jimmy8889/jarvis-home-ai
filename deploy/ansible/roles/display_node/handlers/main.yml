@@ -12,3 +12,9 @@
   ansible.builtin.systemd_service:
     name: pilot-display-kiosk.service
     state: restarted
+
+- name: Restart Pilot display Sendspin
+  ansible.builtin.systemd_service:
+    name: pilot-display-sendspin.service
+    state: restarted
+  when: display_node_sendspin_enabled | bool

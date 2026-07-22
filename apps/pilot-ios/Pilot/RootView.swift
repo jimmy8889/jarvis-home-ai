@@ -1,6 +1,8 @@
 import SwiftUI
 import UIKit
 import VisionKit
+import Charts
+import WebKit
 
 enum PilotSection: String, CaseIterable, Identifiable {
     case home
@@ -105,14 +107,13 @@ struct RootView: View {
                     NavigationStack {
                         destination(item)
                     }
+                    .safeAreaInset(edge: .bottom, spacing: 8) {
+                        MiniPlayerBar(showingNowPlaying: $showingNowPlaying)
+                            .padding(.horizontal, 10)
+                    }
                     .tag(item)
                     .tabItem { Label(item.title, systemImage: item.symbol) }
                 }
-            }
-            .safeAreaInset(edge: .bottom, spacing: 0) {
-                MiniPlayerBar(showingNowPlaying: $showingNowPlaying)
-                    .padding(.horizontal, 10)
-                    .padding(.bottom, 4)
             }
         }
     }
@@ -205,7 +206,7 @@ private struct HomeView: View {
                         }
                     }
 
-                    EnergyOverviewCard(snapshot: model.energy)
+                    PilotEnergyDashboardCard()
                     HomeQuickActions()
                     HomeControlsPanel()
                 }
@@ -479,6 +480,446 @@ private struct EnergyOverviewCard: View {
     }
 }
 
+private struct PilotEnergyDashboardCard: View {
+    @Environment(PilotModel.self) private var model
+    @State private var page = DashboardPage.flow
+
+    private enum DashboardPage: String, CaseIterable, Identifiable {
+        case flow = "Flow"
+        case history = "History"
+        case daily = "Daily"
+        case climate = "Climate"
+        var id: String { rawValue }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack {
+                SectionTitle(
+                    eyebrow: "JAMES HOUSE",
+                    title: "Energy & climate",
+                    trailing: model.dashboard.status == "ok" ? "Live" : "Last known"
+                )
+                Spacer(minLength: 0)
+                Circle()
+                    .fill(model.dashboard.status == "ok" ? PilotTheme.mint : PilotTheme.amber)
+                    .frame(width: 9, height: 9)
+            }
+            Picker("Dashboard page", selection: $page) {
+                ForEach(DashboardPage.allCases) { Text($0.rawValue).tag($0) }
+            }
+            .pickerStyle(.segmented)
+
+            Group {
+                switch page {
+                case .flow: EnergyFlowPage(snapshot: model.dashboard, coreURL: model.coreURL)
+                case .history: EnergyHistoryPage(snapshot: model.dashboard)
+                case .daily: DailyEnergyPage(snapshot: model.dashboard)
+                case .climate: ClimatePage(snapshot: model.dashboard)
+                }
+            }
+            .animation(.smooth(duration: 0.32), value: page)
+
+            if let error = model.dashboardError {
+                Label(error, systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption)
+                    .foregroundStyle(PilotTheme.amber)
+            }
+        }
+        .pilotCard()
+        .task { await model.refreshDashboard(silent: true) }
+    }
+}
+
+private struct EnergyFlowPage: View {
+    let snapshot: DashboardSnapshot
+    let coreURL: String
+
+    private var imageURL: URL? {
+        let name = snapshot.vehicle.connected == true ? "house-energy.png" : "house-no-car.png"
+        return URL(string: coreURL.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+                   + "/dashboard/assets/\(name)")
+    }
+
+    var body: some View {
+        VStack(spacing: 15) {
+            HStack(spacing: 0) {
+                DailySummaryMetric("Generated", snapshot.daily.solarGeneratedKWh, PilotTheme.amber)
+                Divider().frame(height: 48)
+                DailySummaryMetric("Home used", snapshot.daily.homeUsedKWh, PilotTheme.mint)
+                Divider().frame(height: 48)
+                DailySummaryMetric("Exported", snapshot.daily.gridExportedKWh, PilotTheme.cyan)
+            }
+            .padding(.vertical, 10)
+            .background(Color.black.opacity(0.16), in: RoundedRectangle(cornerRadius: 16))
+
+            GeometryReader { proxy in
+                ZStack {
+                    AsyncImage(url: imageURL) { image in
+                        image.resizable().scaledToFit()
+                    } placeholder: {
+                        RoundedRectangle(cornerRadius: 20)
+                            .fill(Color.black.opacity(0.20))
+                            .overlay { ProgressView() }
+                    }
+                    .frame(width: proxy.size.width, height: proxy.size.height)
+                    .clipShape(RoundedRectangle(cornerRadius: 20))
+
+                    EnergyFlowLines(power: snapshot.power)
+                    EnergyNode("PV", snapshot.power.solarWatts, PilotTheme.amber, "sun.max.fill")
+                        .position(x: proxy.size.width * 0.52, y: proxy.size.height * 0.08)
+                    EnergyNode(
+                        snapshot.power.directions["grid"] == "exporting" ? "EXPORT" : "GRID",
+                        snapshot.power.gridWatts.map(abs), PilotTheme.cyan, "transmission"
+                    )
+                    .position(x: proxy.size.width * 0.88, y: proxy.size.height * 0.18)
+                    EnergyNode("HOME", snapshot.power.homeLoadWatts, PilotTheme.mint, "house.fill")
+                        .position(x: proxy.size.width * 0.56, y: proxy.size.height * 0.82)
+                    EnergyNode("BATTERY", snapshot.power.batteryWatts.map(abs), PilotTheme.mint, "battery.75percent")
+                        .position(x: proxy.size.width * 0.77, y: proxy.size.height * 0.63)
+                    if snapshot.vehicle.connected == true {
+                        EnergyNode("TESLA", snapshot.vehicle.powerWatts, .red, "car.fill")
+                            .position(x: proxy.size.width * 0.18, y: proxy.size.height * 0.72)
+                    }
+                    EnergyNode("RACK", snapshot.power.serverRackWatts, PilotTheme.violet, "server.rack")
+                        .position(x: proxy.size.width * 0.91, y: proxy.size.height * 0.76)
+                }
+            }
+            .frame(height: 360)
+
+            HStack(spacing: 14) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Label("Jarvis", systemImage: snapshot.vehicle.connected == true ? "bolt.car.fill" : "car.fill")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(snapshot.vehicle.connected == true ? PilotTheme.mint : .secondary)
+                    Text(snapshot.vehicle.stateOfCharge.map { "\(Int($0))%" } ?? "—")
+                        .font(.title2.monospacedDigit().bold())
+                    Text(snapshot.vehicle.connected == true
+                         ? (snapshot.vehicle.charging ? "Plugged in · charging" : "Plugged in")
+                         : "Not plugged in")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+                if let soc = snapshot.power.batteryStateOfCharge {
+                    VStack(alignment: .trailing, spacing: 4) {
+                        Label("Home battery", systemImage: "battery.75percent")
+                            .font(.caption.weight(.bold)).foregroundStyle(PilotTheme.mint)
+                        Text("\(Int(soc))%")
+                            .font(.title2.monospacedDigit().bold())
+                        Text(snapshot.power.directions["battery"]?.capitalized ?? "Idle")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+            }
+        }
+    }
+}
+
+private struct EnergyFlowLines: View {
+    let power: DashboardPower
+
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 1 / 24)) { timeline in
+            Canvas { context, size in
+                let phase = timeline.date.timeIntervalSinceReferenceDate * -45
+                draw(context: &context, size: size, from: CGPoint(x: 0.52, y: 0.25), to: CGPoint(x: 0.56, y: 0.72),
+                     value: power.solarWatts, color: PilotTheme.amber, phase: phase, active: power.flowActive["solar"] == true)
+                draw(context: &context, size: size, from: CGPoint(x: 0.84, y: 0.27), to: CGPoint(x: 0.60, y: 0.72),
+                     value: power.gridWatts, color: PilotTheme.cyan, phase: phase,
+                     active: power.flowActive["grid"] == true,
+                     reverse: power.directions["grid"] == "exporting")
+                draw(context: &context, size: size, from: CGPoint(x: 0.76, y: 0.59), to: CGPoint(x: 0.61, y: 0.74),
+                     value: power.batteryWatts, color: PilotTheme.mint, phase: phase,
+                     active: power.flowActive["battery"] == true,
+                     reverse: power.directions["battery"] == "charging")
+                draw(context: &context, size: size, from: CGPoint(x: 0.22, y: 0.68), to: CGPoint(x: 0.51, y: 0.76),
+                     value: power.vehicleWatts, color: .red, phase: phase,
+                     active: power.flowActive["vehicle"] == true, reverse: true)
+                draw(context: &context, size: size, from: CGPoint(x: 0.86, y: 0.72), to: CGPoint(x: 0.62, y: 0.76),
+                     value: power.serverRackWatts, color: PilotTheme.violet, phase: phase,
+                     active: power.flowActive["server_rack"] == true, reverse: true)
+            }
+        }
+        .allowsHitTesting(false)
+    }
+
+    private func draw(
+        context: inout GraphicsContext,
+        size: CGSize,
+        from: CGPoint,
+        to: CGPoint,
+        value: Double?,
+        color: Color,
+        phase: Double,
+        active: Bool,
+        reverse: Bool = false
+    ) {
+        var path = Path()
+        let start = reverse ? to : from
+        let end = reverse ? from : to
+        path.move(to: CGPoint(x: size.width * start.x, y: size.height * start.y))
+        path.addLine(to: CGPoint(x: size.width * end.x, y: size.height * end.y))
+        let strength = min(1, max(0.2, abs(value ?? 0) / 8_000))
+        context.stroke(path, with: .color(color.opacity(active ? 0.25 + strength * 0.55 : 0.10)),
+                       style: StrokeStyle(lineWidth: active ? 2.5 + strength * 4 : 1.5,
+                                          lineCap: .round, dash: active ? [5, 10] : [], dashPhase: phase))
+    }
+}
+
+private struct EnergyNode: View {
+    let title: String
+    let watts: Double?
+    let color: Color
+    let symbol: String
+
+    init(_ title: String, _ watts: Double?, _ color: Color, _ symbol: String) {
+        self.title = title
+        self.watts = watts
+        self.color = color
+        self.symbol = symbol
+    }
+
+    var body: some View {
+        VStack(spacing: 2) {
+            Label(title, systemImage: symbol)
+                .font(.caption2.weight(.bold)).foregroundStyle(color)
+            Text(Self.power(watts))
+                .font(.caption.monospacedDigit().weight(.heavy))
+        }
+        .padding(.horizontal, 9).padding(.vertical, 6)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 11))
+        .overlay { RoundedRectangle(cornerRadius: 11).stroke(color.opacity(0.35)) }
+    }
+
+    private static func power(_ watts: Double?) -> String {
+        guard let watts else { return "—" }
+        return abs(watts) >= 1_000
+            ? String(format: "%.2f kW", abs(watts) / 1_000)
+            : String(format: "%.0f W", abs(watts))
+    }
+}
+
+private struct DailySummaryMetric: View {
+    let label: String
+    let value: Double?
+    let color: Color
+    init(_ label: String, _ value: Double?, _ color: Color) {
+        self.label = label; self.value = value; self.color = color
+    }
+    var body: some View {
+        VStack(spacing: 4) {
+            Text(label).font(.caption).foregroundStyle(.secondary)
+            Text(value.map { String(format: "%.1f kWh", $0) } ?? "—")
+                .font(.subheadline.monospacedDigit().bold()).foregroundStyle(color)
+        }.frame(maxWidth: .infinity)
+    }
+}
+
+private struct EnergyHistoryPage: View {
+    let snapshot: DashboardSnapshot
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Last \(snapshot.history.periodHours) hours")
+                .font(.headline)
+            if snapshot.history.series.allSatisfy({ $0.points.isEmpty }) {
+                ContentUnavailableView("No history yet", systemImage: "chart.xyaxis.line")
+                    .frame(height: 250)
+            } else {
+                Chart(snapshot.history.series) { series in
+                    ForEach(series.points) { point in
+                        LineMark(
+                            x: .value("Time", point.date),
+                            y: .value("Power", point.value / 1_000),
+                            series: .value("Series", series.label)
+                        )
+                        .foregroundStyle(Self.color(series.color))
+                        .interpolationMethod(.catmullRom)
+                    }
+                }
+                .chartYAxisLabel("kW")
+                .frame(height: 280)
+                HStack(spacing: 16) {
+                    ForEach(snapshot.history.series) { series in
+                        Label(series.label, systemImage: "circle.fill")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(Self.color(series.color))
+                    }
+                }
+            }
+        }
+    }
+
+    private static func color(_ hex: String) -> Color {
+        let value = UInt64(hex.trimmingCharacters(in: CharacterSet.alphanumerics.inverted), radix: 16) ?? 0
+        return Color(red: Double((value >> 16) & 0xff) / 255,
+                     green: Double((value >> 8) & 0xff) / 255,
+                     blue: Double(value & 0xff) / 255)
+    }
+}
+
+private struct DailyEnergyPage: View {
+    @Environment(PilotModel.self) private var model
+    let snapshot: DashboardSnapshot
+
+    var body: some View {
+        VStack(spacing: 14) {
+            HStack(spacing: 12) {
+                DailyTile("Solar generated", snapshot.daily.solarGeneratedKWh, PilotTheme.amber, "sun.max.fill")
+                DailyTile("Home used", snapshot.daily.homeUsedKWh, PilotTheme.mint, "house.fill")
+                DailyTile("Grid exported", snapshot.daily.gridExportedKWh, PilotTheme.cyan, "transmission")
+            }
+            VStack(alignment: .leading, spacing: 14) {
+                HStack {
+                    Label("Jarvis", systemImage: "bolt.car.fill")
+                        .font(.headline).foregroundStyle(.red)
+                    Spacer()
+                    Text(snapshot.vehicle.stateOfCharge.map { "\(Int($0))%" } ?? "—")
+                        .font(.title2.monospacedDigit().bold())
+                }
+                Text(snapshot.vehicle.connected == true
+                     ? (snapshot.vehicle.charging ? "Plugged in and charging" : "Plugged in")
+                     : "Not plugged in")
+                    .foregroundStyle(.secondary)
+                HStack {
+                    ForEach(snapshot.controls.chargingMode.options.filter { ["Grid", "Solar"].contains($0) }, id: \.self) { mode in
+                        if mode == snapshot.controls.chargingMode.value {
+                            Button(mode) {}
+                                .buttonStyle(.borderedProminent)
+                                .disabled(true)
+                        } else {
+                            Button(mode) {
+                                Task { await model.dashboardAction("set_tesla_charging_mode", value: mode) }
+                            }
+                            .buttonStyle(.bordered)
+                            .disabled(model.dashboardActionInFlight)
+                        }
+                    }
+                }
+            }
+            .pilotCard()
+
+            HStack(spacing: 12) {
+                PriceTile("Buy now", snapshot.tariff.importCentsPerKWh, PilotTheme.amber)
+                PriceTile("Feed-in now", snapshot.tariff.feedInCentsPerKWh, PilotTheme.mint)
+            }
+
+            if snapshot.controls.mediaRoomMode.available {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("MEDIA ROOM MODE").font(.caption.weight(.bold)).foregroundStyle(PilotTheme.violet)
+                    HStack {
+                        Button("Movie Mode On") {
+                            Task { await model.dashboardAction("set_media_room_mode", value: "on") }
+                        }.buttonStyle(.borderedProminent)
+                        Button("Movie Mode Off") {
+                            Task { await model.dashboardAction("set_media_room_mode", value: "off") }
+                        }.buttonStyle(.bordered)
+                    }
+                }.frame(maxWidth: .infinity, alignment: .leading).pilotCard()
+            }
+        }
+    }
+}
+
+private struct DailyTile: View {
+    let title: String; let value: Double?; let color: Color; let symbol: String
+    init(_ title: String, _ value: Double?, _ color: Color, _ symbol: String) {
+        self.title = title; self.value = value; self.color = color; self.symbol = symbol
+    }
+    var body: some View {
+        VStack(spacing: 8) {
+            Image(systemName: symbol).foregroundStyle(color)
+            Text(value.map { String(format: "%.1f", $0) } ?? "—")
+                .font(.title3.monospacedDigit().bold())
+            Text(title).font(.caption2).foregroundStyle(.secondary).multilineTextAlignment(.center)
+        }.frame(maxWidth: .infinity).padding(.vertical, 16)
+         .background(color.opacity(0.08), in: RoundedRectangle(cornerRadius: 16))
+    }
+}
+
+private struct PriceTile: View {
+    let title: String; let value: Double?; let color: Color
+    init(_ title: String, _ value: Double?, _ color: Color) {
+        self.title = title; self.value = value; self.color = color
+    }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(title).font(.caption).foregroundStyle(.secondary)
+            Text(value.map { String(format: "%.2f c/kWh", $0) } ?? "—")
+                .font(.title3.monospacedDigit().bold()).foregroundStyle(color)
+        }.frame(maxWidth: .infinity, alignment: .leading).pilotCard()
+    }
+}
+
+private struct ClimatePage: View {
+    let snapshot: DashboardSnapshot
+    var body: some View {
+        VStack(alignment: .leading, spacing: 15) {
+            HStack(spacing: 16) {
+                Image(systemName: Self.symbol(snapshot.weather.condition))
+                    .font(.system(size: 44)).foregroundStyle(PilotTheme.cyan)
+                VStack(alignment: .leading) {
+                    Text(snapshot.weather.temperatureCelsius.map { String(format: "%.1f°", $0) } ?? "—")
+                        .font(.system(.largeTitle, design: .rounded, weight: .bold))
+                    Text(snapshot.weather.condition?.replacingOccurrences(of: "_", with: " ").capitalized ?? "Weather unavailable")
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                VStack(alignment: .trailing) {
+                    Text(snapshot.weather.humidityPercent.map { "Humidity \(Int($0))%" } ?? "")
+                    Text(snapshot.weather.windSpeed.map { "Wind \(Int($0)) \(snapshot.weather.windSpeedUnit ?? "")" } ?? "")
+                }.font(.caption).foregroundStyle(.secondary)
+            }
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 110), spacing: 10)], spacing: 10) {
+                ForEach(snapshot.temperatures) { reading in
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(reading.label).font(.caption).foregroundStyle(.secondary)
+                        Text(reading.temperatureCelsius.map { String(format: "%.1f°", $0) } ?? "—")
+                            .font(.title3.monospacedDigit().bold())
+                    }.frame(maxWidth: .infinity, alignment: .leading)
+                     .padding(13).background(PilotTheme.cyan.opacity(0.07), in: RoundedRectangle(cornerRadius: 14))
+                }
+            }
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 10) {
+                    ForEach(snapshot.weather.forecast) { day in
+                        VStack(spacing: 6) {
+                            Text(day.dateLabel).font(.caption.weight(.semibold))
+                            Image(systemName: Self.symbol(day.condition)).foregroundStyle(PilotTheme.cyan)
+                            Text("\(Self.temp(day.lowTemperatureCelsius)) / \(Self.temp(day.highTemperatureCelsius))")
+                                .font(.caption.monospacedDigit())
+                            if let rain = day.precipitationProbability {
+                                Label("\(Int(rain))%", systemImage: "drop.fill")
+                                    .font(.caption2).foregroundStyle(PilotTheme.cyan)
+                            }
+                        }.padding(12).background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 14))
+                    }
+                }
+            }
+        }
+    }
+
+    private static func symbol(_ condition: String?) -> String {
+        let value = condition?.lowercased() ?? ""
+        if value.contains("rain") { return "cloud.rain.fill" }
+        if value.contains("cloud") { return "cloud.sun.fill" }
+        if value.contains("storm") { return "cloud.bolt.rain.fill" }
+        return "sun.max.fill"
+    }
+    private static func temp(_ value: Double?) -> String { value.map { "\(Int($0))°" } ?? "—" }
+}
+
+private extension DashboardHistoryPoint {
+    var date: Date { ISO8601DateFormatter().date(from: at) ?? .distantPast }
+}
+
+private extension DashboardForecast {
+    var dateLabel: String {
+        guard let at, let date = ISO8601DateFormatter().date(from: at) else { return "—" }
+        return date.formatted(.dateTime.weekday(.abbreviated))
+    }
+}
+
 private struct EnergyMetric: View {
     let title: String
     let value: Double?
@@ -723,15 +1164,26 @@ private struct QuickAction: View {
 
 private struct MusicView: View {
     @Environment(PilotModel.self) private var model
+    @AppStorage("pilot.musicAssistantURL") private var musicAssistantURL = "http://10.0.2.72:8095"
     @State private var query = ""
     @State private var showingNowPlaying = false
+    @State private var showingPhonePlayer = false
 
     var body: some View {
         ZStack {
             PilotTheme.background.ignoresSafeArea()
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 22) {
-                    RoomSelector()
+                    HStack {
+                        RoomSelector()
+                        Spacer(minLength: 8)
+                        Button {
+                            showingPhonePlayer = true
+                        } label: {
+                            Label("This iPhone", systemImage: "iphone.gen3.radiowaves.left.and.right")
+                        }
+                        .buttonStyle(.bordered)
+                    }
                     NowPlayingHero {
                         showingNowPlaying = true
                     }
@@ -750,12 +1202,23 @@ private struct MusicView: View {
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
         }
+        .fullScreenCover(isPresented: $showingPhonePlayer) {
+            MusicAssistantPhonePlayer(
+                url: URL(string: musicAssistantURL),
+                dismiss: { showingPhonePlayer = false }
+            )
+        }
         .refreshable { await model.refresh() }
     }
 
     @ViewBuilder
     private var searchContent: some View {
-        if model.isSearching {
+        if model.isBrowsingMusic {
+            ProgressView("Opening Music Assistant…")
+                .frame(maxWidth: .infinity).padding(40)
+        } else if let page = model.musicBrowsePage {
+            MusicBrowseDetail(page: page)
+        } else if model.isSearching {
             VStack(spacing: 12) {
                 ForEach(0..<4, id: \.self) { _ in SearchRowSkeleton() }
             }
@@ -768,12 +1231,66 @@ private struct MusicView: View {
             ForEach(model.groupedSearchResults, id: \.0) { kind, results in
                 VStack(alignment: .leading, spacing: 10) {
                     SectionTitle(eyebrow: kind.title.uppercased(), title: "")
-                    ForEach(results) { result in
-                        SearchResultRow(result: result)
+                    if kind == .track {
+                        ForEach(results) { result in SearchResultRow(result: result) }
+                    } else {
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            LazyHStack(spacing: 14) {
+                                ForEach(results) { result in MusicResultCard(result: result) }
+                            }
+                        }
                     }
                 }
             }
         }
+    }
+}
+
+private struct MusicAssistantPhonePlayer: View {
+    let url: URL?
+    let dismiss: () -> Void
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if let url {
+                    MusicAssistantWebView(url: url)
+                        .ignoresSafeArea(edges: .bottom)
+                } else {
+                    ContentUnavailableView(
+                        "Music Assistant URL is invalid",
+                        systemImage: "exclamationmark.triangle",
+                        description: Text("Update it in Pilot settings.")
+                    )
+                }
+            }
+            .navigationTitle("Play on this iPhone")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done", action: dismiss)
+                }
+            }
+        }
+    }
+}
+
+private struct MusicAssistantWebView: UIViewRepresentable {
+    let url: URL
+
+    func makeUIView(context: Context) -> WKWebView {
+        let configuration = WKWebViewConfiguration()
+        configuration.allowsInlineMediaPlayback = true
+        configuration.mediaTypesRequiringUserActionForPlayback = []
+        let view = WKWebView(frame: .zero, configuration: configuration)
+        view.allowsBackForwardNavigationGestures = true
+        view.load(URLRequest(url: url))
+        return view
+    }
+
+    func updateUIView(_ webView: WKWebView, context: Context) {
+        guard webView.url == nil else { return }
+        webView.load(URLRequest(url: url))
     }
 }
 
@@ -783,7 +1300,7 @@ private struct RoomSelector: View {
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 10) {
-                ForEach(model.rooms) { room in
+                ForEach(model.rooms.filter { $0.musicEnabled != false }) { room in
                     Button {
                         model.selectRoom(room.id)
                         PilotHaptics.selection()
@@ -932,13 +1449,7 @@ private struct SearchResultRow: View {
     var body: some View {
         Button {
             PilotHaptics.impact()
-            Task {
-                await model.command(
-                    "play_media",
-                    mediaURI: result.uri,
-                    operationID: result.id
-                )
-            }
+            Task { await model.browse(result) }
         } label: {
             HStack(spacing: 13) {
                 AsyncArtwork(url: result.artworkURL, symbol: result.kind.symbol)
@@ -967,6 +1478,87 @@ private struct SearchResultRow: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Play \(result.title), \(result.subtitle)")
+    }
+}
+
+private struct MusicResultCard: View {
+    @Environment(PilotModel.self) private var model
+    let result: MusicSearchResult
+
+    var body: some View {
+        Button {
+            PilotHaptics.impact()
+            Task { await model.browse(result) }
+        } label: {
+            VStack(alignment: .leading, spacing: 8) {
+                AsyncArtwork(url: result.artworkURL, symbol: result.kind.symbol)
+                    .frame(width: 152, height: 152)
+                    .clipShape(RoundedRectangle(cornerRadius: result.kind == .artist ? 76 : 16))
+                Text(result.title)
+                    .font(.subheadline.weight(.bold)).foregroundStyle(.primary)
+                    .lineLimit(1)
+                Text(result.subtitle.isEmpty ? result.kind.title : result.subtitle)
+                    .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            }
+            .frame(width: 152, alignment: .leading)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Open \(result.title)")
+    }
+}
+
+private struct MusicBrowseDetail: View {
+    @Environment(PilotModel.self) private var model
+    let page: MusicBrowsePage
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            Button {
+                model.dismissMusicBrowse()
+            } label: {
+                Label("Back to results", systemImage: "chevron.left")
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(PilotTheme.cyan)
+
+            HStack(spacing: 18) {
+                AsyncArtwork(url: page.item.artworkURL, symbol: page.item.kind.symbol)
+                    .frame(width: 116, height: 116)
+                    .clipShape(RoundedRectangle(cornerRadius: page.item.kind == .artist ? 58 : 18))
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(page.item.kind.rawValue.uppercased())
+                        .font(.caption.weight(.bold)).tracking(1.8).foregroundStyle(PilotTheme.cyan)
+                    Text(page.item.title).font(.largeTitle.bold()).lineLimit(2)
+                    Text(page.item.subtitle).foregroundStyle(.secondary)
+                    Button {
+                        Task {
+                            await model.command(
+                                "play_media", mediaURI: page.item.uri, operationID: page.item.id
+                            )
+                        }
+                    } label: {
+                        Label("Play", systemImage: "play.fill")
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
+            }
+
+            ForEach(page.sections) { section in
+                VStack(alignment: .leading, spacing: 12) {
+                    Text(section.title).font(.title2.bold())
+                    if section.id == "albums" {
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            LazyHStack(spacing: 14) {
+                                ForEach(section.items) { MusicResultCard(result: $0) }
+                            }
+                        }
+                    } else {
+                        ForEach(section.items) { SearchResultRow(result: $0) }
+                    }
+                }
+            }
+        }
+        .transition(.opacity.combined(with: .move(edge: .trailing)))
     }
 }
 
@@ -1856,7 +2448,9 @@ private struct NowPlayingView: View {
                         .pilotCard()
 
                         Menu {
-                            ForEach(model.rooms.filter { $0.id != model.selectedRoomID }) { room in
+                            ForEach(model.rooms.filter {
+                                $0.id != model.selectedRoomID && $0.musicEnabled != false
+                            }) { room in
                                 Button("Move to \(room.name)") {
                                     Task { await model.transfer(to: room.id) }
                                 }
@@ -1987,6 +2581,7 @@ private struct MiniPlayerBar: View {
 
 private struct SettingsView: View {
     @Environment(PilotModel.self) private var model
+    @AppStorage("pilot.musicAssistantURL") private var musicAssistantURL = "http://10.0.2.72:8095"
     var isInitialSetup = false
     @State private var validationResult: Bool?
 
@@ -2073,6 +2668,17 @@ private struct SettingsView: View {
                     }
                     .listRowBackground(Color.white.opacity(0.06))
 
+                    Section("Phone music output") {
+                        TextField("Music Assistant URL", text: $musicAssistantURL)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                            .keyboardType(.URL)
+                        Text("Used only by the embedded Music Assistant player when you choose This iPhone. Pilot controls continue to use Pilot Core.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .listRowBackground(Color.white.opacity(0.06))
+
                     Section("About") {
                         LabeledContent("Client", value: "iOS / iPadOS")
                         LabeledContent("Authority", value: "Pilot Core")
@@ -2089,7 +2695,7 @@ private struct SettingsView: View {
                     .listRowBackground(Color.white.opacity(0.06))
 
                     Section {
-                        Text("This client never connects directly to Home Assistant, Music Assistant, Ollama, receivers, or room endpoints.")
+                        Text("Pilot actions remain device-scoped through Pilot Core. The optional This iPhone player opens your local Music Assistant web player without storing its credentials in Pilot.")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                     }

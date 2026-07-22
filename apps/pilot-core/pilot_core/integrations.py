@@ -339,10 +339,12 @@ class Integrations:
             "light": {"turn_on", "turn_off", "toggle"},
             "switch": {"turn_on", "turn_off", "toggle"},
             "input_boolean": {"turn_on", "turn_off", "toggle"},
+            "input_select": {"select_option"},
             "fan": {"turn_on", "turn_off", "toggle", "set_percentage"},
             "climate": {"turn_on", "turn_off", "set_temperature", "set_hvac_mode"},
             "cover": {"open_cover", "close_cover", "stop_cover", "set_cover_position"},
             "scene": {"turn_on"},
+            "script": {"turn_on"},
             "lock": {"lock", "unlock"},
             "alarm_control_panel": {
                 "alarm_arm_home",
@@ -361,6 +363,7 @@ class Integrations:
             "temperature",
             "hvac_mode",
             "position",
+            "option",
         }
         if set(service_data) - permitted_keys:
             raise IntegrationRequestFailed("Home Assistant action data is invalid")
@@ -552,6 +555,89 @@ class Integrations:
                 "Home Assistant energy state unavailable: " + ", ".join(failed)
             )
         return states
+
+    async def home_assistant_selected_states(
+        self, entity_ids: list[str] | tuple[str, ...]
+    ) -> dict[str, dict[str, Any]]:
+        """Read an explicit, bounded set of Home Assistant entities."""
+
+        unique = tuple(dict.fromkeys(entity_ids))
+        if not unique or len(unique) > 64:
+            raise IntegrationRequestFailed(
+                "Home Assistant state request must contain between 1 and 64 entities"
+            )
+        if any(not _ENTITY_ID.fullmatch(entity_id) for entity_id in unique):
+            raise IntegrationRequestFailed("Home Assistant entity ID is invalid")
+        results = await asyncio.gather(
+            *(self.home_assistant_state(entity_id) for entity_id in unique),
+            return_exceptions=True,
+        )
+        return {
+            entity_id: result
+            for entity_id, result in zip(unique, results, strict=True)
+            if isinstance(result, dict)
+        }
+
+    async def home_assistant_history(
+        self,
+        entity_ids: list[str] | tuple[str, ...],
+        *,
+        hours: int,
+    ) -> dict[str, list[dict[str, Any]]]:
+        """Read history for an explicit sensor set in one bounded request."""
+
+        unique = tuple(dict.fromkeys(entity_ids))
+        if not unique or len(unique) > 8:
+            raise IntegrationRequestFailed(
+                "Home Assistant history request must contain between 1 and 8 entities"
+            )
+        if not 1 <= hours <= 168:
+            raise IntegrationRequestFailed("Home Assistant history period is invalid")
+        if any(
+            not _ENTITY_ID.fullmatch(entity_id)
+            or not entity_id.startswith("sensor.")
+            for entity_id in unique
+        ):
+            raise IntegrationRequestFailed("Home Assistant history entity ID is invalid")
+        token = read_secret(self.settings.home_assistant_token_env)
+        if not token:
+            raise IntegrationUnavailable("Home Assistant token is not configured")
+        started_at = datetime.now(UTC) - timedelta(hours=hours)
+        period = started_at.isoformat().replace("+00:00", "Z")
+        try:
+            async with httpx.AsyncClient(
+                timeout=30, transport=self.transport, follow_redirects=False
+            ) as client:
+                response = await client.get(
+                    f"{self.settings.home_assistant_url}/api/history/period/{period}",
+                    headers={"Authorization": f"Bearer {token}"},
+                    params={
+                        "filter_entity_id": ",".join(unique),
+                        "minimal_response": "",
+                        "no_attributes": "",
+                    },
+                )
+                response.raise_for_status()
+                raw = response.json()
+        except (httpx.HTTPError, ValueError) as error:
+            raise IntegrationRequestFailed(
+                f"Home Assistant energy history request failed: {error}"
+            ) from error
+        if not isinstance(raw, list):
+            raise IntegrationRequestFailed(
+                "Home Assistant energy history response is invalid"
+            )
+        history: dict[str, list[dict[str, Any]]] = {entity_id: [] for entity_id in unique}
+        for series in raw:
+            if not isinstance(series, list):
+                continue
+            for state in series:
+                if not isinstance(state, dict):
+                    continue
+                entity_id = str(state.get("entity_id") or "")
+                if entity_id in history:
+                    history[entity_id].append(state)
+        return history
 
     async def diagnostics(self) -> dict[str, Any]:
         """Run read-only provider checks without returning URLs or credentials."""

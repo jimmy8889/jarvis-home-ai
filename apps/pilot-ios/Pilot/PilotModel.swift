@@ -25,6 +25,11 @@ final class PilotModel {
     var mediaError: String?
     var energy = EnergySnapshot.awaitingBackend
     var energyError: String?
+    var dashboard = DashboardSnapshot.unavailable
+    var dashboardError: String?
+    var dashboardActionInFlight = false
+    var musicBrowsePage: MusicBrowsePage?
+    var isBrowsingMusic = false
     var home: HomeProjection?
     var pendingHomeAction: HomeAction?
     var isLoadingHome = false
@@ -57,6 +62,7 @@ final class PilotModel {
         static let mediaCache = "pilot.cache.media.v1"
         static let homeCache = "pilot.cache.home.v1"
         static let energyCache = "pilot.cache.energy.v1"
+        static let dashboardCache = "pilot.cache.dashboard.v1"
         static let meetingsCache = "pilot.cache.meetings.v1"
         static let cacheDate = "pilot.cache.date.v1"
         static let pendingMeetings = "pilot.pendingMeetings.v1"
@@ -199,6 +205,7 @@ final class PilotModel {
             clientManifest = manifest
             await refreshHome(silent: true)
             await refreshEnergy(silent: true)
+            await refreshDashboard(silent: true)
             await refreshMeetings(silent: true)
             return true
         } catch {
@@ -232,6 +239,7 @@ final class PilotModel {
             if clientManifest == nil { clientManifest = try? await service.manifest() }
             await refreshHome(silent: true)
             await refreshEnergy(silent: true)
+            await refreshDashboard(silent: true)
             await refreshMeetings(silent: true)
             return true
         } catch {
@@ -270,6 +278,18 @@ final class PilotModel {
                     detail: energyError
                 )
             }
+        }
+    }
+
+    func refreshDashboard(silent: Bool = false) async {
+        guard hasActiveConfiguration else { return }
+        do {
+            dashboard = try await api().dashboard()
+            dashboardError = dashboard.status == "unavailable"
+                ? "Live dashboard data is unavailable." : nil
+            cache(dashboard: dashboard)
+        } catch {
+            dashboardError = Self.friendlyMessage(for: error)
         }
     }
 
@@ -391,11 +411,13 @@ final class PilotModel {
             _ = await refresh(silent: true)
         } else if normalized.contains("home") || normalized.contains("entity") {
             await refreshHome(silent: true)
+            await refreshDashboard(silent: true)
             if normalized.contains("energy") { await refreshEnergy(silent: true) }
         } else if normalized.contains("meeting") {
             await refreshMeetings(silent: true)
         } else if normalized.contains("energy") {
             await refreshEnergy(silent: true)
+            await refreshDashboard(silent: true)
         }
     }
 
@@ -521,6 +543,7 @@ final class PilotModel {
         guard !normalized.isEmpty else {
             searchResults = []
             lastSearchQuery = ""
+            musicBrowsePage = nil
             return
         }
         lastSearchQuery = normalized
@@ -532,6 +555,38 @@ final class PilotModel {
         } catch {
             searchResults = []
             mediaError = Self.friendlyMessage(for: error)
+        }
+    }
+
+    func browse(_ result: MusicSearchResult) async {
+        guard [.artist, .album, .playlist].contains(result.kind) else {
+            await command("play_media", mediaURI: result.uri, operationID: result.id)
+            return
+        }
+        isBrowsingMusic = true
+        defer { isBrowsingMusic = false }
+        do {
+            musicBrowsePage = try await api().browse(result)
+            mediaError = nil
+        } catch {
+            musicBrowsePage = nil
+            mediaError = Self.friendlyMessage(for: error)
+        }
+    }
+
+    func dismissMusicBrowse() {
+        musicBrowsePage = nil
+    }
+
+    func dashboardAction(_ action: String, value: String) async {
+        dashboardActionInFlight = true
+        defer { dashboardActionInFlight = false }
+        do {
+            try await api().dashboardAction(action, value: value)
+            await refreshDashboard(silent: true)
+            dashboardError = nil
+        } catch {
+            dashboardError = Self.friendlyMessage(for: error)
         }
     }
 
@@ -772,6 +827,12 @@ final class PilotModel {
             energy = cached
         }
         if
+            let data = defaults.data(forKey: StorageKey.dashboardCache),
+            let cached = try? decoder.decode(DashboardSnapshot.self, from: data)
+        {
+            dashboard = cached
+        }
+        if
             let data = defaults.data(forKey: StorageKey.meetingsCache),
             let cached = try? decoder.decode([PilotMeeting].self, from: data)
         {
@@ -813,6 +874,13 @@ final class PilotModel {
     private func cache(energy: EnergySnapshot) {
         if let data = try? JSONEncoder().encode(energy) {
             UserDefaults.standard.set(data, forKey: StorageKey.energyCache)
+        }
+        markCacheUpdated()
+    }
+
+    private func cache(dashboard: DashboardSnapshot) {
+        if let data = try? JSONEncoder().encode(dashboard) {
+            UserDefaults.standard.set(data, forKey: StorageKey.dashboardCache)
         }
         markCacheUpdated()
     }
@@ -945,6 +1013,7 @@ final class PilotModel {
                 name: "Office",
                 responsePlayerID: officePlayer.id,
                 defaultMusicPlayerID: officePlayer.id,
+                musicEnabled: true,
                 players: [officePlayer]
             ),
             PilotRoom(
@@ -952,6 +1021,7 @@ final class PilotModel {
                 name: "Media Room",
                 responsePlayerID: mediaPlayer.id,
                 defaultMusicPlayerID: mediaPlayer.id,
+                musicEnabled: true,
                 players: [mediaPlayer]
             ),
         ]
@@ -998,6 +1068,47 @@ final class PilotModel {
             homeLoadWatts: 3_510,
             observedAt: .now,
             detail: nil
+        )
+        model.dashboard = DashboardSnapshot(
+            schemaVersion: "pilot.dashboard.v1",
+            generatedAt: ISO8601DateFormatter().string(from: .now),
+            status: "ok",
+            power: DashboardPower(
+                solarWatts: 8_820, gridWatts: -15, batteryWatts: -3_110,
+                batteryStateOfCharge: 77, homeLoadWatts: 5_610,
+                serverRackWatts: 640, vehicleWatts: 4_540,
+                directions: ["grid": "idle", "battery": "charging"],
+                flowActive: ["solar": true, "grid": false, "battery": true,
+                             "home": true, "server_rack": true, "vehicle": true]
+            ),
+            daily: DashboardDaily(
+                solarGeneratedKWh: 66.3, homeUsedKWh: 32.9, gridExportedKWh: 5.5
+            ),
+            vehicle: DashboardVehicle(
+                name: "Jarvis", connected: true, charging: true,
+                powerWatts: 4_540, stateOfCharge: 63
+            ),
+            tariff: DashboardTariff(
+                importCentsPerKWh: 17.4, feedInCentsPerKWh: 8.2,
+                feedInForecast: []
+            ),
+            temperatures: [
+                DashboardTemperature(id: "office", label: "Office", temperatureCelsius: 22.4),
+                DashboardTemperature(id: "outdoor", label: "Outdoor", temperatureCelsius: 24.1),
+                DashboardTemperature(id: "bedroom", label: "Bedroom", temperatureCelsius: 21.8),
+            ],
+            history: .empty,
+            weather: DashboardWeather(
+                status: "ok", condition: "partlycloudy", temperatureCelsius: 24.1,
+                apparentTemperatureCelsius: 23.6, humidityPercent: 58,
+                windSpeed: 13, windSpeedUnit: "km/h", forecast: []
+            ),
+            controls: DashboardControls(
+                chargingMode: DashboardChargingMode(
+                    value: "Solar", options: ["Grid", "Solar"], available: true
+                ),
+                mediaRoomMode: DashboardMediaRoomMode(available: true)
+            )
         )
         model.messages = [
             ChatMessage(

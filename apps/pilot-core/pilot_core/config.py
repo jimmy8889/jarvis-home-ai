@@ -44,6 +44,24 @@ class IntegrationSettings:
     energy_battery_power_entity_id: str = ""
     energy_battery_soc_entity_id: str = ""
     energy_home_load_entity_id: str = ""
+    energy_server_power_entity_id: str = ""
+    energy_vehicle_connected_entity_id: str = ""
+    energy_vehicle_power_entity_id: str = ""
+    energy_vehicle_soc_entity_id: str = ""
+    energy_solar_today_entity_ids: tuple[str, ...] = ()
+    energy_home_today_entity_id: str = ""
+    energy_grid_export_today_entity_id: str = ""
+    energy_history_hours: int = 24
+    amber_import_price_entity_id: str = ""
+    amber_feed_in_price_entity_id: str = ""
+    amber_feed_in_forecast_entity_id: str = ""
+    tesla_charging_mode_entity_id: str = ""
+    media_room_mode_on_script_id: str = ""
+    media_room_mode_off_script_id: str = ""
+    temperature_office_entity_id: str = ""
+    temperature_tv_room_entity_id: str = ""
+    temperature_bedroom_entity_id: str = ""
+    temperature_media_room_entity_id: str = ""
     home_catalog_sync_interval_seconds: int = 300
     home_catalog_stale_after_seconds: int = 900
     home_catalog_max_entities: int = 20_000
@@ -85,6 +103,7 @@ class Room:
     agent_url: str = ""
     assist_satellite_entity_id: str = ""
     home_area_ids: tuple[str, ...] = ()
+    music_enabled: bool = True
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -96,6 +115,7 @@ class Room:
             "agent_url": self.agent_url,
             "assist_satellite_entity_id": self.assist_satellite_entity_id,
             "home_area_ids": list(self.home_area_ids or (self.id,)),
+            "music_enabled": self.music_enabled,
         }
 
 
@@ -141,6 +161,14 @@ def _require_nonempty(value: object, field: str) -> str:
     return value.strip()
 
 
+def _parse_string_tuple(value: object, field: str) -> tuple[str, ...]:
+    if not isinstance(value, list) or not all(
+        isinstance(item, str) and item.strip() for item in value
+    ):
+        raise ValueError(f"{field} must be an array of strings")
+    return tuple(dict.fromkeys(item.strip() for item in value))
+
+
 def _parse_room(value: dict[str, object]) -> Room:
     room_id = _require_nonempty(value.get("id"), "room.id")
     area_values = value.get("home_area_ids", [room_id])
@@ -166,6 +194,7 @@ def _parse_room(value: dict[str, object]) -> Room:
             value.get("assist_satellite_entity_id", "")
         ).strip(),
         home_area_ids=home_area_ids,
+        music_enabled=bool(value.get("music_enabled", True)),
     )
 
 
@@ -351,6 +380,59 @@ def load_settings(path: str | Path) -> Settings:
         energy_home_load_entity_id=str(
             integration_values.get("energy_home_load_entity_id", "")
         ).strip(),
+        energy_server_power_entity_id=str(
+            integration_values.get("energy_server_power_entity_id", "")
+        ).strip(),
+        energy_vehicle_connected_entity_id=str(
+            integration_values.get("energy_vehicle_connected_entity_id", "")
+        ).strip(),
+        energy_vehicle_power_entity_id=str(
+            integration_values.get("energy_vehicle_power_entity_id", "")
+        ).strip(),
+        energy_vehicle_soc_entity_id=str(
+            integration_values.get("energy_vehicle_soc_entity_id", "")
+        ).strip(),
+        energy_solar_today_entity_ids=_parse_string_tuple(
+            integration_values.get("energy_solar_today_entity_ids", []),
+            "integrations.energy_solar_today_entity_ids",
+        ),
+        energy_home_today_entity_id=str(
+            integration_values.get("energy_home_today_entity_id", "")
+        ).strip(),
+        energy_grid_export_today_entity_id=str(
+            integration_values.get("energy_grid_export_today_entity_id", "")
+        ).strip(),
+        energy_history_hours=int(integration_values.get("energy_history_hours", 24)),
+        amber_import_price_entity_id=str(
+            integration_values.get("amber_import_price_entity_id", "")
+        ).strip(),
+        amber_feed_in_price_entity_id=str(
+            integration_values.get("amber_feed_in_price_entity_id", "")
+        ).strip(),
+        amber_feed_in_forecast_entity_id=str(
+            integration_values.get("amber_feed_in_forecast_entity_id", "")
+        ).strip(),
+        tesla_charging_mode_entity_id=str(
+            integration_values.get("tesla_charging_mode_entity_id", "")
+        ).strip(),
+        media_room_mode_on_script_id=str(
+            integration_values.get("media_room_mode_on_script_id", "")
+        ).strip(),
+        media_room_mode_off_script_id=str(
+            integration_values.get("media_room_mode_off_script_id", "")
+        ).strip(),
+        temperature_office_entity_id=str(
+            integration_values.get("temperature_office_entity_id", "")
+        ).strip(),
+        temperature_tv_room_entity_id=str(
+            integration_values.get("temperature_tv_room_entity_id", "")
+        ).strip(),
+        temperature_bedroom_entity_id=str(
+            integration_values.get("temperature_bedroom_entity_id", "")
+        ).strip(),
+        temperature_media_room_entity_id=str(
+            integration_values.get("temperature_media_room_entity_id", "")
+        ).strip(),
         home_catalog_sync_interval_seconds=int(
             integration_values.get("home_catalog_sync_interval_seconds", 300)
         ),
@@ -466,6 +548,22 @@ def load_settings(path: str | Path) -> Settings:
         ("energy_battery_power_entity_id", integrations.energy_battery_power_entity_id),
         ("energy_battery_soc_entity_id", integrations.energy_battery_soc_entity_id),
         ("energy_home_load_entity_id", integrations.energy_home_load_entity_id),
+        ("energy_server_power_entity_id", integrations.energy_server_power_entity_id),
+        ("energy_vehicle_power_entity_id", integrations.energy_vehicle_power_entity_id),
+        ("energy_vehicle_soc_entity_id", integrations.energy_vehicle_soc_entity_id),
+        ("energy_home_today_entity_id", integrations.energy_home_today_entity_id),
+        ("energy_grid_export_today_entity_id", integrations.energy_grid_export_today_entity_id),
+        ("amber_import_price_entity_id", integrations.amber_import_price_entity_id),
+        ("amber_feed_in_price_entity_id", integrations.amber_feed_in_price_entity_id),
+        ("amber_feed_in_forecast_entity_id", integrations.amber_feed_in_forecast_entity_id),
+        ("temperature_office_entity_id", integrations.temperature_office_entity_id),
+        ("temperature_tv_room_entity_id", integrations.temperature_tv_room_entity_id),
+        ("temperature_bedroom_entity_id", integrations.temperature_bedroom_entity_id),
+        ("temperature_media_room_entity_id", integrations.temperature_media_room_entity_id),
+        *(
+            ("energy_solar_today_entity_ids", entity_id)
+            for entity_id in integrations.energy_solar_today_entity_ids
+        ),
     ):
         if entity_id and not entity_id.startswith("sensor."):
             raise ValueError(f"integrations.{setting_name} must be a sensor entity")
@@ -473,6 +571,28 @@ def load_settings(path: str | Path) -> Settings:
         raise ValueError(
             "integrations.temperature_history_hours must be between 1 and 168"
         )
+    if not 1 <= integrations.energy_history_hours <= 168:
+        raise ValueError("integrations.energy_history_hours must be between 1 and 168")
+    if (
+        integrations.energy_vehicle_connected_entity_id
+        and not integrations.energy_vehicle_connected_entity_id.startswith("binary_sensor.")
+    ):
+        raise ValueError(
+            "integrations.energy_vehicle_connected_entity_id must be a binary_sensor entity"
+        )
+    if (
+        integrations.tesla_charging_mode_entity_id
+        and not integrations.tesla_charging_mode_entity_id.startswith("input_select.")
+    ):
+        raise ValueError(
+            "integrations.tesla_charging_mode_entity_id must be an input_select entity"
+        )
+    for setting_name, entity_id in (
+        ("media_room_mode_on_script_id", integrations.media_room_mode_on_script_id),
+        ("media_room_mode_off_script_id", integrations.media_room_mode_off_script_id),
+    ):
+        if entity_id and not entity_id.startswith("script."):
+            raise ValueError(f"integrations.{setting_name} must be a script entity")
     if integrations.tts_provider == "home_assistant":
         if not integrations.home_assistant_url:
             raise ValueError(

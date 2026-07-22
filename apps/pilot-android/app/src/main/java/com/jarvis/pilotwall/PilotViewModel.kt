@@ -324,6 +324,17 @@ class PilotViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun dashboardAction(action: String, value: String) {
+        val token = preferences.token() ?: return
+        viewModelScope.launch {
+            _state.update { it.copy(actionInFlight = true, error = null) }
+            runCatching { PilotCoreClient(_state.value.config, token).dashboardAction(action, value) }
+                .onSuccess { refresh() }
+                .onFailure { error -> _state.update { it.copy(error = friendlyError(error)) } }
+            _state.update { it.copy(actionInFlight = false) }
+        }
+    }
+
     fun transferMedia(targetRoomId: String) {
         val source = _state.value.snapshot?.media?.players?.firstOrNull {
             it.player.roomId == _state.value.selectedRoom?.id &&

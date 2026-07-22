@@ -18,9 +18,15 @@ class PilotCoreClient(
     suspend fun snapshot(): PilotSnapshot = coroutineScope {
         val media = async { request("v1/devices/${config.deviceId}/media") }
         val surface = async { request("v1/devices/${config.deviceId}/surface") }
+        val dashboard = async {
+            runCatching {
+                PilotJson.dashboard(request("v1/devices/${config.deviceId}/dashboard"))
+            }.getOrNull()
+        }
         PilotSnapshot(
             media = PilotJson.media(media.await()),
             surface = PilotJson.surface(surface.await()),
+            dashboard = dashboard.await(),
         )
     }
 
@@ -68,6 +74,11 @@ class PilotCoreClient(
             command.source?.let { put("source", it) }
         }
         request("v1/devices/${config.deviceId}/media", "POST", body)
+    }
+
+    suspend fun dashboardAction(action: String, value: String) {
+        val body = JSONObject().put("action", action).put("value", value)
+        request("v1/devices/${config.deviceId}/dashboard/actions", "POST", body)
     }
 
     suspend fun search(query: String): List<MusicSearchResult> {

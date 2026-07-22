@@ -8,6 +8,81 @@ import org.junit.Test
 
 class PilotJsonTest {
     @Test
+    fun parsesHouseDashboardAndBedroomMusicPolicy() {
+        val dashboard = PilotJson.dashboard(
+            JSONObject(
+                """
+                {
+                  "status": "ok",
+                  "power": {
+                    "solar_w": 8820, "grid_w": 15, "battery_w": -3110,
+                    "battery_soc_percent": 77, "home_load_w": 5610,
+                    "server_rack_w": 312,
+                    "directions": {"grid": "exporting", "battery": "charging"},
+                    "flow_active": {"grid": false}
+                  },
+                  "daily": {
+                    "solar_generated_kwh": 66.3,
+                    "home_used_kwh": 32.9,
+                    "grid_exported_kwh": 5.5
+                  },
+                  "vehicle": {
+                    "connected": true, "charging": true,
+                    "power_w": 4540, "state_of_charge_percent": 64
+                  },
+                  "temperatures": [
+                    {"id": "bedroom", "label": "Bedroom", "temperature_c": 23.4}
+                  ],
+                  "history": {"series": [{
+                    "id": "solar", "label": "Solar", "color": "#F8C84A",
+                    "points": [{"at": "2026-07-22T03:00:00Z", "value": 8820}]
+                  }]},
+                  "weather": {
+                    "condition": "sunny", "temperature_c": 24,
+                    "forecast": [{
+                      "at": "2026-07-23T00:00:00Z", "condition": "partlycloudy",
+                      "high_temperature_c": 26, "low_temperature_c": 15,
+                      "precipitation_probability": 10
+                    }]
+                  },
+                  "tariff": {
+                    "import_cents_per_kwh": 28.5, "feed_in_cents_per_kwh": 8.2,
+                    "feed_in_forecast": [{"at": "2026-07-22T04:00:00Z", "cents_per_kwh": 11.3}]
+                  },
+                  "controls": {
+                    "tesla_charging_mode": {"value": "Solar", "options": ["Grid", "Solar"]},
+                    "media_room_mode": {"available": true}
+                  }
+                }
+                """.trimIndent(),
+            ),
+        )
+
+        assertFalse(dashboard.power.gridFlowActive)
+        assertEquals("charging", dashboard.power.batteryDirection)
+        assertEquals(312.0, dashboard.power.serverRackW!!, 0.01)
+        assertTrue(dashboard.vehicle.connected == true)
+        assertTrue(dashboard.vehicle.charging)
+        assertEquals("Bedroom", dashboard.temperatures.single().label)
+        assertEquals(8820.0, dashboard.history.single().points.single().value, 0.01)
+        assertEquals(26.0, dashboard.weather.forecast.single().highC!!, 0.01)
+        assertEquals("Solar", dashboard.controls.chargingMode)
+        assertTrue(dashboard.controls.mediaRoomAvailable)
+
+        val media = PilotJson.media(
+            JSONObject(
+                """
+                {"rooms": [{
+                  "id": "bedroom", "name": "Bedroom", "music_enabled": false,
+                  "players": []
+                }], "media": {"players": {}}}
+                """.trimIndent(),
+            ),
+        )
+        assertFalse(media.rooms.single().musicEnabled)
+    }
+
+    @Test
     fun parsesDeviceScopedMediaEnvelope() {
         val snapshot = PilotJson.media(
             JSONObject(

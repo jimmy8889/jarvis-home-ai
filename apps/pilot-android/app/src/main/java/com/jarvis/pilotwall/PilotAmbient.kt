@@ -1,7 +1,9 @@
 package com.jarvis.pilotwall
 
+import android.app.Activity
 import android.os.SystemClock
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -17,6 +19,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.produceState
@@ -26,6 +29,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -40,12 +44,23 @@ fun PilotIdleGuard(
     content: @Composable () -> Unit,
 ) {
     var lastInteraction by remember { mutableLongStateOf(SystemClock.elapsedRealtime()) }
-    val ambient by produceState(false, state.config.ambientAfterMinutes, state.assistantPhase) {
+    val dimmed by produceState(false, state.assistantPhase) {
         while (true) {
             val elapsed = SystemClock.elapsedRealtime() - lastInteraction
             value = state.assistantPhase == AssistantPhase.Idle &&
-                elapsed >= state.config.ambientAfterMinutes * 60_000L
-            delay(5_000)
+                elapsed >= 45_000L
+            delay(1_000)
+        }
+    }
+    val activity = LocalContext.current as? Activity
+    DisposableEffect(dimmed, activity) {
+        val window = activity?.window
+        val previous = window?.attributes?.screenBrightness ?: -1f
+        window?.let { it.attributes = it.attributes.apply {
+            screenBrightness = if (dimmed) 0.03f else -1f
+        } }
+        onDispose {
+            window?.let { it.attributes = it.attributes.apply { screenBrightness = previous } }
         }
     }
     Box(
@@ -60,7 +75,16 @@ fun PilotIdleGuard(
                 }
             },
     ) {
-        if (ambient) PilotAmbientSurface(state) else content()
+        content()
+        if (dimmed) {
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .background(androidx.compose.ui.graphics.Color.Black.copy(alpha = .58f))
+                    .semantics { contentDescription = "Display dimmed. Tap to wake." }
+                    .clickable { lastInteraction = SystemClock.elapsedRealtime() },
+            )
+        }
     }
 }
 

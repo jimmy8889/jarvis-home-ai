@@ -6,9 +6,11 @@ permanently mounted Android tablet.
 ## Product capabilities
 
 - Adaptive tablet/phone navigation and a spacious 1024×600 wall layout.
-- Home overview with freshness, rooms, active media and an animated
-  solar/grid/battery/home energy-flow diagram.
-- Room-aware media state and playback context.
+- Continuous Flow, History, Daily and Climate monitoring with the shared James
+  House scene, directional solar/grid/battery/Tesla/server-rack paths, daily
+  totals, 24-hour chart, Amber pricing, weather and five room temperatures.
+- Bedroom music is intentionally hidden. The mounted tablet is a home monitor
+  and controller, not a playback endpoint.
 - Server-curated Home Assistant presentation with purpose-built lighting,
   climate, cover, fan, lock, scene, switch, sensor and contact tiles. Core's
   inclusion policy, canonical IDs, duplicate suppression, display names,
@@ -26,8 +28,10 @@ permanently mounted Android tablet.
 - Secure device-token storage using Android Keystore AES-GCM.
 - Reconnect-safe event snapshots and cursor-based long polling when advertised
   by Core, with periodic polling retained as a heartbeat/fallback.
-- Automatic day/night palette, configurable ambient clock/energy/now-playing
-  mode, kiosk system-bar behavior, keep-awake control and burn-in offsets.
+- Automatic day/night palette, kiosk system-bar behavior and keep-awake control.
+  After 45 seconds without interaction brightness drops to 3%; the first touch
+  restores it immediately. The dashboard remains visible rather than entering
+  an ambient screensaver.
 - Accessible descriptions, large touch targets, adaptive 1024×600 layouts,
   canonical contract fixtures, Compose previews and screenshot-test scaffolding.
 
@@ -71,8 +75,11 @@ Gradle wrapper and dependency versions are included for reproducible CI builds.
 | Feature | Device-scoped endpoint |
 |---|---|
 | Rooms and media state | `GET /v1/devices/{id}/media` |
+| Shared monitoring | `GET /v1/devices/{id}/dashboard` |
+| Tesla and Movie Mode | `POST /v1/devices/{id}/dashboard/actions` |
 | Media control | `POST /v1/devices/{id}/media` |
 | Music search | `POST /v1/devices/{id}/media/search` |
+| Music item detail | `POST /v1/devices/{id}/media/browse` |
 | Assistant chat | `POST /v1/devices/{id}/assistant` |
 | Energy and now playing | `GET /v1/devices/{id}/surface` |
 | Client manifest | `GET /v1/devices/{id}/manifest` |

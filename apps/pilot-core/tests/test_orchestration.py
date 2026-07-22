@@ -67,6 +67,32 @@ class OrchestrationTests(unittest.TestCase):
         self.assertEqual(player.id, "office-music")
         self.assertEqual(player.external_id, "pilot-office")
 
+    def test_room_music_policy_fails_closed(self) -> None:
+        config = settings()
+        room = config.rooms[0]
+        disabled = Settings(
+            server=config.server,
+            integrations=config.integrations,
+            rooms=(
+                Room(
+                    id=room.id,
+                    name=room.name,
+                    response_player_id=room.response_player_id,
+                    default_music_player_id=room.default_music_player_id,
+                    default_device_id=room.default_device_id,
+                    music_enabled=False,
+                ),
+            ),
+            players=config.players,
+        )
+        store = Store(":memory:", disabled)
+        try:
+            orchestrator = RoomOrchestrator(Registry.from_settings(disabled), store)
+            with self.assertRaisesRegex(ResolutionError, "music is disabled"):
+                orchestrator.music_player("office")
+        finally:
+            store.close()
+
     def test_connected_capable_device_is_preferred_deterministically(self) -> None:
         selected = self.orchestrator.device(
             "office", {"office-primary"}, capability="audio"

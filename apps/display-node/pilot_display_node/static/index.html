@@ -18,114 +18,70 @@
       </header>
 
       <div id="pages" class="pages">
-        <section class="page active" data-page="home" aria-label="Overview">
-          <div class="overview-clock">
-            <time id="clock">--:--</time>
-            <div id="date">Starting…</div>
+        <section class="page active" data-page="home" aria-label="Live energy flow">
+          <div class="energy-heading">
+            <div><span class="eyebrow">James House</span><h1>Energy flow</h1></div>
+            <div class="header-clock"><time id="clock">--:--</time><span id="date">Starting…</span></div>
+            <span id="energy-state" class="data-state">Waiting</span>
           </div>
-          <div class="overview-panels">
-            <article class="overview-card">
-              <span class="eyebrow">Energy now</span>
-              <div class="quick-energy">
-                <div><span>Solar</span><strong id="home-solar">—</strong></div>
-                <div><span>Home</span><strong id="home-load">—</strong></div>
-                <div><span>Battery</span><strong id="home-soc">—</strong></div>
-              </div>
-            </article>
-            <article class="overview-card playing-summary">
-              <span class="eyebrow">Now playing</span>
-              <strong id="home-track">Nothing playing</strong>
-              <span id="home-artist">Pilot network is quiet</span>
-              <small id="home-player">—</small>
-            </article>
+          <div class="daily-strip" aria-label="Today's energy">
+            <div><span>Generated</span><strong id="daily-generated">—</strong></div>
+            <div><span>Home used</span><strong id="daily-home">—</strong></div>
+            <div><span>Exported</span><strong id="daily-export">—</strong></div>
+          </div>
+          <div id="energy-flow" class="energy-flow house-flow" role="img" aria-label="Waiting for live energy flow">
+            <img class="energy-house" src="/assets/house-energy.png" alt="James House with solar, Tesla and grid">
+            <svg class="flow-lines" viewBox="0 0 1000 430" aria-hidden="true">
+              <defs>
+                <linearGradient id="solar-gradient"><stop stop-color="#ffd35d"></stop><stop offset="1" stop-color="#ff9f43"></stop></linearGradient>
+                <linearGradient id="grid-gradient"><stop stop-color="#4bb8ff"></stop><stop offset="1" stop-color="#697dff"></stop></linearGradient>
+                <linearGradient id="battery-gradient"><stop stop-color="#00e6be"></stop><stop offset="1" stop-color="#3ba7ff"></stop></linearGradient>
+                <linearGradient id="vehicle-gradient"><stop stop-color="#ff5468"></stop><stop offset="1" stop-color="#ff9b62"></stop></linearGradient>
+              </defs>
+              <path class="flow-base" d="M500 60 C500 105 500 125 500 156"></path>
+              <path class="flow-base" d="M875 120 C780 120 720 160 647 205"></path>
+              <path class="flow-base" d="M780 353 C700 344 655 316 610 282"></path>
+              <path class="flow-base" d="M190 340 C280 330 344 300 405 270"></path>
+              <path class="flow-base" d="M832 276 C745 275 690 266 618 252"></path>
+              <path id="flow-solar" class="flow-active solar-flow" d="M500 60 C500 105 500 125 500 156"></path>
+              <path id="flow-grid" class="flow-active grid-flow" d="M875 120 C780 120 720 160 647 205"></path>
+              <path id="flow-battery" class="flow-active battery-flow" d="M780 353 C700 344 655 316 610 282"></path>
+              <path id="flow-vehicle" class="flow-active vehicle-flow" d="M610 282 C520 310 350 338 190 340"></path>
+              <path id="flow-server" class="flow-active server-flow" d="M618 252 C690 266 745 275 832 276"></path>
+              <g id="particles-solar" class="flow-particles solar-particles"><circle r="4"><animateMotion dur="1.5s" repeatCount="indefinite" path="M500 60 C500 105 500 125 500 156"></animateMotion></circle></g>
+              <g id="particles-grid" class="flow-particles grid-particles"><g class="particles-forward"><circle r="4"><animateMotion dur="1.6s" repeatCount="indefinite" path="M875 120 C780 120 720 160 647 205"></animateMotion></circle></g><g class="particles-reverse"><circle r="4"><animateMotion dur="1.6s" repeatCount="indefinite" path="M647 205 C720 160 780 120 875 120"></animateMotion></circle></g></g>
+              <g id="particles-battery" class="flow-particles battery-particles"><g class="particles-forward"><circle r="5"><animateMotion dur="1.35s" repeatCount="indefinite" path="M780 353 C700 344 655 316 610 282"></animateMotion></circle></g><g class="particles-reverse"><circle r="5"><animateMotion dur="1.35s" repeatCount="indefinite" path="M610 282 C655 316 700 344 780 353"></animateMotion></circle></g></g>
+              <g id="particles-vehicle" class="flow-particles vehicle-particles"><circle r="4"><animateMotion dur="1.3s" repeatCount="indefinite" path="M610 282 C520 310 350 338 190 340"></animateMotion></circle></g>
+              <g id="particles-server" class="flow-particles server-particles"><circle r="4"><animateMotion dur="1.4s" repeatCount="indefinite" path="M618 252 C690 266 745 275 832 276"></animateMotion></circle></g>
+            </svg>
+            <article id="node-solar" class="flow-node solar-node"><span class="node-icon">☀</span><div><small>PV</small><strong id="energy-solar">—</strong></div></article>
+            <article id="node-grid" class="flow-node grid-node"><span class="node-icon">⇄</span><div><small>Grid</small><strong id="energy-grid">—</strong><em id="energy-grid-direction">Waiting</em></div></article>
+            <article id="node-home" class="flow-node home-node"><span class="node-icon">⌂</span><div><small>Home load</small><strong id="energy-home">—</strong></div></article>
+            <article id="node-battery" class="flow-node battery-node"><span class="node-icon">▰</span><div><small>Battery</small><strong id="energy-battery">—</strong><em id="energy-battery-direction">Waiting</em></div><div class="battery-soc"><span id="energy-soc">—</span><div class="soc-track"><i id="soc-fill"></i></div></div></article>
+            <article id="node-vehicle" class="flow-node vehicle-node"><span class="node-icon">◆</span><div><small>Jarvis</small><strong id="energy-vehicle">—</strong><em id="vehicle-state">Away</em></div></article>
+            <article id="node-server" class="flow-node server-node"><span class="server-rack-icon" aria-hidden="true"><i></i><i></i><i></i></span><div><small>Server rack</small><strong id="energy-server">—</strong></div></article>
           </div>
         </section>
 
-        <section class="page" data-page="energy" aria-label="Energy">
-          <div class="page-title">
-            <div>
-              <span class="eyebrow">Home Assistant</span>
-              <h1>Energy system</h1>
-            </div>
-            <span id="energy-state" class="data-state">Waiting</span>
-          </div>
-          <div id="energy-flow" class="energy-flow" role="img" aria-label="Waiting for live energy flow">
-            <svg class="flow-lines" viewBox="0 0 920 310" aria-hidden="true">
-              <defs>
-                <linearGradient id="solar-gradient" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0" stop-color="#ffd35d"></stop>
-                  <stop offset="1" stop-color="#ff9f43"></stop>
-                </linearGradient>
-                <linearGradient id="grid-gradient" x1="0" y1="0" x2="1" y2="0">
-                  <stop offset="0" stop-color="#4bb8ff"></stop>
-                  <stop offset="1" stop-color="#697dff"></stop>
-                </linearGradient>
-                <linearGradient id="battery-gradient" x1="1" y1="0" x2="0" y2="0">
-                  <stop offset="0" stop-color="#00e6be"></stop>
-                  <stop offset="1" stop-color="#3ba7ff"></stop>
-                </linearGradient>
-              </defs>
-              <path class="flow-base" d="M460 88 C460 112 460 124 460 148"></path>
-              <path class="flow-base" d="M204 207 C282 207 330 207 382 207"></path>
-              <path class="flow-base" d="M716 207 C638 207 590 207 538 207"></path>
-              <path id="flow-solar" class="flow-active solar-flow" pathLength="100" d="M460 88 C460 112 460 124 460 148"></path>
-              <path id="flow-grid" class="flow-active grid-flow" pathLength="100" d="M204 207 C282 207 330 207 382 207"></path>
-              <path id="flow-battery" class="flow-active battery-flow" pathLength="100" d="M716 207 C638 207 590 207 538 207"></path>
-              <g id="particles-solar" class="flow-particles solar-particles">
-                <circle r="5"><animateMotion dur="1.5s" begin="0s" repeatCount="indefinite" path="M460 88 C460 112 460 124 460 148"></animateMotion></circle>
-                <circle r="3"><animateMotion dur="1.5s" begin="-0.75s" repeatCount="indefinite" path="M460 88 C460 112 460 124 460 148"></animateMotion></circle>
-              </g>
-              <g id="particles-grid" class="flow-particles grid-particles">
-                <g class="particles-forward">
-                  <circle r="5"><animateMotion dur="1.6s" begin="0s" repeatCount="indefinite" path="M204 207 C282 207 330 207 382 207"></animateMotion></circle>
-                  <circle r="3"><animateMotion dur="1.6s" begin="-0.8s" repeatCount="indefinite" path="M204 207 C282 207 330 207 382 207"></animateMotion></circle>
-                </g>
-                <g class="particles-reverse">
-                  <circle r="5"><animateMotion dur="1.6s" begin="0s" repeatCount="indefinite" path="M382 207 C330 207 282 207 204 207"></animateMotion></circle>
-                  <circle r="3"><animateMotion dur="1.6s" begin="-0.8s" repeatCount="indefinite" path="M382 207 C330 207 282 207 204 207"></animateMotion></circle>
-                </g>
-              </g>
-              <g id="particles-battery" class="flow-particles battery-particles">
-                <g class="particles-forward">
-                  <circle r="6"><animateMotion dur="1.35s" begin="0s" repeatCount="indefinite" path="M716 207 C638 207 590 207 538 207"></animateMotion></circle>
-                  <circle r="4"><animateMotion dur="1.35s" begin="-0.675s" repeatCount="indefinite" path="M716 207 C638 207 590 207 538 207"></animateMotion></circle>
-                </g>
-                <g class="particles-reverse">
-                  <circle r="6"><animateMotion dur="1.35s" begin="0s" repeatCount="indefinite" path="M538 207 C590 207 638 207 716 207"></animateMotion></circle>
-                  <circle r="4"><animateMotion dur="1.35s" begin="-0.675s" repeatCount="indefinite" path="M538 207 C590 207 638 207 716 207"></animateMotion></circle>
-                </g>
-              </g>
-            </svg>
+        <section class="page" data-page="history" aria-label="Energy history">
+          <div class="page-title"><div><span class="eyebrow">Last 24 hours</span><h1>Power history</h1></div><span class="data-state online">Live</span></div>
+          <article class="chart-card"><svg id="energy-chart" viewBox="0 0 960 380" role="img" aria-label="Home, battery and solar power history"></svg><div id="chart-legend" class="chart-legend"></div></article>
+        </section>
 
-            <article id="node-solar" class="flow-node solar-node">
-              <span class="node-icon">☀</span>
-              <div><small>Solar</small><strong id="energy-solar">—</strong></div>
-            </article>
-            <article id="node-grid" class="flow-node grid-node">
-              <span class="node-icon">⇄</span>
-              <div>
-                <small>Grid</small>
-                <strong id="energy-grid">—</strong>
-                <em id="energy-grid-direction">Waiting</em>
-              </div>
-            </article>
-            <article id="node-home" class="flow-node home-node">
-              <span class="node-icon">⌂</span>
-              <div><small>Home load</small><strong id="energy-home">—</strong></div>
-            </article>
-            <article id="node-battery" class="flow-node battery-node">
-              <span class="node-icon">▰</span>
-              <div>
-                <small>Battery</small>
-                <strong id="energy-battery">—</strong>
-                <em id="energy-battery-direction">Waiting</em>
-              </div>
-              <div class="battery-soc">
-                <span id="energy-soc">—</span>
-                <div class="soc-track"><i id="soc-fill"></i></div>
-              </div>
-            </article>
+        <section class="page" data-page="daily" aria-label="Daily energy and vehicle">
+          <div class="page-title"><div><span class="eyebrow">Today</span><h1>Energy &amp; Jarvis</h1></div></div>
+          <div class="daily-grid">
+            <article class="hero-stat generated"><span>Solar generated</span><strong id="daily-generated-large">—</strong><small>Across all three arrays</small></article>
+            <article class="hero-stat used"><span>Home used</span><strong id="daily-home-large">—</strong><small>Whole-house consumption</small></article>
+            <article class="hero-stat exported"><span>Grid exported</span><strong id="daily-export-large">—</strong><small>Sent to the network</small></article>
+            <article class="vehicle-card"><span class="eyebrow">Tesla · Jarvis</span><div class="vehicle-summary"><strong id="vehicle-soc">—</strong><span id="vehicle-connected">Checking connection</span></div><div class="segmented"><button type="button" data-charge-mode="Grid">Grid</button><button type="button" data-charge-mode="Solar">Solar</button></div></article>
+            <article class="tariff-card"><span class="eyebrow">Amber now</span><div><span>Buy</span><strong id="tariff-buy">—</strong></div><div><span>Feed-in</span><strong id="tariff-fit">—</strong></div><svg id="tariff-chart" viewBox="0 0 420 90" aria-label="Forecast feed-in price"></svg></article>
           </div>
+        </section>
+
+        <section class="page" data-page="climate" aria-label="Weather and temperatures">
+          <div class="page-title"><div><span class="eyebrow">Weather station</span><h1>Climate</h1></div><span id="weather-condition" class="data-state">Waiting</span></div>
+          <div class="climate-layout"><article class="weather-now"><span id="weather-icon" class="weather-icon">☀</span><div><strong id="weather-temperature">—</strong><span id="weather-detail">Waiting for forecast</span></div></article><div id="temperature-grid" class="temperature-grid"></div><div id="forecast-row" class="forecast-row"></div></div>
         </section>
 
         <section class="page" data-page="music" aria-label="Music">
@@ -156,6 +112,26 @@
             </article>
           </div>
           <div id="music-results" class="music-results" aria-label="Music search results"></div>
+        </section>
+
+        <section class="page console-only" data-page="media" aria-label="Media room console">
+          <div class="media-console-hero">
+            <div class="media-brand"><span class="eyebrow">Pilot Media Room</span><h1>Everything, beautifully connected.</h1><p>Music Assistant, local video, the Shield and your home in one ten-foot interface.</p></div>
+            <div id="console-now-playing" class="console-now-playing"><span class="media-disc">♪</span><div><small>NOW PLAYING</small><strong id="console-track">Ready</strong><span id="console-artist">Choose music or video</span></div></div>
+          </div>
+          <div class="media-console-actions">
+            <button type="button" data-console-target="music"><span>♪</span><strong>Music</strong><small>TIDAL &amp; local library</small></button>
+            <button type="button" data-console-target="home"><span>ϟ</span><strong>House</strong><small>Energy and climate</small></button>
+            <button type="button" data-console-target="video"><span>▶</span><strong>Local video</strong><small>Supervised mpv playback</small></button>
+            <button type="button" data-console-target="shield"><span>▣</span><strong>NVIDIA Shield</strong><small>Dolby Vision &amp; streaming</small></button>
+          </div>
+          <div id="console-video-panel" class="console-video-panel" hidden>
+            <label><span>Local/Jellyfin media identifier</span><input id="console-video-input" type="text" placeholder="Films/Movie.mkv" autocomplete="off"></label>
+            <button id="console-video-play" type="button">Play video</button>
+            <button id="console-video-pause" type="button">Pause</button>
+            <button id="console-video-stop" type="button">Stop</button>
+            <span id="console-video-message" role="status"></span>
+          </div>
         </section>
 
         <section class="page" data-page="system" aria-label="System">
@@ -191,8 +167,11 @@
       </div>
 
       <nav aria-label="Dashboard pages">
-        <button type="button" class="active" data-target="home"><span>⌂</span>Home</button>
-        <button type="button" data-target="energy"><span>ϟ</span>Energy</button>
+        <button type="button" class="console-only" data-target="media"><span>◆</span>Media</button>
+        <button type="button" class="active" data-target="home"><span>ϟ</span>Flow</button>
+        <button type="button" data-target="history"><span>⌁</span>History</button>
+        <button type="button" data-target="daily"><span>◉</span>Daily</button>
+        <button type="button" data-target="climate"><span>☀</span>Climate</button>
         <button type="button" data-target="music"><span>♪</span>Music</button>
         <button type="button" data-target="system"><span>●</span>System</button>
       </nav>

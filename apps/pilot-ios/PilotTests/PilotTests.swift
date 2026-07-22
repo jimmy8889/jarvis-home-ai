@@ -77,6 +77,46 @@ final class PilotTests: XCTestCase {
         XCTAssertEqual(value.batteryStateOfCharge, 76)
     }
 
+    func testSharedDashboardContractDecodesMonitoringAndControls() throws {
+        let data = Data(
+            """
+            {
+              "schema_version":"pilot.dashboard.v1","status":"ok",
+              "power":{"solar_w":8820,"grid_w":15,"battery_w":-3110,
+                "battery_soc_percent":77,"home_load_w":5610,"server_rack_w":312,
+                "vehicle_w":4540,"directions":{"grid":"exporting","battery":"charging"},
+                "flow_active":{"grid":false,"battery":true}},
+              "daily":{"solar_generated_kwh":66.3,"home_used_kwh":32.9,
+                "grid_exported_kwh":5.5},
+              "vehicle":{"name":"Jarvis","connected":true,"charging":true,
+                "power_w":4540,"state_of_charge_percent":64},
+              "tariff":{"import_cents_per_kwh":28.5,"feed_in_cents_per_kwh":8.2,
+                "feed_in_forecast":[{"at":"2026-07-22T04:00:00Z","cents_per_kwh":11.3}]},
+              "temperatures":[{"id":"bedroom","label":"Bedroom","temperature_c":23.4}],
+              "history":{"period_hours":24,"series":[{"id":"solar","label":"Solar",
+                "color":"#FFC247","unit":"W","points":[
+                  {"at":"2026-07-22T03:00:00Z","value":8820}]}]},
+              "weather":{"status":"ok","condition":"sunny","temperature_c":24,
+                "forecast":[{"at":"2026-07-23T00:00:00Z","condition":"partlycloudy",
+                  "high_temperature_c":26,"low_temperature_c":15,
+                  "precipitation_probability":10}]},
+              "controls":{"tesla_charging_mode":{"value":"Solar",
+                "options":["Grid","Solar"],"available":true},
+                "media_room_mode":{"available":true}}
+            }
+            """.utf8
+        )
+        let value = try JSONDecoder().decode(DashboardSnapshot.self, from: data)
+        XCTAssertEqual(value.power.serverRackWatts, 312)
+        XCTAssertEqual(value.power.flowActive["grid"], false)
+        XCTAssertEqual(value.power.directions["battery"], "charging")
+        XCTAssertTrue(value.vehicle.charging)
+        XCTAssertEqual(value.history.series.first?.points.first?.value, 8820)
+        XCTAssertEqual(value.weather.forecast.first?.highTemperatureCelsius, 26)
+        XCTAssertEqual(value.controls.chargingMode.value, "Solar")
+        XCTAssertTrue(value.controls.mediaRoomMode.available)
+    }
+
     @MainActor
     func testPairingCodeParsesJSONAndBareGrant() throws {
         let json = """

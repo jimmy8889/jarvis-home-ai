@@ -8,10 +8,16 @@ The polished v1 application provides:
 - an adaptive phone `TabView` and iPad `NavigationSplitView`;
 - a premium home surface with explainable Core-curated room controls, live energy,
   explicit offline/stale handling, and cached last-known state;
+- matching Flow, History, Daily and Climate monitoring pages with the James
+  House energy scene, dynamic directional paths, Tesla and server-rack loads,
+  daily totals, Amber pricing, weather and five room temperatures;
 - a persistent mini-player and full now-playing surface with normalized artwork,
   queue/progress, seek, previous/next, mute, volume, and room transfer controls;
 - grouped Music Assistant search for tracks, albums, artists, playlists, radio,
-  and other results, with artwork support where Pilot Core supplies it;
+  and other results, with artwork-led artist/album/playlist drill-downs;
+- Media Room On/Off controls, Grid/Solar Tesla charging mode and an optional
+  embedded Music Assistant web player when playback should originate from the
+  iPhone itself;
 - a contextual Pilot conversation surface with rich result cards, tool outcomes,
   citations, room selection, continued sessions, errors, and new-session actions;
 - transactional onboarding: manually entered credentials are not activated or
@@ -54,6 +60,8 @@ The client consumes the device-scoped `pilot.client.v1` product contract:
 - `/manifest` for features and authorized endpoint discovery;
 - `/events/snapshot` plus resumable `/events` long polling;
 - `/energy`, `/home`, `/media`, `/assistant`, and `/meetings` projections;
+- `/dashboard` plus `/dashboard/actions` for the shared monitoring contract;
+- `/media/browse` for provider-backed artist, album and playlist detail;
 - explainable entity presentation metadata and normalized media state.
 
 The app retains bounded compatibility fallbacks while updated Core is deployed.

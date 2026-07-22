@@ -59,3 +59,20 @@ all:
           display_node_mode: display
           display_node_resolution: 1024x600
           display_node_hdmi_connector: HDMI-A-1
+        pilot-media-console:
+          ansible_host: 192.0.2.41
+          ansible_user: pilot-admin
+          ansible_python_interpreter: /usr/bin/python3
+          display_node_hostname: pilot-media-console
+          display_node_core_url: http://192.0.2.30:8770
+          display_node_device_id: pilot-media-console
+          display_node_device_token_source_file: /secure/pilot-media-console-token
+          display_node_mode: media-console
+          display_node_force_resolution: false
+          display_node_sendspin_install: true
+          display_node_sendspin_enabled: true
+          display_node_sendspin_name: Pilot Media Room Music
+          display_node_sendspin_id: pilot-media-room
+          display_node_sendspin_server_url: ws://192.0.2.20:8927/sendspin
+          # Use a PipeWire sink name accepted on the physical Denon/HDMI path.
+          display_node_sendspin_audio_device: default

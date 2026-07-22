@@ -42,7 +42,7 @@ The node deliberately avoids a full desktop:
   Assistant credential is installed on the node or browser.
 - SSH remains enabled for administration.
 
-The touch surface provides:
+The deployed 0.4 touch surface provides:
 
 - Brisbane time and date
 - live solar, home load, grid direction, battery power/direction, and battery SOC
@@ -68,9 +68,14 @@ Assistant, or Pilot administrator credentials.
 
 ## Current source release
 
-The display service and touch UI now also implement:
+Pilot Linux Display 0.5 now also implements:
 
 - a configurable `display` or `media-console` presentation mode;
+- the shared Flow, History, Daily and Climate monitoring surfaces, including
+  Tesla connection/charging, the server-rack load, Amber pricing, daily totals,
+  five temperatures and seven-day weather;
+- local James House artwork, smooth watt-scaled directional paths, a visible
+  battery charge/discharge direction and a 100 W grid animation deadband;
 - a persistent selected room/output stored in browser-local presentation
   state, without persisting a credential in the browser;
 - five-second local status/media refresh and a device-authenticated product
@@ -81,6 +86,16 @@ The display service and touch UI now also implement:
 - an on-screen touch keyboard for music search;
 - a loopback-only client-event snapshot proxy and assistant response overlay
   driven by `pilot.assistant.completed.v1` events.
+- artwork-led Music Assistant search plus artist, album and playlist drill-down;
+- an optional pinned Sendspin 7.5.0 player so the Pi can become a Music
+  Assistant output through a USB DAC.
+
+The production inventory installs the Pi's Sendspin runtime but intentionally
+leaves it stopped and disabled because no USB DAC is connected yet. After the
+DAC is attached, identify and accept its stable PipeWire sink, set
+`display_node_sendspin_audio_device`, then enable
+`display_node_sendspin_enabled`. Do not route it through an unverified default
+sink.
 
 The updated Python service tests and JavaScript syntax check validate these
 source paths. They have not yet replaced the physically accepted Pi release
@@ -164,7 +179,8 @@ The previously deployed Pi release passed:
 - no current or historical thermal throttling
 - two-way application rollback
 
-After promoting the current source release, repeat those checks and also
+After promoting the 0.5 source release, repeat those checks and also
 verify output persistence, the touch keyboard, progress/queue updates, stale
-recovery and a real assistant-completion overlay. Until that run is recorded,
+recovery, the monitoring pages and a real assistant-completion overlay. USB-DAC
+playback has a separate audible acceptance gate. Until that run is recorded,
 the new UI behavior is **built and tested in source but awaiting Pi acceptance**.

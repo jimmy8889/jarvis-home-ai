@@ -298,6 +298,15 @@ class DisplayHandler(BaseHTTPRequestHandler):
             )
             self._send_json(payload, status)
             return
+        if path == "/api/dashboard":
+            status, payload = _core_device_request(  # type: ignore[attr-defined]
+                self.server.core_url,
+                self.server.device_id,
+                self.server.device_token_file,
+                "dashboard",
+            )
+            self._send_json(payload, status)
+            return
         if path == "/api/events/snapshot":
             values = parse_qs(parsed_path.query)
             cursor = values.get("cursor", [""])[0]
@@ -320,6 +329,8 @@ class DisplayHandler(BaseHTTPRequestHandler):
             "/": ("index.html", "text/html; charset=utf-8"),
             "/app.js": ("app.js", "text/javascript; charset=utf-8"),
             "/styles.css": ("styles.css", "text/css; charset=utf-8"),
+            "/assets/house-energy.png": ("assets/house-energy.png", "image/png"),
+            "/assets/house-no-car.png": ("assets/house-no-car.png", "image/png"),
         }
         asset = assets.get(path)
         if asset is None:
@@ -338,6 +349,9 @@ class DisplayHandler(BaseHTTPRequestHandler):
         endpoints = {
             "/api/media": "media",
             "/api/media/search": "media/search",
+            "/api/media/browse": "media/browse",
+            "/api/video": "video",
+            "/api/dashboard/actions": "dashboard/actions",
         }
         endpoint = endpoints.get(path)
         if endpoint is None:

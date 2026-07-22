@@ -63,6 +63,23 @@ struct PilotAPI: Sendable {
         return try JSONDecoder().decode(EnergyEnvelope.self, from: nested).snapshot
     }
 
+    func dashboard() async throws -> DashboardSnapshot {
+        let data = try await request(path: "v1/devices/\(deviceID)/dashboard")
+        return try JSONDecoder().decode(DashboardSnapshot.self, from: data)
+    }
+
+    func dashboardAction(_ action: String, value: String) async throws {
+        let body = try JSONSerialization.data(withJSONObject: [
+            "action": action,
+            "value": value,
+        ])
+        _ = try await request(
+            path: "v1/devices/\(deviceID)/dashboard/actions",
+            method: "POST",
+            body: body
+        )
+    }
+
     func surfaceEnergy() async throws -> EnergySnapshot {
         let data = try await request(path: "v1/devices/\(deviceID)/surface")
         let object = try JSONSerialization.jsonObject(with: data) as? [String: Any]
@@ -229,6 +246,30 @@ struct PilotAPI: Sendable {
         )
         let object = try JSONSerialization.jsonObject(with: data)
         return Self.flattenSearch(object)
+    }
+
+    func browse(_ result: MusicSearchResult) async throws -> MusicBrowsePage {
+        let body = try JSONSerialization.data(withJSONObject: [
+            "uri": result.uri,
+            "media_type": result.kind.rawValue,
+        ])
+        let data = try await request(
+            path: "v1/devices/\(deviceID)/media/browse",
+            method: "POST",
+            body: body
+        )
+        guard let root = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { throw PilotAPIError.invalidResponse }
+        let resolved = root["item"].flatMap { Self.flattenSearch($0).first } ?? result
+        let sections: [MusicBrowseSection] = (root["sections"] as? [[String: Any]] ?? []).compactMap { section -> MusicBrowseSection? in
+            guard let id = section["id"] as? String else { return nil }
+            return MusicBrowseSection(
+                id: id,
+                title: section["title"] as? String ?? id.capitalized,
+                items: Self.flattenSearch(section["items"] as Any)
+            )
+        }
+        return MusicBrowsePage(item: resolved, sections: sections)
     }
 
     func ask(

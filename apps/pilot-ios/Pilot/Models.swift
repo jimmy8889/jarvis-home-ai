@@ -5,12 +5,14 @@ struct PilotRoom: Codable, Identifiable, Hashable, Sendable {
     let name: String
     let responsePlayerID: String
     let defaultMusicPlayerID: String
+    let musicEnabled: Bool?
     let players: [PilotPlayer]
 
     enum CodingKeys: String, CodingKey {
         case id, name, players
         case responsePlayerID = "response_player_id"
         case defaultMusicPlayerID = "default_music_player_id"
+        case musicEnabled = "music_enabled"
     }
 }
 
@@ -335,6 +337,17 @@ struct MusicSearchResult: Identifiable, Hashable {
     let artworkURL: URL?
 }
 
+struct MusicBrowseSection: Identifiable, Hashable {
+    let id: String
+    let title: String
+    let items: [MusicSearchResult]
+}
+
+struct MusicBrowsePage: Hashable {
+    let item: MusicSearchResult
+    let sections: [MusicBrowseSection]
+}
+
 enum MusicResultKind: String, Hashable, CaseIterable {
     case track
     case album
@@ -434,6 +447,236 @@ struct EnergyEnvelope: Codable, Sendable {
             detail: detail
         )
     }
+}
+
+struct DashboardSnapshot: Codable, Equatable, Sendable {
+    let schemaVersion: String
+    let generatedAt: String?
+    let status: String
+    let power: DashboardPower
+    let daily: DashboardDaily
+    let vehicle: DashboardVehicle
+    let tariff: DashboardTariff
+    let temperatures: [DashboardTemperature]
+    let history: DashboardHistory
+    let weather: DashboardWeather
+    let controls: DashboardControls
+
+    enum CodingKeys: String, CodingKey {
+        case status, power, daily, vehicle, tariff, temperatures, history, weather, controls
+        case schemaVersion = "schema_version"
+        case generatedAt = "generated_at"
+    }
+
+    static let unavailable = DashboardSnapshot(
+        schemaVersion: "pilot.dashboard.v1",
+        generatedAt: nil,
+        status: "unavailable",
+        power: .empty,
+        daily: .empty,
+        vehicle: .empty,
+        tariff: .empty,
+        temperatures: [],
+        history: .empty,
+        weather: .empty,
+        controls: .empty
+    )
+}
+
+struct DashboardPower: Codable, Equatable, Sendable {
+    let solarWatts: Double?
+    let gridWatts: Double?
+    let batteryWatts: Double?
+    let batteryStateOfCharge: Double?
+    let homeLoadWatts: Double?
+    let serverRackWatts: Double?
+    let vehicleWatts: Double?
+    let directions: [String: String]
+    let flowActive: [String: Bool]
+
+    enum CodingKeys: String, CodingKey {
+        case directions
+        case solarWatts = "solar_w"
+        case gridWatts = "grid_w"
+        case batteryWatts = "battery_w"
+        case batteryStateOfCharge = "battery_soc_percent"
+        case homeLoadWatts = "home_load_w"
+        case serverRackWatts = "server_rack_w"
+        case vehicleWatts = "vehicle_w"
+        case flowActive = "flow_active"
+    }
+
+    static let empty = DashboardPower(
+        solarWatts: nil, gridWatts: nil, batteryWatts: nil,
+        batteryStateOfCharge: nil, homeLoadWatts: nil, serverRackWatts: nil,
+        vehicleWatts: nil, directions: [:], flowActive: [:]
+    )
+}
+
+struct DashboardDaily: Codable, Equatable, Sendable {
+    let solarGeneratedKWh: Double?
+    let homeUsedKWh: Double?
+    let gridExportedKWh: Double?
+
+    enum CodingKeys: String, CodingKey {
+        case solarGeneratedKWh = "solar_generated_kwh"
+        case homeUsedKWh = "home_used_kwh"
+        case gridExportedKWh = "grid_exported_kwh"
+    }
+
+    static let empty = DashboardDaily(
+        solarGeneratedKWh: nil, homeUsedKWh: nil, gridExportedKWh: nil
+    )
+}
+
+struct DashboardVehicle: Codable, Equatable, Sendable {
+    let name: String
+    let connected: Bool?
+    let charging: Bool
+    let powerWatts: Double?
+    let stateOfCharge: Double?
+
+    enum CodingKeys: String, CodingKey {
+        case name, connected, charging
+        case powerWatts = "power_w"
+        case stateOfCharge = "state_of_charge_percent"
+    }
+
+    static let empty = DashboardVehicle(
+        name: "Jarvis", connected: nil, charging: false,
+        powerWatts: nil, stateOfCharge: nil
+    )
+}
+
+struct DashboardTariffPoint: Codable, Identifiable, Equatable, Sendable {
+    let at: String?
+    let centsPerKWh: Double?
+    var id: String { at ?? String(centsPerKWh ?? 0) }
+
+    enum CodingKeys: String, CodingKey {
+        case at
+        case centsPerKWh = "cents_per_kwh"
+    }
+}
+
+struct DashboardTariff: Codable, Equatable, Sendable {
+    let importCentsPerKWh: Double?
+    let feedInCentsPerKWh: Double?
+    let feedInForecast: [DashboardTariffPoint]
+
+    enum CodingKeys: String, CodingKey {
+        case importCentsPerKWh = "import_cents_per_kwh"
+        case feedInCentsPerKWh = "feed_in_cents_per_kwh"
+        case feedInForecast = "feed_in_forecast"
+    }
+
+    static let empty = DashboardTariff(
+        importCentsPerKWh: nil, feedInCentsPerKWh: nil, feedInForecast: []
+    )
+}
+
+struct DashboardTemperature: Codable, Identifiable, Equatable, Sendable {
+    let id: String
+    let label: String
+    let temperatureCelsius: Double?
+
+    enum CodingKeys: String, CodingKey {
+        case id, label
+        case temperatureCelsius = "temperature_c"
+    }
+}
+
+struct DashboardHistoryPoint: Codable, Identifiable, Equatable, Sendable {
+    let at: String
+    let value: Double
+    var id: String { at }
+}
+
+struct DashboardHistorySeries: Codable, Identifiable, Equatable, Sendable {
+    let id: String
+    let label: String
+    let color: String
+    let unit: String
+    let points: [DashboardHistoryPoint]
+}
+
+struct DashboardHistory: Codable, Equatable, Sendable {
+    let periodHours: Int
+    let series: [DashboardHistorySeries]
+
+    enum CodingKeys: String, CodingKey {
+        case series
+        case periodHours = "period_hours"
+    }
+
+    static let empty = DashboardHistory(periodHours: 24, series: [])
+}
+
+struct DashboardForecast: Codable, Identifiable, Equatable, Sendable {
+    let at: String?
+    let condition: String?
+    let highTemperatureCelsius: Double?
+    let lowTemperatureCelsius: Double?
+    let precipitationProbability: Double?
+    var id: String { at ?? condition ?? "forecast" }
+
+    enum CodingKeys: String, CodingKey {
+        case at, condition
+        case highTemperatureCelsius = "high_temperature_c"
+        case lowTemperatureCelsius = "low_temperature_c"
+        case precipitationProbability = "precipitation_probability"
+    }
+}
+
+struct DashboardWeather: Codable, Equatable, Sendable {
+    let status: String
+    let condition: String?
+    let temperatureCelsius: Double?
+    let apparentTemperatureCelsius: Double?
+    let humidityPercent: Double?
+    let windSpeed: Double?
+    let windSpeedUnit: String?
+    let forecast: [DashboardForecast]
+
+    enum CodingKeys: String, CodingKey {
+        case status, condition, forecast
+        case temperatureCelsius = "temperature_c"
+        case apparentTemperatureCelsius = "apparent_temperature_c"
+        case humidityPercent = "humidity_percent"
+        case windSpeed = "wind_speed"
+        case windSpeedUnit = "wind_speed_unit"
+    }
+
+    static let empty = DashboardWeather(
+        status: "unavailable", condition: nil, temperatureCelsius: nil,
+        apparentTemperatureCelsius: nil, humidityPercent: nil,
+        windSpeed: nil, windSpeedUnit: nil, forecast: []
+    )
+}
+
+struct DashboardChargingMode: Codable, Equatable, Sendable {
+    let value: String?
+    let options: [String]
+    let available: Bool
+}
+
+struct DashboardMediaRoomMode: Codable, Equatable, Sendable {
+    let available: Bool
+}
+
+struct DashboardControls: Codable, Equatable, Sendable {
+    let chargingMode: DashboardChargingMode
+    let mediaRoomMode: DashboardMediaRoomMode
+
+    enum CodingKeys: String, CodingKey {
+        case chargingMode = "tesla_charging_mode"
+        case mediaRoomMode = "media_room_mode"
+    }
+
+    static let empty = DashboardControls(
+        chargingMode: DashboardChargingMode(value: nil, options: [], available: false),
+        mediaRoomMode: DashboardMediaRoomMode(available: false)
+    )
 }
 
 struct EnergyMeasurement: Codable, Sendable {

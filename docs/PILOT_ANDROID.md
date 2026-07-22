@@ -6,24 +6,26 @@ Music Assistant client.
 
 ## Current surface
 
-- Tablet-first adaptive navigation with room, energy, music, and assistant
-  views.
+- Tablet-first adaptive navigation whose primary always-visible surface is the
+  shared Flow, History, Daily and Climate dashboard.
 - One-time pairing-grant enrolment, including `pilot://pair` deep-link input and
   an advanced existing-token recovery path.
 - Device tokens encrypted at rest with an Android Keystore AES-GCM key.
 - Device-manifest discovery and resumable cursor-based event polling with
   snapshot recovery.
-- Live room and now-playing state.
-- Music Assistant search, playback, previous/next, seek, mute, room transfer
-  and volume control through Pilot Core.
+- Live room state. Bedroom music and music navigation are intentionally absent
+  because the mounted wall panel is not a playback endpoint.
 - Curated room controls that render Core's presentation metadata and invoke
   only returned supported actions; confirmation-gated actions remain explicit.
 - Text and push-to-talk assistant conversations scoped to the selected room,
   including 16 kHz mono capture, structured cards/sources, response audio and
   listening/processing/speaking states.
-- Animated solar, grid, battery, and home energy flow.
-- Night-friendly palette, optional keep-awake behavior, ambient clock mode and
-  subtle burn-in offset movement.
+- Watt-scaled directional solar, grid, battery, Tesla, home and server-rack
+  energy flow; a 100 W grid deadband; 24-hour power history; daily totals;
+  Amber prices; weather; and five room temperatures.
+- Night-friendly palette and optional keep-awake behavior. After 45 seconds of
+  inactivity the window dims to 3%; the next touch restores it immediately.
+  There is no separate ambient/screensaver page.
 - Explicit loading, stale, offline, and error states.
 - Preview fixtures, an instrumentation screenshot scaffold, accessibility
   semantics and protocol/security unit tests.
@@ -69,7 +71,8 @@ The app is kiosk-ready but does not silently assume Android device-owner
 privileges. Production hardening still requires physical acceptance on the
 target tablet:
 
-1. confirm touch targets, brightness, orientation, and energy animation;
+1. confirm touch targets, 45-second dim/tap wake, orientation, and every energy
+   direction at real loads;
 2. configure Android lock-task or the chosen managed-launcher policy;
 3. validate boot-to-app and recovery access;
 4. validate Wi-Fi loss, Pilot Core restart, and token revocation;

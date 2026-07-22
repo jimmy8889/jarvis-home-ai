@@ -11,10 +11,15 @@ provides:
 - the versioned device manifest, recoverable product snapshot and cursor-based
   event stream, with snapshot recovery after a cursor reset;
 - room-centric curated home, energy, media, meeting and assistant surfaces;
+- matching Flow, History, Daily and Climate monitoring with dynamic James House
+  energy paths, Tesla and server-rack loads, daily totals, Amber tariffs,
+  weather and five temperatures;
 - typed Home Assistant controls, including explicit confirmation handling for
   actions that Core marks as sensitive;
-- grouped Music Assistant search, playback, previous/next, seek, mute, room
-  transfer and volume control;
+- artwork-led Music Assistant search, artist/album/playlist drill-down,
+  playback, previous/next, seek, mute, room transfer and volume control;
+- Grid/Solar Tesla charging mode, Movie Mode On/Off and a `This iPhone`
+  Music Assistant browser-player option;
 - compact and expanded now-playing presentation;
 - room-selectable contextual Pilot conversations with structured cards,
   citations and action results;
@@ -80,8 +85,10 @@ The initial app permits HTTP only to support the existing private-LAN Core
 deployment; port 8770 must not be exposed outside that network. A trusted HTTPS
 origin is required before remote access is enabled.
 
-Energy is now supplied by the device-scoped `pilot.energy.v1` contract. The app
-does not invent sensor values or connect directly to Home Assistant.
+Energy and monitoring are supplied by the device-scoped `pilot.energy.v1` and
+`pilot.dashboard.v1` contracts. The app does not invent sensor values or
+connect directly to Home Assistant. The mini-player is inset inside each phone
+navigation stack so it cannot cover the tab bar.
 
 Pilot iOS now includes the first device-scoped meeting recorder and review
 surface. It records AAC only after an explicit tap, supports iOS background

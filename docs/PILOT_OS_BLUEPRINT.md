@@ -303,7 +303,8 @@ Hardware: Raspberry Pi 4 Model B, 2 GB / 16 GB microSD
 Display: 10-inch 1024 x 600 HDMI with ILITEK USB touch
 OS: 64-bit Debian 13 Trixie
 Runtime: Cage Wayland compositor + Chromium kiosk
-Surface: Pilot Linux Display 0.4
+Deployed surface: Pilot Linux Display 0.4
+Source release: Pilot Linux Display 0.5
 ```
 
 This node is deployed as a minimal appliance rather than a full desktop. A
@@ -328,6 +329,16 @@ two-way application rollback. Pilot Core 0.14 adds a bounded, authenticated
 display surface. The Pi remains room-bound to Office and now has the narrow
 `display` and `media-control` capabilities; its browser still receives no
 credential and cannot bypass Pilot Core.
+
+Display 0.5 replaces the generic energy page with the shared James House
+monitoring experience: animated watt-scaled solar, grid, battery, Tesla and
+server-rack paths; 24-hour solar/battery/home history; daily generation,
+consumption and export; Amber pricing; weather; and Office, TV room, Outdoor,
+Bedroom and Media Room temperatures. Grid values below 100 W remain visible but
+do not animate. It also adds artwork-led artist/album/playlist drill-down and a
+reproducible Sendspin player for the future Pi USB DAC. The runtime is installed
+but disabled until that DAC and its stable PipeWire sink are physically
+accepted. The 0.5 deployment and touch/rollback receipt remain pending.
 
 ## 5. Hardware plan
 
@@ -460,15 +471,21 @@ The shared digital-twin design, model contract, security boundary, and ordered
 delivery plan are documented in `docs/HOME_DIGITAL_TWIN.md`.
 
 The current iOS/iPadOS source consumes the manifest, snapshot/events, curated
-home, energy, media, assistant and meeting contracts. It supports one-time
-pairing, Keychain device credentials, typed home confirmations, rich media
-control and a retained meeting-upload queue. Physical iPhone/iPad and long
-recording acceptance remains separate.
+home, shared dashboard, media, assistant and meeting contracts. It supports
+one-time pairing, Keychain device credentials, typed home confirmations, rich
+media control, a retained meeting-upload queue, matching energy/history/daily/
+climate pages, Tesla charging mode, Movie Mode, Amber tariffs and a safe-area
+correct mini-player. An embedded Music Assistant web player provides a
+phone-origin output option. Physical iPhone/iPad and long recording acceptance
+remain separate.
 
 The Android wall source consumes the same bounded Core contracts, keeps its
 device token encrypted by Android Keystore, adds curated room controls,
-resumable events, push-to-talk/reply audio and an ambient wall mode. CI build
-evidence does not replace acceptance on the mounted tablet.
+resumable events and push-to-talk/reply audio. Its primary experience is the
+same continuously visible Flow, History, Daily and Climate dashboard; it dims
+to 3% after 45 seconds and wakes on first touch instead of entering an ambient
+screensaver. Bedroom music is hidden by Core policy. CI build evidence does
+not replace acceptance on the mounted tablet.
 
 Pilot TV is now a device-paired Kotlin/Compose for TV media-room client. It
 renders now playing, progress, queue, room outputs, energy and curated room
@@ -492,8 +509,10 @@ Pilot Core APIs instead of connecting directly to the N150, Denon, Shield, or
 mpv socket. The full plan is in `docs/N150_MEDIA_CONSOLE.md`.
 
 The reusable Linux display source now supports a `media-console` mode with a
-music-first layout, retained output selection, progress/queue information,
-stale-state handling, a touch search keyboard and assistant event overlays.
+ten-foot media home, artwork-led Music Assistant discovery, retained output
+selection, progress/queue information, shared monitoring pages, supervised
+local-video commands, Shield handoff affordance, stale-state handling, a touch
+search keyboard and assistant event overlays.
 Room Agent's local mpv adapter is source tested. No native-HDMI N150 has yet
 completed display, decode, HDMI audio, CEC or HDR10 physical acceptance.
 
@@ -517,7 +536,8 @@ and kiosk recovery; Pilot Core remains authoritative for rooms, home state,
 assistant context, and future control authorization.
 
 The current display source adds device-authenticated product/event polling,
-stale indication, persistent output selection, progress/queue presentation, a
+the `pilot.dashboard.v1` monitoring projection, stale indication, persistent
+output selection, artist/album/playlist detail, progress/queue presentation, a
 touch search keyboard and assistant completion overlays. These additions await
 promotion and repeat physical touch/rollback acceptance on the deployed Pi.
 
@@ -776,6 +796,7 @@ deployed integration, hardware boundary, or milestone status changes.
 - [x] iOS one-time pairing, scoped product contract and rich media controls in source
 - [ ] iOS physical-device deployment and secure pairing acceptance
 - [x] Music Assistant search, artwork/queue/progress and playback-transfer UX in source
+- [x] Music Assistant artist, album and playlist detail APIs and client UX in source
 - [x] Bounded Home Assistant Denon power and source commands
 - [ ] HDMI/CEC source coordination for a future media-room N150
 - [ ] N150 HDR10 and HD-audio acceptance
@@ -804,6 +825,9 @@ deployed integration, hardware boundary, or milestone status changes.
 - [x] Native Android wall-tablet application foundation
 - [x] Android immersive display, night mode, cached offline state, and reconnect behavior
 - [x] Android one-time pairing, resumable events, curated controls and push-to-talk in source
+- [x] Shared iOS/Android/Linux Flow, History, Daily and Climate monitoring contract
+- [x] Tesla connection, charging power/SOC/mode, server-rack flow and Amber tariff surfaces
+- [x] Bedroom music disabled by room capability policy
 - [ ] Android boot launch, device-owner kiosk, watchdog, and physical-tablet acceptance
 - [ ] Climate, blinds, media, occupancy, environmental, and energy overlays
 - [ ] Confirmation-gated locks, garage, alarm, and security actions
@@ -866,17 +890,18 @@ deployed integration, hardware boundary, or milestone status changes.
 
 ## 14. Immediate next steps
 
-1. Finish the full release validation matrix, create a verified cold Core
-   backup, promote the product-contract release and test snapshot/event and
-   pairing persistence across a container restart.
+1. Promote Pilot Core 0.26 and Pilot Linux Display 0.5 through the guarded
+   backup/deploy paths, then accept the refreshed Pi touch dashboard and
+   rollback on the physical 10-inch display.
 2. Review the production Home Assistant catalogue in the presentation editor:
    explicitly include useful omissions, hide duplicates and promote only
    trustworthy room mappings before enabling their controls.
 3. Pair and physically accept iPhone/iPad, the mounted Android wall tablet and
    the Shield using separate scoped identities; test rotation, revocation,
    offline recovery, accessibility/touch/focus and real media/home actions.
-4. Promote the updated Raspberry Pi display release and repeat touch,
-   event-overlay, stale-state and two-way rollback acceptance.
+4. Attach the Pi USB DAC, accept its stable PipeWire sink, enable the staged
+   Sendspin player and validate TIDAL plus local lossless playback. Until then,
+   the installed player remains disabled.
 5. Deploy the N150 Media Console role on a native-HDMI target and accept its
    shell, mpv, HDMI audio, Denon source recovery and HDR10 boundary while
    retaining Shield for Dolby Vision/DRM.

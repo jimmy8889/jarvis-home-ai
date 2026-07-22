@@ -50,6 +50,9 @@ class DisplayNodeApiTests(unittest.TestCase):
                 energy_battery_power_entity_id="sensor.battery_power",
                 energy_battery_soc_entity_id="sensor.battery_soc",
                 energy_home_load_entity_id="sensor.home_load",
+                tesla_charging_mode_entity_id="input_select.car_mode",
+                media_room_mode_on_script_id="script.movie_on",
+                media_room_mode_off_script_id="script.movie_off",
                 tts_provider="home_assistant",
                 tts_engine_id="tts.piper",
             ),
@@ -399,6 +402,58 @@ class DisplayNodeApiTests(unittest.TestCase):
             },
         )
 
+    def test_media_browse_returns_artist_albums_and_tracks(self) -> None:
+        async def request(_integration: Integrations, command: str, args: dict) -> object:
+            if command == "music/item_by_uri":
+                return {
+                    "item_id": "artist-1",
+                    "provider": "tidal",
+                    "media_type": "artist",
+                    "uri": "tidal://artist/artist-1",
+                    "name": "Massive Attack",
+                }
+            if command == "music/artists/artist_albums":
+                self.assertEqual(args["item_id"], "artist-1")
+                return [{"uri": "tidal://album/a1", "name": "Mezzanine"}]
+            if command == "music/artists/artist_tracks":
+                return [{"uri": "tidal://track/t1", "name": "Teardrop"}]
+            self.fail(f"unexpected command {command}")
+
+        with patch.object(Integrations, "music_assistant", new=request):
+            response = self.client.post(
+                "/v1/devices/pilot-bedroom-display/media/browse",
+                headers=self.headers,
+                json={
+                    "uri": "tidal://artist/artist-1",
+                    "media_type": "artist",
+                },
+            )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["schema_version"], "pilot.media-browse.v1")
+        self.assertEqual(response.json()["sections"][0]["title"], "Albums")
+        self.assertEqual(response.json()["sections"][1]["items"][0]["name"], "Teardrop")
+        self.assertEqual(response.headers["cache-control"], "no-store")
+
+    def test_media_browse_rejects_a_type_mismatch(self) -> None:
+        with patch.object(
+            Integrations,
+            "music_assistant",
+            new=AsyncMock(
+                return_value={
+                    "item_id": "track-1",
+                    "provider": "tidal",
+                    "media_type": "track",
+                }
+            ),
+        ):
+            response = self.client.post(
+                "/v1/devices/pilot-bedroom-display/media/browse",
+                headers=self.headers,
+                json={"uri": "tidal://track/track-1", "media_type": "artist"},
+            )
+        self.assertEqual(response.status_code, 409, response.text)
+
     def test_surface_is_authenticated_and_bounded(self) -> None:
         raw_energy = {
             "solar": {
@@ -466,6 +521,62 @@ class DisplayNodeApiTests(unittest.TestCase):
             ).status_code,
             422,
         )
+
+    def test_dashboard_is_device_scoped_and_actions_are_allowlisted(self) -> None:
+        dashboard = {
+            "schema_version": "pilot.dashboard.v1",
+            "status": "ok",
+            "power": {"grid_w": 15, "flow_active": {"grid": False}},
+        }
+        with patch(
+            "pilot_core.dashboard.DashboardService.snapshot",
+            new=AsyncMock(return_value=dashboard),
+        ):
+            response = self.client.get(
+                "/v1/devices/pilot-bedroom-display/dashboard",
+                headers=self.headers,
+            )
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["power"]["grid_w"], 15)
+        self.assertEqual(
+            self.client.get(
+                "/v1/devices/pilot-bedroom-display/dashboard"
+            ).status_code,
+            422,
+        )
+
+        self.store.update_device_capabilities(
+            "pilot-bedroom-display",
+            ["audio", "display", "home-control", "media-control", "ota", "voice"],
+        )
+        typed_action = AsyncMock(return_value={"status": "accepted"})
+        with patch.object(
+            Integrations,
+            "home_assistant_typed_action",
+            new=typed_action,
+        ):
+            selected = self.client.post(
+                "/v1/devices/pilot-bedroom-display/dashboard/actions",
+                headers=self.headers,
+                json={"action": "set_tesla_charging_mode", "value": "Solar"},
+            )
+            movie = self.client.post(
+                "/v1/devices/pilot-bedroom-display/dashboard/actions",
+                headers=self.headers,
+                json={"action": "set_media_room_mode", "value": "on"},
+            )
+            rejected = self.client.post(
+                "/v1/devices/pilot-bedroom-display/dashboard/actions",
+                headers=self.headers,
+                json={"action": "set_tesla_charging_mode", "value": "Solar + Grid"},
+            )
+        self.assertEqual(selected.status_code, 200, selected.text)
+        self.assertEqual(movie.status_code, 200, movie.text)
+        self.assertEqual(rejected.status_code, 422, rejected.text)
+        typed_action.assert_any_await(
+            "input_select", "select_option", "input_select.car_mode", {"option": "Solar"}
+        )
+        typed_action.assert_any_await("script", "turn_on", "script.movie_on", {})
 
     def test_voice_stream_returns_private_tts_asset(self) -> None:
         synthesized = SynthesizedAudio(

@@ -92,7 +92,6 @@ import java.time.format.DateTimeFormatter
 private enum class PilotDestination(val label: String, val glyph: String) {
     Home("Home", "⌂"),
     Rooms("Rooms", "▦"),
-    Music("Music", "♫"),
     Assistant("Pilot", "✦"),
     Settings("Settings", "⚙"),
 }
@@ -153,9 +152,6 @@ private fun BurnInGuard(enabled: Boolean, content: @Composable () -> Unit) {
 private fun PilotShell(state: PilotUiState, model: PilotViewModel) {
     var destination by remember { mutableStateOf(PilotDestination.Home) }
     val wide = LocalConfiguration.current.screenWidthDp >= 700
-    val nowPlaying = state.snapshot?.media?.players
-        ?.firstOrNull { it.effective.playbackState == "playing" }
-
     Row(
         Modifier
             .fillMaxSize()
@@ -183,25 +179,15 @@ private fun PilotShell(state: PilotUiState, model: PilotViewModel) {
             modifier = Modifier.weight(1f),
             containerColor = Color.Transparent,
             bottomBar = {
-                Column {
-                    if (nowPlaying != null) {
-                        PilotMiniPlayer(
-                            nowPlaying,
-                            model::artwork,
-                            state.actionInFlight,
-                            model::media,
-                        )
-                    }
-                    if (!wide) {
-                        NavigationBar {
-                            PilotDestination.entries.forEach {
-                                NavigationBarItem(
-                                    selected = destination == it,
-                                    onClick = { destination = it },
-                                    icon = { Text(it.glyph) },
-                                    label = { Text(it.label) },
-                                )
-                            }
+                if (!wide) {
+                    NavigationBar {
+                        PilotDestination.entries.forEach {
+                            NavigationBarItem(
+                                selected = destination == it,
+                                onClick = { destination = it },
+                                icon = { Text(it.glyph) },
+                                label = { Text(it.label) },
+                            )
                         }
                     }
                 }
@@ -212,7 +198,6 @@ private fun PilotShell(state: PilotUiState, model: PilotViewModel) {
                 when (destination) {
                     PilotDestination.Home -> HomeScreen(state, model)
                     PilotDestination.Rooms -> RoomsScreen(state, model)
-                    PilotDestination.Music -> PilotMusicExperience(state, model)
                     PilotDestination.Assistant -> PilotAssistantPanel(state, model)
                     PilotDestination.Settings -> SettingsScreen(state, model)
                 }
@@ -255,83 +240,7 @@ private fun ConnectionBanner(state: PilotUiState, refresh: () -> Unit) {
 
 @Composable
 private fun HomeScreen(state: PilotUiState, model: PilotViewModel) {
-    val now by produceState(LocalDateTime.now()) {
-        while (true) {
-            value = LocalDateTime.now()
-            delay(30_000)
-        }
-    }
-    val energy = state.snapshot?.surface?.energy
-    val playing = state.snapshot?.media?.players?.filter {
-        it.effective.playbackState == "playing"
-    }.orEmpty()
-    LazyColumn(
-        contentPadding = PaddingValues(24.dp),
-        verticalArrangement = Arrangement.spacedBy(18.dp),
-    ) {
-        item {
-            Row(verticalAlignment = Alignment.Bottom) {
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        now.format(DateTimeFormatter.ofPattern("EEEE, d MMMM")),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Text(
-                        now.format(DateTimeFormatter.ofPattern("h:mm")),
-                        style = MaterialTheme.typography.displayLarge,
-                    )
-                    Text(
-                        "Your home, at a glance",
-                        style = MaterialTheme.typography.headlineMedium,
-                    )
-                }
-                StatusPill(state.connection, state.snapshot?.receivedAt)
-            }
-        }
-        item {
-            if (energy == null) {
-                StateCard(
-                    title = "Energy is waiting for Pilot Core",
-                    detail = "The tablet will recover automatically when the energy surface is available.",
-                    action = "Refresh",
-                    onAction = model::refresh,
-                )
-            } else {
-                EnergyFlowCard(energy)
-            }
-        }
-        item {
-            Text("Rooms", style = MaterialTheme.typography.headlineMedium)
-            Spacer(Modifier.height(10.dp))
-            LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                items(state.rooms, key = { it.id }) { room ->
-                    val roomState = state.snapshot?.media?.players
-                        ?.firstOrNull { it.player.roomId == room.id }
-                    RoomSummaryCard(
-                        room = room,
-                        state = roomState,
-                        selected = state.selectedRoom?.id == room.id,
-                        onClick = { model.selectRoom(room.id) },
-                    )
-                }
-            }
-        }
-        item {
-            CuratedHomeControls(state, model)
-        }
-        item {
-            Text("Active now", style = MaterialTheme.typography.headlineMedium)
-            Spacer(Modifier.height(10.dp))
-            if (playing.isEmpty()) {
-                StateCard("The house is quiet", "Nothing is currently playing.")
-            } else {
-                playing.forEach { state ->
-                    NowPlayingCard(state, model::media)
-                    Spacer(Modifier.height(10.dp))
-                }
-            }
-        }
-    }
+    PilotEnergyDashboard(state, model)
 }
 
 @Composable

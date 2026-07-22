@@ -36,6 +36,7 @@ from .conversation import (
     ConversationEngine,
     OpenAICompatibleLLM,
 )
+from .dashboard import DashboardService
 from .firmware import FirmwareReleaseError, FirmwareReleases, is_newer_version
 from .home_actions import (
     HomeActionConflict,
@@ -205,6 +206,11 @@ class DeviceHomeActionRequest(BaseModel):
         return self
 
 
+class DeviceDashboardActionRequest(BaseModel):
+    action: Literal["set_tesla_charging_mode", "set_media_room_mode"]
+    value: str = Field(min_length=1, max_length=32)
+
+
 class DeviceVideoCommand(BaseModel):
     room_id: str | None = Field(default=None, min_length=1, max_length=128)
     action: Literal[
@@ -247,6 +253,17 @@ class MediaSearch(BaseModel):
     media_types: list[str] = Field(default_factory=list)
     limit: int = Field(default=10, ge=1, le=100)
     library_only: bool = False
+
+
+class MediaBrowseRequest(BaseModel):
+    uri: str = Field(min_length=3, max_length=1000)
+    media_type: Literal["artist", "album", "playlist", "track", "radio", "other"]
+
+    @model_validator(mode="after")
+    def validate_media_uri(self) -> "MediaBrowseRequest":
+        if "://" not in self.uri or any(character.isspace() for character in self.uri):
+            raise ValueError("uri must be a Music Assistant media URI")
+        return self
 
 
 class DeviceCommandInput(BaseModel):
@@ -525,6 +542,7 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
         integrations,
         settings.rooms,
     )
+    home_dashboard = DashboardService(settings.integrations, integrations)
     audio_assets = AudioAssets(
         database,
         settings.server.audio_asset_path,
@@ -651,6 +669,9 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
             "energy": bool(
                 {"home-read", "home-control", "display"} & capabilities
             ),
+            "dashboard": bool(
+                {"home-read", "home-control", "display"} & capabilities
+            ),
             "media": "media-control" in capabilities,
             "assistant": "voice" in capabilities,
             "meetings": "meetings" in capabilities,
@@ -683,6 +704,7 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
                 "events_websocket": f"{base}/events/ws",
                 "home": f"{base}/home",
                 "energy": f"{base}/energy",
+                "dashboard": f"{base}/dashboard",
                 "media": f"{base}/media",
                 "assistant": f"{base}/assistant",
                 "meetings": f"{base}/meetings",
@@ -1194,6 +1216,76 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
         except IntegrationRequestFailed as error:
             raise HTTPException(status_code=502, detail=str(error)) from None
 
+    async def browse_music(request: MediaBrowseRequest) -> dict[str, Any]:
+        """Resolve one Music Assistant item into a small client-facing detail page."""
+
+        try:
+            item = await integrations.music_assistant(
+                "music/item_by_uri",
+                {"uri": request.uri, "allow_update_metadata": False},
+            )
+            if not isinstance(item, dict):
+                raise IntegrationRequestFailed("Music Assistant returned an invalid item")
+
+            resolved_type = str(item.get("media_type") or item.get("type") or "").lower()
+            if resolved_type and resolved_type != request.media_type:
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"media URI resolved as {resolved_type}, not {request.media_type}",
+                )
+
+            provider = str(item.get("provider") or request.uri.partition("://")[0])
+            item_id = str(item.get("item_id") or "")
+            if not item_id:
+                path = request.uri.partition("://")[2]
+                parts = path.split("/", 1)
+                item_id = parts[1] if len(parts) == 2 else parts[0]
+            if not provider or not item_id:
+                raise IntegrationRequestFailed("Music Assistant item has no provider identity")
+
+            base_args = {
+                "item_id": item_id,
+                "provider_instance_id_or_domain": provider,
+            }
+            sections: list[dict[str, Any]] = []
+            if request.media_type == "artist":
+                albums, tracks = await asyncio.gather(
+                    integrations.music_assistant("music/artists/artist_albums", base_args),
+                    integrations.music_assistant("music/artists/artist_tracks", base_args),
+                )
+                sections = [
+                    {"id": "albums", "title": "Albums", "items": albums},
+                    {"id": "tracks", "title": "Songs", "items": tracks},
+                ]
+            elif request.media_type == "album":
+                sections = [{
+                    "id": "tracks",
+                    "title": "Songs",
+                    "items": await integrations.music_assistant(
+                        "music/albums/album_tracks", base_args
+                    ),
+                }]
+            elif request.media_type == "playlist":
+                sections = [{
+                    "id": "tracks",
+                    "title": "Songs",
+                    "items": await integrations.music_assistant(
+                        "music/playlists/playlist_tracks", base_args
+                    ),
+                }]
+
+            return {
+                "schema_version": "pilot.media-browse.v1",
+                "item": item,
+                "sections": sections,
+            }
+        except HTTPException:
+            raise
+        except IntegrationUnavailable as error:
+            raise HTTPException(status_code=503, detail=str(error)) from None
+        except IntegrationRequestFailed as error:
+            raise HTTPException(status_code=502, detail=str(error)) from None
+
     def require_admin(authorization: str | None = Header(default=None)) -> None:
         configured = read_secret(settings.server.admin_token_env)
         if not configured or not secrets.compare_digest(
@@ -1230,6 +1322,8 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
         allowed = {
             "app.css": "text/css",
             "app.js": "text/javascript",
+            "house-energy.png": "image/png",
+            "house-no-car.png": "image/png",
         }
         media_type = allowed.get(asset_name)
         if media_type is None:
@@ -2683,6 +2777,89 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
             **home_intelligence.energy_snapshot(),
         }
 
+    @app.get("/v1/devices/{device_id}/dashboard")
+    async def device_dashboard_snapshot(
+        device_id: str,
+        response: Response,
+        x_pilot_device_id: str = Header(),
+        authorization: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        device = authenticated_device(device_id, x_pilot_device_id, authorization)
+        if not device_features(device)["dashboard"]:
+            raise HTTPException(
+                status_code=403, detail="device does not have dashboard-read capability"
+            )
+        response.headers["Cache-Control"] = "no-store"
+        return await home_dashboard.snapshot()
+
+    @app.post("/v1/devices/{device_id}/dashboard/actions")
+    async def device_dashboard_action(
+        device_id: str,
+        request: DeviceDashboardActionRequest,
+        response: Response,
+        x_pilot_device_id: str = Header(),
+        authorization: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        device = authenticated_device(device_id, x_pilot_device_id, authorization)
+        if "home-control" not in device["capabilities"]:
+            raise HTTPException(
+                status_code=403, detail="device does not have home-control capability"
+            )
+        settings_value = settings.integrations
+        if request.action == "set_tesla_charging_mode":
+            if request.value not in {"Grid", "Solar"}:
+                raise HTTPException(
+                    status_code=422, detail="charging mode must be Grid or Solar"
+                )
+            entity_id = settings_value.tesla_charging_mode_entity_id
+            if not entity_id:
+                raise HTTPException(status_code=503, detail="charging mode is not configured")
+            domain, service, data = "input_select", "select_option", {"option": request.value}
+        else:
+            enabled = request.value.casefold() in {"on", "true", "enabled"}
+            disabled = request.value.casefold() in {"off", "false", "disabled"}
+            if not enabled and not disabled:
+                raise HTTPException(
+                    status_code=422, detail="media room mode must be on or off"
+                )
+            entity_id = (
+                settings_value.media_room_mode_on_script_id
+                if enabled
+                else settings_value.media_room_mode_off_script_id
+            )
+            if not entity_id:
+                raise HTTPException(status_code=503, detail="media room mode is not configured")
+            domain, service, data = "script", "turn_on", {}
+        try:
+            provider = await integrations.home_assistant_typed_action(
+                domain, service, entity_id, data
+            )
+        except IntegrationUnavailable as error:
+            raise HTTPException(status_code=503, detail=str(error)) from None
+        except IntegrationRequestFailed as error:
+            raise HTTPException(status_code=502, detail=str(error)) from None
+        home_dashboard.invalidate()
+        event = database.record_client_event(
+            "pilot.dashboard.action.v1",
+            {
+                "action": request.action,
+                "value": request.value,
+                "entity_id": entity_id,
+                "status": "succeeded",
+            },
+            room_id="media-room" if request.action == "set_media_room_mode" else device["room_id"],
+            device_id=device_id,
+            required_capability="home-read",
+        )
+        response.headers["Cache-Control"] = "no-store"
+        return {
+            "status": "succeeded",
+            "action": request.action,
+            "value": request.value,
+            "provider": provider,
+            "event": event,
+        }
+
     @app.post("/v1/devices/{device_id}/home/actions")
     async def device_home_action(
         device_id: str,
@@ -2952,6 +3129,23 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
             raise HTTPException(status_code=503, detail=str(error)) from None
         except IntegrationRequestFailed as error:
             raise HTTPException(status_code=502, detail=str(error)) from None
+        response.headers["Cache-Control"] = "no-store"
+        return result
+
+    @app.post("/v1/devices/{device_id}/media/browse")
+    async def device_media_browse(
+        device_id: str,
+        request: MediaBrowseRequest,
+        response: Response,
+        x_pilot_device_id: str = Header(),
+        authorization: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        device = authenticated_device(device_id, x_pilot_device_id, authorization)
+        if "media-control" not in device["capabilities"]:
+            raise HTTPException(
+                status_code=403, detail="device does not have media-control capability"
+            )
+        result = await browse_music(request)
         response.headers["Cache-Control"] = "no-store"
         return result
 
@@ -3333,6 +3527,11 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
             raise HTTPException(status_code=503, detail=str(error)) from None
         except IntegrationRequestFailed as error:
             raise HTTPException(status_code=502, detail=str(error)) from None
+
+    @app.post("/v1/media/browse", dependencies=[Depends(require_admin)])
+    async def media_browse(request: MediaBrowseRequest, response: Response) -> dict[str, Any]:
+        response.headers["Cache-Control"] = "no-store"
+        return await browse_music(request)
 
     @app.post("/v1/media", dependencies=[Depends(require_admin)])
     async def media(command: MediaCommand) -> Any:

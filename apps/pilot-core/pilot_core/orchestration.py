@@ -39,7 +39,10 @@ class RoomOrchestrator:
 
     def music_player(self, room_id: str, player_id: str | None = None) -> Player:
         self.require_room(room_id)
-        selected_id = player_id or self.registry.rooms[room_id].default_music_player_id
+        room = self.registry.rooms[room_id]
+        if not room.music_enabled:
+            raise ResolutionError(f"music is disabled in room {room_id}")
+        selected_id = player_id or room.default_music_player_id
         player = self.registry.players.get(selected_id)
         if player is None:
             raise ResolutionError(f"unknown player: {selected_id}")

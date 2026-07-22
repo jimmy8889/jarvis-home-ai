@@ -1,6 +1,6 @@
 # Pilot Core production operations
 
-Pilot Core 0.25 provides a repeatable central deployment without enabling any
+Pilot Core 0.26 provides a repeatable central deployment without enabling any
 audible room action. The production Compose definition uses a read-only root
 filesystem, drops all Linux capabilities, prevents privilege escalation, limits
 process count and log growth, and stores persistent data in one named volume.

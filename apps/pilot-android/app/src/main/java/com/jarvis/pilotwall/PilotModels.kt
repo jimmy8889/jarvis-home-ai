@@ -24,6 +24,7 @@ data class PilotRoom(
     val responsePlayerId: String?,
     val defaultMusicPlayerId: String?,
     val players: List<PilotPlayer>,
+    val musicEnabled: Boolean = true,
 )
 
 data class PilotPlayer(
@@ -112,6 +113,30 @@ data class EnergySnapshot(
     val homeLoad: EnergyMeasurement,
 )
 
+data class DashboardPower(
+    val solarW: Double?, val gridW: Double?, val batteryW: Double?,
+    val batterySocPercent: Double?, val homeLoadW: Double?, val serverRackW: Double?,
+    val gridDirection: String, val batteryDirection: String, val gridFlowActive: Boolean,
+)
+data class DashboardDaily(val generatedKWh: Double?, val homeKWh: Double?, val exportedKWh: Double?)
+data class DashboardVehicle(val connected: Boolean?, val charging: Boolean, val powerW: Double?, val socPercent: Double?)
+data class DashboardTemperature(val id: String, val label: String, val temperatureC: Double?)
+data class DashboardPoint(val at: Instant?, val value: Double)
+data class DashboardSeries(val id: String, val label: String, val color: String, val points: List<DashboardPoint>)
+data class DashboardForecast(val at: Instant?, val condition: String?, val highC: Double?, val lowC: Double?, val rainPercent: Double?)
+data class DashboardWeather(
+    val condition: String?, val temperatureC: Double?, val humidityPercent: Double?,
+    val windSpeed: Double?, val windSpeedUnit: String?, val forecast: List<DashboardForecast>,
+)
+data class DashboardTariff(val importCents: Double?, val feedInCents: Double?, val forecast: List<DashboardPoint>)
+data class DashboardControls(val chargingMode: String?, val chargingModes: List<String>, val mediaRoomAvailable: Boolean)
+data class DashboardSnapshot(
+    val status: String, val power: DashboardPower, val daily: DashboardDaily,
+    val vehicle: DashboardVehicle, val temperatures: List<DashboardTemperature>,
+    val history: List<DashboardSeries>, val weather: DashboardWeather,
+    val tariff: DashboardTariff, val controls: DashboardControls,
+)
+
 data class SurfaceSnapshot(
     val serverTime: Instant?,
     val energy: EnergySnapshot?,
@@ -166,6 +191,7 @@ enum class AssistantPhase { Idle, Listening, Processing, Speaking, Failed }
 data class PilotSnapshot(
     val media: MediaSnapshot,
     val surface: SurfaceSnapshot,
+    val dashboard: DashboardSnapshot? = null,
     val receivedAt: Instant = Instant.now(),
 )
 
@@ -428,6 +454,87 @@ internal object PilotJson {
         )
     }
 
+    fun dashboard(root: JSONObject): DashboardSnapshot {
+        val power = root.optJSONObject("power") ?: JSONObject()
+        val directions = power.optJSONObject("directions") ?: JSONObject()
+        val active = power.optJSONObject("flow_active") ?: JSONObject()
+        val daily = root.optJSONObject("daily") ?: JSONObject()
+        val vehicle = root.optJSONObject("vehicle") ?: JSONObject()
+        val tariff = root.optJSONObject("tariff") ?: JSONObject()
+        val weather = root.optJSONObject("weather") ?: JSONObject()
+        val controls = root.optJSONObject("controls") ?: JSONObject()
+        val chargingMode = controls.optJSONObject("tesla_charging_mode") ?: JSONObject()
+        return DashboardSnapshot(
+            status = root.optString("status", "partial"),
+            power = DashboardPower(
+                solarW = power.optFiniteDouble("solar_w"),
+                gridW = power.optFiniteDouble("grid_w"),
+                batteryW = power.optFiniteDouble("battery_w"),
+                batterySocPercent = power.optFiniteDouble("battery_soc_percent"),
+                homeLoadW = power.optFiniteDouble("home_load_w"),
+                serverRackW = power.optFiniteDouble("server_rack_w"),
+                gridDirection = directions.optString("grid", "idle"),
+                batteryDirection = directions.optString("battery", "idle"),
+                gridFlowActive = active.optBoolean("grid", false),
+            ),
+            daily = DashboardDaily(
+                generatedKWh = daily.optFiniteDouble("solar_generated_kwh"),
+                homeKWh = daily.optFiniteDouble("home_used_kwh"),
+                exportedKWh = daily.optFiniteDouble("grid_exported_kwh"),
+            ),
+            vehicle = DashboardVehicle(
+                connected = vehicle.optNullableBoolean("connected"),
+                charging = vehicle.optBoolean("charging", false),
+                powerW = vehicle.optFiniteDouble("power_w"),
+                socPercent = vehicle.optFiniteDouble("state_of_charge_percent"),
+            ),
+            temperatures = root.optJSONArray("temperatures").objects().map {
+                DashboardTemperature(
+                    id = it.optString("id"), label = it.optString("label"),
+                    temperatureC = it.optFiniteDouble("temperature_c"),
+                )
+            },
+            history = root.optJSONObject("history")?.optJSONArray("series").objects().map { series ->
+                DashboardSeries(
+                    id = series.optString("id"),
+                    label = series.optString("label"),
+                    color = series.optString("color", "#55B6FF"),
+                    points = series.optJSONArray("points").objects().mapNotNull { point ->
+                        point.optFiniteDouble("value")?.let { DashboardPoint(point.optInstant("at"), it) }
+                    },
+                )
+            }.orEmpty(),
+            weather = DashboardWeather(
+                condition = weather.optNullableString("condition"),
+                temperatureC = weather.optFiniteDouble("temperature_c"),
+                humidityPercent = weather.optFiniteDouble("humidity_percent"),
+                windSpeed = weather.optFiniteDouble("wind_speed"),
+                windSpeedUnit = weather.optNullableString("wind_speed_unit"),
+                forecast = weather.optJSONArray("forecast").objects().map {
+                    DashboardForecast(
+                        at = it.optInstant("at"), condition = it.optNullableString("condition"),
+                        highC = it.optFiniteDouble("high_temperature_c"),
+                        lowC = it.optFiniteDouble("low_temperature_c"),
+                        rainPercent = it.optFiniteDouble("precipitation_probability"),
+                    )
+                },
+            ),
+            tariff = DashboardTariff(
+                importCents = tariff.optFiniteDouble("import_cents_per_kwh"),
+                feedInCents = tariff.optFiniteDouble("feed_in_cents_per_kwh"),
+                forecast = tariff.optJSONArray("feed_in_forecast").objects().mapNotNull {
+                    it.optFiniteDouble("cents_per_kwh")?.let { value -> DashboardPoint(it.optInstant("at"), value) }
+                },
+            ),
+            controls = DashboardControls(
+                chargingMode = chargingMode.optNullableString("value"),
+                chargingModes = chargingMode.optJSONArray("options").strings(),
+                mediaRoomAvailable = controls.optJSONObject("media_room_mode")
+                    ?.optBoolean("available", false) == true,
+            ),
+        )
+    }
+
     fun assistant(root: JSONObject): AssistantReply {
         val audio = root.optJSONObject("audio") ?: JSONObject()
         return AssistantReply(
@@ -542,6 +649,7 @@ internal object PilotJson {
         responsePlayerId = value.optNullableString("response_player_id"),
         defaultMusicPlayerId = value.optNullableString("default_music_player_id"),
         players = value.optJSONArray("players").objects().map(::player),
+        musicEnabled = value.optBoolean("music_enabled", true),
     )
 
     private fun player(value: JSONObject, fallbackId: String = "") = PilotPlayer(

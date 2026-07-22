@@ -1,0 +1,26 @@
+[Unit]
+Description=Pilot display Music Assistant Sendspin player
+After=network-online.target user@{{ display_node_uid.stdout }}.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User={{ display_node_user }}
+Group={{ display_node_user }}
+Environment=HOME=/var/lib/pilot-display
+Environment=XDG_RUNTIME_DIR=/run/user/{{ display_node_uid.stdout }}
+Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{{ display_node_uid.stdout }}/bus
+Environment=XDG_CONFIG_HOME=/var/lib/pilot-display/sendspin/config
+Environment=XDG_CACHE_HOME=/var/lib/pilot-display/sendspin/cache
+Environment=SERVER_PORT={{ display_node_sendspin_server_port }}
+ExecStart=/opt/pilot-display/vendor/sendspin-{{ display_node_sendspin_version }}/bin/sendspin daemon --name "{{ display_node_sendspin_name }}" --id "{{ display_node_sendspin_id }}" --url "{{ display_node_sendspin_server_url }}" --audio-device "{{ display_node_sendspin_audio_device }}" --hardware-volume false --interface "{{ display_node_sendspin_interface }}" --manufacturer "Pilot OS" --product-name "Pilot Display Audio"
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/pilot-display/sendspin
+
+[Install]
+WantedBy=multi-user.target

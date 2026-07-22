@@ -298,6 +298,9 @@ body[data-mode="media-console"] .track-card {
 .solar-flow { stroke: url("#solar-gradient"); filter: drop-shadow(0 0 7px rgba(255,190,72,.75)); }
 .grid-flow { stroke: url("#grid-gradient"); filter: drop-shadow(0 0 7px rgba(75,184,255,.75)); }
 .battery-flow { stroke: url("#battery-gradient"); filter: drop-shadow(0 0 7px rgba(0,230,190,.72)); }
+.home-flow { stroke: url("#home-gradient"); filter: drop-shadow(0 0 7px rgba(97,230,168,.72)); }
+.home-flow-base { stroke: rgba(97,230,168,.24); }
+.battery-feeding-home .home-flow.active { stroke-width: 8; }
 @keyframes energy-flow-forward { to { stroke-dashoffset: -28; } }
 @keyframes energy-flow-reverse { to { stroke-dashoffset: 28; } }
 .flow-particles {
@@ -321,6 +324,10 @@ body[data-mode="media-console"] .track-card {
 .battery-particles circle {
   fill: #00f0c6;
   filter: drop-shadow(0 0 8px #00e6be);
+}
+.home-particles circle {
+  fill: #61e6a8;
+  filter: drop-shadow(0 0 8px #61e6a8);
 }
 
 .flow-node {
@@ -870,16 +877,24 @@ body.keyboard-open .page[data-page="music"] { padding-bottom: 0; }
  * device state animations, but avoid Chromium's costly software-raster path.
  * SVG filters, backdrop blur and SMIL particles otherwise repaint most of the
  * 1024x600 scene every frame. SMIL is paused by app.js for this profile; the
- * dashed flow remains animated at a bounded 20 visual updates per second.
+ * dashed flow remains animated at a bounded 10 visual updates per second.
  */
+body[data-performance-profile="low-power"] .flow-lines {
+  shape-rendering: optimizeSpeed;
+}
 body[data-performance-profile="low-power"] .flow-active.active {
   animation-timing-function: steps(var(--flow-steps, 36), end);
 }
 body[data-performance-profile="low-power"] .flow-particles { display: none; }
+body[data-performance-profile="low-power"] .solar-flow { stroke: #ffc247; }
+body[data-performance-profile="low-power"] .grid-flow { stroke: #4bb8ff; }
+body[data-performance-profile="low-power"] :is(.battery-flow, .home-flow) { stroke: #00e6be; }
+body[data-performance-profile="low-power"] .vehicle-flow { stroke: #ff6072; }
+body[data-performance-profile="low-power"] .server-flow { stroke: #b49bff; }
 body[data-performance-profile="low-power"] :is(
-  .solar-flow, .grid-flow, .battery-flow, .vehicle-flow, .server-flow,
+  .solar-flow, .grid-flow, .battery-flow, .home-flow, .vehicle-flow, .server-flow,
   .solar-particles circle, .grid-particles circle, .battery-particles circle,
-  .vehicle-particles circle, .server-particles circle
+  .home-particles circle, .vehicle-particles circle, .server-particles circle
 ) { filter: none; }
 body[data-performance-profile="low-power"] .house-flow .flow-node {
   backdrop-filter: none;
@@ -913,6 +928,7 @@ body[data-performance-profile="low-power"] .server-rack-visual i {
 .motion-paused .server-rack-visual i {
   animation-play-state: paused !important;
 }
+.motion-paused .energy-house { transition: none; }
 
 .console-only { --console-accent: #62e7b2; }
 .console-topline {

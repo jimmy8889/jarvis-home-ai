@@ -254,7 +254,7 @@ administrator token or communicate directly with the N150.
 1. Build the media-console agent, capability, health model, and authenticated
    command contract. **Source complete.**
 2. Build the fullscreen shell with music, assistant-overlay, stale/offline, and
-   recovery states. **Source complete in Pilot Linux Display 0.6**, including
+   recovery states. **Source complete in Pilot Linux Display 0.6.2**, including
    the direct media-home startup route and 1920 x 1080 visual acceptance.
 3. Add Music Assistant now-playing, progress and queue presentation.
    **Source complete**, including artist/album/playlist drill-down; target
@@ -287,7 +287,9 @@ The milestone is complete when:
 - invalid, expired, cross-room, and arbitrary-path commands fail closed;
 - the current and previous immutable releases can be selected remotely.
 
-Until all of these checks pass on the selected N150, this role must be reported
-as **built but awaiting hardware acceptance**, not deployed or operational.
+The role is now deployed on the selected N150 and its web, kiosk and existing
+room-audio services are operational. Until every acceptance check above passes,
+report the media-center capability as **service-deployed but awaiting hardware
+acceptance**, not as accepted local video, HDMI audio, CEC or HDR playback.
 Intel GPU/HDMI passthrough is not part of this design: the media-console target
 is native Debian with direct hardware access.

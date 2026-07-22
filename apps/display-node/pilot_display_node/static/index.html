@@ -39,6 +39,7 @@
                 <linearGradient id="solar-gradient"><stop stop-color="#ffd35d"></stop><stop offset="1" stop-color="#ff9f43"></stop></linearGradient>
                 <linearGradient id="grid-gradient"><stop stop-color="#4bb8ff"></stop><stop offset="1" stop-color="#697dff"></stop></linearGradient>
                 <linearGradient id="battery-gradient"><stop stop-color="#00e6be"></stop><stop offset="1" stop-color="#3ba7ff"></stop></linearGradient>
+                <linearGradient id="home-gradient"><stop stop-color="#00e6be"></stop><stop offset="1" stop-color="#a991ff"></stop></linearGradient>
                 <linearGradient id="vehicle-gradient"><stop stop-color="#ff5468"></stop><stop offset="1" stop-color="#ff9b62"></stop></linearGradient>
               </defs>
               <path class="flow-base" d="M500 60 C500 105 500 125 500 156"></path>
@@ -46,16 +47,19 @@
               <path class="flow-base" d="M780 353 C700 344 655 316 610 282"></path>
               <path class="flow-base" d="M190 340 C280 330 344 300 405 270"></path>
               <path class="flow-base" d="M832 276 C745 275 690 266 618 252"></path>
+              <path class="flow-base home-flow-base" d="M610 282 C590 320 548 347 500 370"></path>
               <path id="flow-solar" class="flow-active solar-flow" d="M500 60 C500 105 500 125 500 156"></path>
               <path id="flow-grid" class="flow-active grid-flow" d="M875 120 C780 120 720 160 647 205"></path>
               <path id="flow-battery" class="flow-active battery-flow" d="M780 353 C700 344 655 316 610 282"></path>
               <path id="flow-vehicle" class="flow-active vehicle-flow" d="M610 282 C520 310 350 338 190 340"></path>
               <path id="flow-server" class="flow-active server-flow" d="M618 252 C690 266 745 275 832 276"></path>
+              <path id="flow-home" class="flow-active home-flow" d="M610 282 C590 320 548 347 500 370"></path>
               <g id="particles-solar" class="flow-particles solar-particles"><circle r="4"><animateMotion dur="1.5s" repeatCount="indefinite" path="M500 60 C500 105 500 125 500 156"></animateMotion></circle></g>
               <g id="particles-grid" class="flow-particles grid-particles"><g class="particles-forward"><circle r="4"><animateMotion dur="1.6s" repeatCount="indefinite" path="M875 120 C780 120 720 160 647 205"></animateMotion></circle></g><g class="particles-reverse"><circle r="4"><animateMotion dur="1.6s" repeatCount="indefinite" path="M647 205 C720 160 780 120 875 120"></animateMotion></circle></g></g>
               <g id="particles-battery" class="flow-particles battery-particles"><g class="particles-forward"><circle r="5"><animateMotion dur="1.35s" repeatCount="indefinite" path="M780 353 C700 344 655 316 610 282"></animateMotion></circle></g><g class="particles-reverse"><circle r="5"><animateMotion dur="1.35s" repeatCount="indefinite" path="M610 282 C655 316 700 344 780 353"></animateMotion></circle></g></g>
               <g id="particles-vehicle" class="flow-particles vehicle-particles"><circle r="4"><animateMotion dur="1.3s" repeatCount="indefinite" path="M610 282 C520 310 350 338 190 340"></animateMotion></circle></g>
               <g id="particles-server" class="flow-particles server-particles"><circle r="4"><animateMotion dur="1.4s" repeatCount="indefinite" path="M618 252 C690 266 745 275 832 276"></animateMotion></circle></g>
+              <g id="particles-home" class="flow-particles home-particles"><circle r="5"><animateMotion dur="1.35s" repeatCount="indefinite" path="M610 282 C590 320 548 347 500 370"></animateMotion></circle><circle r="3.5"><animateMotion begin="-.675s" dur="1.35s" repeatCount="indefinite" path="M610 282 C590 320 548 347 500 370"></animateMotion></circle></g>
             </svg>
             <article id="node-solar" class="flow-node solar-node"><span class="node-icon">☀</span><div><small>PV</small><strong id="energy-solar">—</strong></div></article>
             <article id="node-grid" class="flow-node grid-node"><span class="node-icon">⇄</span><div><small>Grid</small><strong id="energy-grid">—</strong><em id="energy-grid-direction">Waiting</em></div></article>

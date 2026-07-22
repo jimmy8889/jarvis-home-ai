@@ -35,8 +35,10 @@ The node deliberately avoids a full desktop:
 - The Pi resolves `display_node_performance_profile: auto` to `low-power`.
   This keeps the power-scaled travelling paths, directional battery motion and
   rack LEDs while pausing redundant SVG particles and removing repaint-heavy
-  blur/drop-shadow effects. Motion also pauses whenever the energy page is not
-  visible. Pin `balanced` only after measuring adequate thermal headroom.
+  blur/drop-shadow effects. It uses solid flow strokes plus speed-optimized SVG
+  rendering, and quantizes dash motion to at most 10 paint updates per second;
+  all motion also pauses when the energy page is hidden or the user requests
+  reduced motion. Pin `balanced` only after measuring adequate thermal headroom.
 - The browser profile and its bounded caches live under
   `/var/lib/pilot-display`.
 - `pilot-display-web.service` serves the local surface only on
@@ -52,8 +54,10 @@ The deployed touch surface provides:
 - Brisbane time and date
 - live solar, home load, grid direction, battery power/direction, and battery SOC
 - an animated power-flow diagram whose direction, speed, glow, and active
-  paths follow the live Home Assistant values; bright moving particles make
-  Battery-to-Home discharge and reversed charging/export paths explicit
+  paths follow the live Home Assistant values; an explicit hub-to-Home segment
+  completes the Battery-to-Home discharge route. The balanced profile adds
+  travelling particles, while the Pi profile uses the bounded moving dashes
+  without continuously repainting SMIL particles
 - now-playing title, artist, player, state, and volume for every active Music
   Assistant endpoint
 - touch controls for room selection, play, pause, stop, and volume
@@ -73,7 +77,7 @@ Assistant, or Pilot administrator credentials.
 
 ## Current source release
 
-Pilot Linux Display 0.6 now also implements:
+Pilot Linux Display 0.6.2 now also implements:
 
 - a configurable `display` or `media-console` presentation mode;
 - the shared Flow, History, Daily and Climate monitoring surfaces, including
@@ -82,7 +86,8 @@ Pilot Linux Display 0.6 now also implements:
 - four local James House scenes selected from Home Assistant's day/night state
   and Tesla presence, with a 450 ms crossfade that never waits on the network;
   smooth watt-scaled directional paths, a visible battery charge/discharge
-  direction, and 100 W grid and vehicle animation deadbands;
+  direction, an explicit Home-load leg, and 100 W grid and vehicle animation
+  deadbands;
 - a persistent selected room/output stored in browser-local presentation
   state, without persisting a credential in the browser;
 - one sequenced media-state arbiter: the five-second legacy surface, full media
@@ -208,11 +213,14 @@ The previously deployed Pi release passed:
 - no current or historical thermal throttling
 - two-way application rollback
 
-After promoting the 0.6 source release, repeat those checks and also
-verify output persistence, the touch keyboard, progress/queue updates, stale
-recovery, the monitoring pages, cached artwork, and a real
-assistant-completion overlay. Search for a known TIDAL artist, start a track in
-Office, close the keyboard and confirm the content immediately regains the
-entire display. USB-DAC playback has a separate audible acceptance gate. Until
-that run is recorded, the new UI behavior is **built and tested in source but
-awaiting Pi acceptance**.
+The 0.6.1 service release is deployed on the Pi with healthy web/kiosk services,
+Core connectivity and an intact rollback pair. Promote 0.6.2, then repeat the
+reboot check and measure Chromium CPU and temperature with several simultaneous
+flows; the low-power profile now uses solid speed-optimized SVG strokes, caps
+dash paint updates at 10 per second and pauses all motion off-page or under
+reduced-motion preferences. Also verify the
+touch keyboard, progress/queue updates, stale recovery, cached artwork and a
+real assistant-completion overlay. Search for a known TIDAL artist, start a
+track in Office, close the keyboard and confirm the content immediately regains
+the entire display. USB-DAC playback and touch remain separate physical
+acceptance gates.

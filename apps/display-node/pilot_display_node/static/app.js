@@ -5,7 +5,8 @@ const elements = Object.fromEntries(
     "energy-state", "energy-solar", "energy-home", "energy-grid",
     "energy-grid-direction", "energy-battery", "energy-battery-direction",
     "energy-soc", "soc-fill", "energy-flow", "flow-solar", "flow-grid",
-    "flow-battery", "particles-solar", "particles-grid", "particles-battery",
+    "flow-battery", "flow-home", "particles-solar", "particles-grid", "particles-battery",
+    "particles-home",
     "node-solar", "node-grid", "node-home", "node-battery",
     "flow-vehicle", "flow-server", "particles-vehicle", "particles-server",
     "node-vehicle", "node-server", "energy-vehicle", "energy-server", "vehicle-state",
@@ -56,6 +57,7 @@ const HOUSE_SCENES = Object.freeze({
   "house-night-tesla": "/assets/house-night-tesla.png",
 });
 const flowDiagram = document.querySelector(".flow-lines");
+const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
 let smilPaused = null;
 
 function applyPerformanceProfile(profile) {
@@ -69,13 +71,19 @@ function applyPerformanceProfile(profile) {
 
 function syncAnimationActivity() {
   const homeVisible = document.querySelector('.page.active')?.dataset.page === "home";
-  const pagePaused = document.hidden || !homeVisible;
+  const pagePaused = document.hidden || !homeVisible || reducedMotion.matches;
   document.body.classList.toggle("motion-paused", pagePaused);
   const pauseSmil = pagePaused || document.body.dataset.performanceProfile === "low-power";
   if (smilPaused === pauseSmil) return;
   if (pauseSmil) flowDiagram?.pauseAnimations?.();
   else flowDiagram?.unpauseAnimations?.();
   smilPaused = pauseSmil;
+}
+
+if (typeof reducedMotion.addEventListener === "function") {
+  reducedMotion.addEventListener("change", syncAnimationActivity);
+} else {
+  reducedMotion.addListener(syncAnimationActivity);
 }
 
 function renderHouseScene(value, power, vehicle) {
@@ -148,7 +156,7 @@ function setFlow(path, particles, node, value, reverse = false, threshold = 25) 
   // retaining a visibly power-scaled speed and intensity.
   const speedSeconds = Math.round((2.5 - (normalized * 1.7)) * 10) / 10;
   const speed = `${speedSeconds.toFixed(1)}s`;
-  const steps = String(Math.max(16, Math.round(speedSeconds * 20)));
+  const steps = String(Math.max(8, Math.round(speedSeconds * 10)));
   const strength = String((Math.round((0.45 + (normalized * 0.55)) * 20) / 20).toFixed(2));
   if (path.dataset.flowSpeed !== speed) {
     path.dataset.flowSpeed = speed;
@@ -193,7 +201,15 @@ function renderEnergy(energy = {}) {
     battery,
     battery < 0,
   );
-  elements.node_home.classList.toggle("active", typeof home === "number" && home >= 25);
+  setFlow(elements.flow_home, elements.particles_home, elements.node_home, home);
+  const batteryDirection = directions.battery || energy.battery?.direction;
+  const batteryDischarging = batteryDirection === "discharging" || (
+    !batteryDirection && typeof battery === "number" && battery >= 25
+  );
+  elements.energy_flow.classList.toggle(
+    "battery-feeding-home",
+    batteryDischarging && typeof home === "number" && home >= 25,
+  );
   elements.energy_flow.setAttribute(
     "aria-label",
     `Solar ${watts(solar)}, home load ${watts(home)}, grid ${

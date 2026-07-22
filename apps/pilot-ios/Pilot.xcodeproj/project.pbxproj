@@ -12,6 +12,9 @@
 		2C66CABBDDEA7F3B797AC6A8 /* KeychainStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3A10FDF9ED1E34E334E2FD50 /* KeychainStore.swift */; };
 		93570751D7B731E10026294F /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0403CF9AD9A373A5C4ECA2C /* Models.swift */; };
 		9778D75A4D000C2405F0F53E /* PilotTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5169EE5BCE182D7B1AFBC22B /* PilotTests.swift */; };
+		A2F6BD8D8D4A937B4D8CD6E3 /* PhonePlaybackController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B45F19FEC453C7C45B90BB83 /* PhonePlaybackController.swift */; };
+		AD1B14677B9B6BD4063C4B8B /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 83A4E73A78886F255F2ED460 /* Assets.xcassets */; };
+		BB2E1AB014C6C81377A42F25 /* SendspinKit in Frameworks */ = {isa = PBXBuildFile; productRef = 1415F6AAF3FCC263AA335360 /* SendspinKit */; };
 		DF4427ABDB61AE355381264B /* PilotModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A3D7B9A9354E56EC99B7E08 /* PilotModel.swift */; };
 		F1D9C21F86E27295DA5AA39F /* PilotApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 88E48CEE1B3F4DF8D6EDB216 /* PilotApp.swift */; };
 /* End PBXBuildFile section */
@@ -31,13 +34,26 @@
 		3A10FDF9ED1E34E334E2FD50 /* KeychainStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainStore.swift; sourceTree = "<group>"; };
 		5169EE5BCE182D7B1AFBC22B /* PilotTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PilotTests.swift; sourceTree = "<group>"; };
 		6A3D7B9A9354E56EC99B7E08 /* PilotModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PilotModel.swift; sourceTree = "<group>"; };
+		83A4E73A78886F255F2ED460 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		88E48CEE1B3F4DF8D6EDB216 /* PilotApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PilotApp.swift; sourceTree = "<group>"; };
-		A69638DA27EA76C10C483DDC /* PilotTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = PilotTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-		AB85CEC11BD665F9FF73BE7E /* Pilot.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = Pilot.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		A69638DA27EA76C10C483DDC /* PilotTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = PilotTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		AB85CEC11BD665F9FF73BE7E /* Pilot.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Pilot.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		AEDFE53775C96B8F08B3A077 /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
 		B0403CF9AD9A373A5C4ECA2C /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
+		B45F19FEC453C7C45B90BB83 /* PhonePlaybackController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhonePlaybackController.swift; sourceTree = "<group>"; };
 		F5C5898A0D20AD0532CB74F5 /* PilotAPI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PilotAPI.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		04CCF6C4AF3422963904D8CB /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				BB2E1AB014C6C81377A42F25 /* SendspinKit in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
 		2DB63B66A426AB40F3323889 /* PilotTests */ = {
@@ -69,9 +85,11 @@
 		F1EA1129CE9D13BD867B1F21 /* Pilot */ = {
 			isa = PBXGroup;
 			children = (
+				83A4E73A78886F255F2ED460 /* Assets.xcassets */,
 				033B7B0DFB321D06AF6959AE /* Info.plist */,
 				3A10FDF9ED1E34E334E2FD50 /* KeychainStore.swift */,
 				B0403CF9AD9A373A5C4ECA2C /* Models.swift */,
+				B45F19FEC453C7C45B90BB83 /* PhonePlaybackController.swift */,
 				F5C5898A0D20AD0532CB74F5 /* PilotAPI.swift */,
 				88E48CEE1B3F4DF8D6EDB216 /* PilotApp.swift */,
 				6A3D7B9A9354E56EC99B7E08 /* PilotModel.swift */,
@@ -106,6 +124,8 @@
 			buildConfigurationList = C88E1BB78C3D84A1284783C0 /* Build configuration list for PBXNativeTarget "Pilot" */;
 			buildPhases = (
 				103AA9C78E34D6CDE3EA0B73 /* Sources */,
+				7EFE0C03BFA31B79D408917E /* Resources */,
+				04CCF6C4AF3422963904D8CB /* Frameworks */,
 			);
 			buildRules = (
 			);
@@ -113,6 +133,7 @@
 			);
 			name = Pilot;
 			packageProductDependencies = (
+				1415F6AAF3FCC263AA335360 /* SendspinKit */,
 			);
 			productName = Pilot;
 			productReference = AB85CEC11BD665F9FF73BE7E /* Pilot.app */;
@@ -125,19 +146,24 @@
 			isa = PBXProject;
 			attributes = {
 				BuildIndependentTargetsInParallel = YES;
-				LastUpgradeCheck = 1430;
+				LastUpgradeCheck = 2660;
 				TargetAttributes = {
+					FE8ED209D7643DC0791F345F = {
+						DevelopmentTeam = 362V48U65C;
+					};
 				};
 			};
 			buildConfigurationList = 79B4DC32867D528FEEA13573 /* Build configuration list for PBXProject "Pilot" */;
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
 			knownRegions = (
-				Base,
 				en,
 			);
 			mainGroup = 5DCCA06A0E104DBA6E91894C;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				CCCB69F4349AB3E1C2966687 /* XCRemoteSwiftPackageReference "SendspinKit" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = DC7D82CC69762577B57556DA /* Products */;
 			projectDirPath = "";
@@ -149,6 +175,17 @@
 		};
 /* End PBXProject section */
 
+/* Begin PBXResourcesBuildPhase section */
+		7EFE0C03BFA31B79D408917E /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				AD1B14677B9B6BD4063C4B8B /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
 /* Begin PBXSourcesBuildPhase section */
 		103AA9C78E34D6CDE3EA0B73 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
@@ -156,6 +193,7 @@
 			files = (
 				2C66CABBDDEA7F3B797AC6A8 /* KeychainStore.swift in Sources */,
 				93570751D7B731E10026294F /* Models.swift in Sources */,
+				A2F6BD8D8D4A937B4D8CD6E3 /* PhonePlaybackController.swift in Sources */,
 				260C6B29B047979CE7181505 /* PilotAPI.swift in Sources */,
 				F1D9C21F86E27295DA5AA39F /* PilotApp.swift in Sources */,
 				DF4427ABDB61AE355381264B /* PilotModel.swift in Sources */,
@@ -186,6 +224,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -202,6 +241,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -251,6 +291,7 @@
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
 				GCC_C_LANGUAGE_STANDARD = gnu11;
 				GCC_DYNAMIC_NO_PIC = NO;
 				GCC_NO_COMMON_BLOCKS = YES;
@@ -272,6 +313,7 @@
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 				SWIFT_VERSION = 6.0;
 			};
@@ -282,6 +324,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
+				DEVELOPMENT_TEAM = 362V48U65C;
 				INFOPLIST_FILE = Pilot/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -331,6 +374,7 @@
 				COPY_PHASE_STRIP = NO;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				GCC_C_LANGUAGE_STANDARD = gnu11;
 				GCC_NO_COMMON_BLOCKS = YES;
@@ -346,6 +390,7 @@
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
 				SWIFT_COMPILATION_MODE = wholemodule;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_OPTIMIZATION_LEVEL = "-O";
 				SWIFT_VERSION = 6.0;
 			};
@@ -356,6 +401,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
+				DEVELOPMENT_TEAM = 362V48U65C;
 				INFOPLIST_FILE = Pilot/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -400,6 +446,25 @@
 			defaultConfigurationName = Debug;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		CCCB69F4349AB3E1C2966687 /* XCRemoteSwiftPackageReference "SendspinKit" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/Sendspin/SendspinKit.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 1.0.1;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		1415F6AAF3FCC263AA335360 /* SendspinKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = CCCB69F4349AB3E1C2966687 /* XCRemoteSwiftPackageReference "SendspinKit" */;
+			productName = SendspinKit;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = A7605EA25E9B512DD73FBB4B /* Project object */;
 }

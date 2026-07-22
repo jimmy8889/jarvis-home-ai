@@ -402,6 +402,31 @@ class DisplayNodeApiTests(unittest.TestCase):
             },
         )
 
+    def test_local_media_queue_is_derived_from_authenticated_device(self) -> None:
+        with patch.object(
+            Integrations,
+            "music_assistant",
+            new=AsyncMock(return_value={"accepted": True}),
+        ) as music_assistant:
+            response = self.client.post(
+                "/v1/devices/pilot-bedroom-display/media/local",
+                headers=self.headers,
+                json={"action": "play_media", "media_uri": "tidal://track/123"},
+            )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(
+            response.json()["queue_id"],
+            "pilot-native-pilot-bedroom-display",
+        )
+        music_assistant.assert_awaited_once_with(
+            "player_queues/play_media",
+            {
+                "queue_id": "pilot-native-pilot-bedroom-display",
+                "media": "tidal://track/123",
+            },
+        )
+
     def test_media_browse_returns_artist_albums_and_tracks(self) -> None:
         async def request(_integration: Integrations, command: str, args: dict) -> object:
             if command == "music/item_by_uri":

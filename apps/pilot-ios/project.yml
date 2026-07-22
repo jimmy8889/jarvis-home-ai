@@ -6,6 +6,10 @@ options:
 settings:
   base:
     SWIFT_VERSION: "6.0"
+packages:
+  SendspinKit:
+    url: https://github.com/Sendspin/SendspinKit.git
+    from: 1.0.1
 targets:
   Pilot:
     type: application
@@ -31,8 +35,11 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.jameshazell.pilot
         PRODUCT_NAME: Pilot
+        DEVELOPMENT_TEAM: 362V48U65C
         SUPPORTS_MACCATALYST: YES
         TARGETED_DEVICE_FAMILY: "1,2"
+    dependencies:
+      - package: SendspinKit
     scheme:
       testTargets:
         - PilotTests

@@ -38,11 +38,16 @@ songs; album and playlist URIs resolve to their tracks. iOS and Linux displays
 use those projections for artwork-led discovery without storing the Music
 Assistant token.
 
-On iPhone, **This iPhone** opens Music Assistant's browser player inside Pilot.
-This is intentionally the one provider-facing playback surface: the browser is
-itself the local Sendspin output while Pilot Core remains authoritative for the
-other room endpoints. It can be disabled or pointed at another trusted LAN
-Music Assistant origin in Settings.
+On iPhone, **This iPhone** is a native Sendspin player inside Pilot. It appears
+beside room outputs, shares the artwork-led browse/search interface, survives
+tab changes and supports background audio. Pilot Core derives the player's
+`pilot-native-{device_id}` Music Assistant queue server-side and proxies local
+commands through the paired device identity, so neither an administrator token
+nor the Music Assistant token is embedded in the app.
+
+The client currently uses Music Assistant's configured trusted LAN Sendspin
+origin for the audio socket. Remote playback must wait for a trusted TLS route;
+the existing private-LAN HTTP exception is not an internet exposure policy.
 
 The Raspberry Pi 10-inch node has an optional pinned Sendspin player in the
 display Ansible role. Production installs the runtime but leaves it disabled

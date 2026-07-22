@@ -48,7 +48,7 @@ class DashboardService:
 
     async def _fresh_snapshot(self) -> dict[str, Any]:
         entity_ids = self._configured_entity_ids()
-        history_ids = tuple(
+        power_history_ids = tuple(
             entity_id
             for entity_id in (
                 self.settings.energy_home_load_entity_id,
@@ -57,6 +57,20 @@ class DashboardService:
             )
             if entity_id
         )
+        temperature_history_ids = tuple(
+            dict.fromkeys(
+                entity_id
+                for entity_id in (
+                    self.settings.temperature_office_entity_id,
+                    self.settings.temperature_tv_room_entity_id,
+                    self.settings.outdoor_temperature_entity_id,
+                    self.settings.temperature_bedroom_entity_id,
+                    self.settings.temperature_media_room_entity_id,
+                )
+                if entity_id
+            )
+        )
+        history_ids = tuple(dict.fromkeys((*power_history_ids, *temperature_history_ids)))
         states_result, history_result, weather_result = await asyncio.gather(
             self._states(entity_ids),
             self._history(history_ids),
@@ -75,7 +89,7 @@ class DashboardService:
             "daily": self._daily(state_by_id),
             "vehicle": self._vehicle(state_by_id),
             "tariff": self._tariff(state_by_id),
-            "temperatures": self._temperatures(state_by_id),
+            "temperatures": self._temperatures(state_by_id, history_by_id),
             "history": self._history_projection(history_by_id),
             "weather": weather,
             "controls": self._controls(state_by_id),
@@ -254,7 +268,43 @@ class DashboardService:
 
     def _tariff(self, states: dict[str, dict[str, Any]]) -> dict[str, Any]:
         forecast_state = states.get(self.settings.amber_feed_in_forecast_entity_id, {})
-        forecast = forecast_state.get("attributes", {}).get("forecast", [])
+        attributes = forecast_state.get("attributes", {})
+        forecast = next(
+            (
+                attributes[key]
+                for key in ("forecast", "forecasts", "prices")
+                if isinstance(attributes.get(key), list)
+            ),
+            [],
+        )
+        forecast_unit = str(attributes.get("unit_of_measurement") or "c/kWh")
+
+        def forecast_point(item: dict[str, Any]) -> dict[str, Any]:
+            at = next(
+                (
+                    self._text(item.get(key))
+                    for key in ("time", "start_time", "datetime", "date", "nem_date")
+                    if self._text(item.get(key))
+                ),
+                None,
+            )
+            price = next(
+                (
+                    item.get(key)
+                    for key in (
+                        "value",
+                        "per_kwh",
+                        "price",
+                        "cents_per_kwh",
+                        "spot_per_kwh",
+                    )
+                    if item.get(key) is not None
+                ),
+                None,
+            )
+            unit = str(item.get("unit") or item.get("unit_of_measurement") or forecast_unit)
+            return {"at": at, "cents_per_kwh": self._price_value(price, unit)}
+
         return {
             "import_cents_per_kwh": self._price_state(
                 states, self.settings.amber_import_price_entity_id
@@ -262,17 +312,14 @@ class DashboardService:
             "feed_in_cents_per_kwh": self._price_state(
                 states, self.settings.amber_feed_in_price_entity_id
             ),
-            "feed_in_forecast": [
-                {
-                    "at": self._text(item.get("time")),
-                    "cents_per_kwh": self._price_value(item.get("value"), "$/kWh"),
-                }
-                for item in forecast[:96]
-                if isinstance(item, dict)
-            ],
+            "feed_in_forecast": [forecast_point(item) for item in forecast[:96] if isinstance(item, dict)],
         }
 
-    def _temperatures(self, states: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
+    def _temperatures(
+        self,
+        states: dict[str, dict[str, Any]],
+        history: dict[str, list[dict[str, Any]]],
+    ) -> list[dict[str, Any]]:
         configured = (
             ("office", "Office", self.settings.temperature_office_entity_id),
             ("tv-room", "TV room", self.settings.temperature_tv_room_entity_id),
@@ -286,6 +333,7 @@ class DashboardService:
                 "label": label,
                 "temperature_c": self._temperature_state(states, entity_id),
                 "entity_id": entity_id,
+                "history": self._temperature_history_points(history.get(entity_id, [])),
             }
             for identifier, label, entity_id in configured
             if entity_id
@@ -352,6 +400,28 @@ class DashboardService:
         stride = math.ceil(len(points) / 96)
         return [*points[::stride]][-96:]
 
+    def _temperature_history_points(
+        self, values: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
+        points: list[dict[str, Any]] = []
+        for item in values:
+            value = self._number(item.get("state"))
+            attrs = item.get("attributes") or {}
+            unit = str(attrs.get("unit_of_measurement") or "°C").casefold()
+            if value is None or unit not in {"°c", "c", "celsius", "°f", "f", "fahrenheit"}:
+                continue
+            if unit in {"°f", "f", "fahrenheit"}:
+                value = (value - 32) * 5 / 9
+            if not -100 <= value <= 100:
+                continue
+            at = self._text(item.get("last_updated") or item.get("last_changed"))
+            if at:
+                points.append({"at": at, "value": round(value, 2)})
+        if len(points) <= 96:
+            return points
+        stride = math.ceil(len(points) / 96)
+        return [*points[::stride]][-96:]
+
     @staticmethod
     def _forecast_day(item: dict[str, Any]) -> dict[str, Any]:
         def number(value: Any) -> float | None:
@@ -405,7 +475,8 @@ class DashboardService:
         value = self._number(candidate)
         if value is None:
             return None
-        if unit.casefold().startswith("$/"):
+        normalized_unit = unit.casefold().replace(" ", "")
+        if normalized_unit.startswith("$/") or normalized_unit in {"aud/kwh", "$/kwh"}:
             value *= 100
         return round(value, 4)
 

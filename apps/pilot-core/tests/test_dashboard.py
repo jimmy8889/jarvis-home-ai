@@ -92,6 +92,7 @@ class DashboardServiceTests(unittest.IsolatedAsyncioTestCase):
             "sensor.home": [state("sensor.home", 5000, "W")],
             "sensor.battery": [state("sensor.battery", -3000, "W")],
             "sensor.solar": [state("sensor.solar", 8100, "W")],
+            "sensor.office": [state("sensor.office", 21.6, "°C")],
         }
         integrations.home_assistant_weather.return_value = {
             "entity_id": "weather.home",
@@ -132,11 +133,16 @@ class DashboardServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["daily"]["solar_generated_kwh"], 69.64)
         self.assertEqual(result["tariff"]["feed_in_forecast"][0]["cents_per_kwh"], 5.98)
         self.assertEqual(len(result["temperatures"]), 5)
+        self.assertEqual(result["temperatures"][0]["history"][0]["value"], 21.6)
         self.assertEqual([item["id"] for item in result["history"]["series"]], [
             "home_load", "battery", "solar"
         ])
         self.assertEqual(result["controls"]["tesla_charging_mode"]["options"], ["Grid", "Solar"])
         self.assertNotIn("attributes", str(result))
+
+        history_ids = integrations.home_assistant_history.await_args.args[0]
+        self.assertEqual(len(history_ids), 8)
+        self.assertIn("sensor.office", history_ids)
 
         cached = await service.snapshot()
         self.assertEqual(cached["generated_at"], result["generated_at"])

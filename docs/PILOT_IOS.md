@@ -19,7 +19,11 @@ provides:
 - artwork-led Music Assistant search, artist/album/playlist drill-down,
   playback, previous/next, seek, mute, room transfer and volume control;
 - Grid/Solar Tesla charging mode, Movie Mode On/Off and a `This iPhone`
-  Music Assistant browser-player option;
+  native Sendspin destination that continues playing while navigating the app
+  or while the app is in the background;
+- a compact generated Pilot identity and room selector, bundled energy artwork,
+  animated power/rack presentation, and drag-selectable power, tariff and
+  temperature history charts with exact timestamp/value inspection;
 - compact and expanded now-playing presentation;
 - room-selectable contextual Pilot conversations with structured cards,
   citations and action results;
@@ -87,8 +91,14 @@ origin is required before remote access is enabled.
 
 Energy and monitoring are supplied by the device-scoped `pilot.energy.v1` and
 `pilot.dashboard.v1` contracts. The app does not invent sensor values or
-connect directly to Home Assistant. The mini-player is inset inside each phone
-navigation stack so it cannot cover the tab bar.
+connect directly to Home Assistant. The mini-player is inset once above the
+phone tab bar so it cannot obscure navigation and remains stable across tabs.
+
+`This iPhone` uses the official SendspinKit client. Its stable player identity
+is derived from the paired Pilot device ID, while playback commands travel
+through `/v1/devices/{device_id}/media/local`. Pilot Core derives the matching
+Music Assistant queue ID server-side and records the action; the app never
+receives the Music Assistant token.
 
 Pilot iOS now includes the first device-scoped meeting recorder and review
 surface. It records AAC only after an explicit tap, supports iOS background
@@ -106,7 +116,8 @@ iPad, verify:
    reinstall behavior;
 2. actual iPhone and iPad layouts, Dynamic Type, VoiceOver and orientation;
 3. media transfer, seeking, mute and confirmation-gated home actions against
-   the production rooms;
+   the production rooms, plus native `This iPhone` playback, background audio,
+   interruption recovery and movement between phone and room outputs;
 4. background/foreground event recovery and stale-cache behavior across a Core
    restart and Wi-Fi loss;
 5. a long real meeting recording, retained failed upload, retry, processing and

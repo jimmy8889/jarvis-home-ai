@@ -5,6 +5,7 @@ import AVFoundation
 @MainActor
 @Observable
 final class PilotModel {
+    let phonePlayback = PhonePlaybackController()
     var coreURL: String
     var deviceID: String
     var token: String
@@ -23,6 +24,7 @@ final class PilotModel {
     var activeMediaAction: String?
     var activeMediaResultID: String?
     var mediaError: String?
+    var musicPlaysOnThisIPhone: Bool
     var energy = EnergySnapshot.awaitingBackend
     var energyError: String?
     var dashboard = DashboardSnapshot.unavailable
@@ -78,11 +80,15 @@ final class PilotModel {
             token = KeychainStore.read(account: "device-token")
             selectedRoomID = UserDefaults.standard.string(forKey: "pilot.roomID")
                 ?? "office"
+            musicPlaysOnThisIPhone = UserDefaults.standard.bool(
+                forKey: "pilot.musicPlaysOnThisIPhone"
+            )
         } else {
             coreURL = ""
             deviceID = ""
             token = ""
             selectedRoomID = "office"
+            musicPlaysOnThisIPhone = false
         }
         connectionState = .notConfigured
         activeCoreURL = coreURL
@@ -143,6 +149,30 @@ final class PilotModel {
         UserDefaults.standard.set(roomID, forKey: "pilot.roomID")
         home = nil
         Task { await refreshHome() }
+    }
+
+    func selectMusicRoom(_ roomID: String) {
+        musicPlaysOnThisIPhone = false
+        UserDefaults.standard.set(false, forKey: "pilot.musicPlaysOnThisIPhone")
+        selectRoom(roomID)
+    }
+
+    func selectThisIPhoneForMusic() {
+        musicPlaysOnThisIPhone = true
+        UserDefaults.standard.set(true, forKey: "pilot.musicPlaysOnThisIPhone")
+        Task { await preparePhonePlaybackIfNeeded() }
+    }
+
+    func preparePhonePlaybackIfNeeded() async {
+        guard musicPlaysOnThisIPhone else { return }
+        let musicAssistantURL = UserDefaults.standard.string(
+            forKey: "pilot.musicAssistantURL"
+        ) ?? "http://10.0.2.72:8095"
+        await phonePlayback.connect(baseURL: musicAssistantURL, deviceID: deviceID)
+    }
+
+    var musicDestinationTitle: String {
+        musicPlaysOnThisIPhone ? "This iPhone" : (selectedRoom?.name ?? "Choose room")
     }
 
     func api() throws -> PilotAPI {
@@ -494,7 +524,6 @@ final class PilotModel {
         muted: Bool? = nil,
         operationID: String? = nil
     ) async {
-        guard let player = selectedPlayer else { return }
         activeMediaAction = action
         activeMediaResultID = operationID
         defer {
@@ -502,17 +531,22 @@ final class PilotModel {
             activeMediaResultID = nil
         }
         do {
-            try await api().send(
-                MediaCommand(
-                    action: action,
-                    playerID: player.player.id,
-                    mediaURI: mediaURI,
-                    volume: volume,
-                    positionSeconds: positionSeconds,
-                    muted: muted
-                )
+            let mediaCommand = MediaCommand(
+                action: action,
+                playerID: musicPlaysOnThisIPhone ? nil : selectedPlayer?.player.id,
+                mediaURI: mediaURI,
+                volume: volume,
+                positionSeconds: positionSeconds,
+                muted: muted
             )
-            _ = await refresh(silent: true)
+            if musicPlaysOnThisIPhone {
+                await preparePhonePlaybackIfNeeded()
+                try await api().sendToLocalPlayer(mediaCommand)
+            } else {
+                guard selectedPlayer != nil else { return }
+                try await api().send(mediaCommand)
+                _ = await refresh(silent: true)
+            }
             mediaError = nil
         } catch {
             mediaError = Self.friendlyMessage(for: error)

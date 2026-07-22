@@ -1,4 +1,5 @@
 import XCTest
+import UIKit
 @testable import Pilot
 
 final class PilotTests: XCTestCase {
@@ -77,6 +78,19 @@ final class PilotTests: XCTestCase {
             ),
             "SolarHouse"
         )
+    }
+
+    func testDashboardArtworkIsBundledInTheApp() {
+        for assetName in [
+            "SolarHouse",
+            "SolarHouseDay",
+            "SolarHouseTesla",
+            "SolarHouseTeslaDay",
+            "PilotServerRack",
+            "PilotLogo",
+        ] {
+            XCTAssertNotNil(UIImage(named: assetName), "Missing bundled asset: \(assetName)")
+        }
     }
 
     func testPortableEnergyContractMapsPartialSnapshot() throws {

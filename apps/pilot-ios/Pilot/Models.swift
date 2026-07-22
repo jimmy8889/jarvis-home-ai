@@ -593,9 +593,10 @@ struct DashboardTemperature: Codable, Identifiable, Equatable, Sendable {
     let id: String
     let label: String
     let temperatureCelsius: Double?
+    var history: [DashboardHistoryPoint]? = nil
 
     enum CodingKeys: String, CodingKey {
-        case id, label
+        case id, label, history
         case temperatureCelsius = "temperature_c"
     }
 }

@@ -233,6 +233,15 @@ struct PilotAPI: Sendable {
         )
     }
 
+    func sendToLocalPlayer(_ command: MediaCommand) async throws {
+        let body = try JSONEncoder().encode(command)
+        _ = try await request(
+            path: "v1/devices/\(deviceID)/media/local",
+            method: "POST",
+            body: body
+        )
+    }
+
     func search(_ query: String) async throws -> [MusicSearchResult] {
         let body = try JSONSerialization.data(withJSONObject: [
             "query": query,

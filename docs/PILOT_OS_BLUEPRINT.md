@@ -888,6 +888,10 @@ deployed integration, hardware boundary, or milestone status changes.
 - [x] Add a governed full Home Assistant catalogue and read-only semantic tools
 - [x] Add synchronized floor, area, device, entity, alias, and energy projections
 - [x] Add polished native iOS/iPadOS and Android wall-tablet application surfaces
+- [x] Add native, background-capable `This iPhone` Sendspin playback without a
+      Music Assistant browser handoff or client-held provider credential
+- [x] Add bundled iOS scene/logo/rack artwork and interactive power, Amber and
+      room-temperature history inspection
 - [x] Deploy the first Raspberry Pi large-format Pilot display appliance
 
 ## 14. Immediate next steps
@@ -900,7 +904,9 @@ deployed integration, hardware boundary, or milestone status changes.
    trustworthy room mappings before enabling their controls.
 3. Pair and physically accept iPhone/iPad, the mounted Android wall tablet and
    the Shield using separate scoped identities; test rotation, revocation,
-   offline recovery, accessibility/touch/focus and real media/home actions.
+   offline recovery, accessibility/touch/focus and real media/home actions. On
+   iPhone, explicitly test native `This iPhone` TIDAL/local playback, background
+   audio, interruptions and transfer between the phone, Office and Media Room.
 4. Attach the Pi USB DAC, accept its stable PipeWire sink, enable the staged
    Sendspin player and validate TIDAL plus local lossless playback. Until then,
    the installed player remains disabled.
@@ -1119,3 +1125,10 @@ deployed integration, hardware boundary, or milestone status changes.
   updates, exposes QWERTY touch search without reserving hidden keyboard space,
   and provides a first-class N150 media-console profile. Production Core,
   Raspberry Pi and N150 deployment/physical acceptance remain distinct gates.
+- **4.4** — Built Pilot Core 0.28 and the native iPhone playback/monitoring
+  release: official SendspinKit audio inside Pilot, a device-scoped local queue
+  command boundary, background playback across tabs, bundled product/energy
+  artwork, a brighter rack with native LED motion, compact Pilot navigation and
+  drag-inspectable power, Amber and 24-hour room-temperature charts. Simulator,
+  bundle-resource and full Core tests pass; real iPhone audio/interruption and
+  production data-shape acceptance remain explicit physical checks.

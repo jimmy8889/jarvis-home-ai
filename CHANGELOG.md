@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.28.0 — 2026-07-23
+
+- Replaced the embedded Music Assistant browser handoff on iPhone with an
+  in-app, background-capable Sendspin player. `This iPhone` is now a normal
+  destination in Pilot's music interface, keeps playing across tabs and uses a
+  Core-derived device queue instead of exposing Music Assistant credentials.
+- Added the authenticated device-local media command route and audit event so
+  play, pause, stop, seek, volume, mute and media selection remain within the
+  same scoped Pilot Core control boundary as room playback.
+- Rebuilt the iPhone energy surface with bundled day/night/Tesla assets,
+  power-scaled travelling pulses, a brighter generated server rack and animated
+  LEDs. Added a generated Pilot product mark and compressed the home header and
+  room selector to reclaim vertical space.
+- Added drag-selectable 24-hour power, Amber feed-in and room-temperature
+  charts with exact timestamp/value readouts. Pilot Core now includes bounded
+  temperature histories and accepts the Home Assistant Amber forecast shapes
+  used by the production sensor.
+- Fixed the Xcode project resource phase so all dashboard artwork is compiled
+  into the app. Added a simulator regression test that loads every required
+  house, rack and logo asset from the built bundle.
+
 ## 0.27.1 — 2026-07-22
 
 - Fixed Home Assistant `minimal_response` history parsing so all states in each

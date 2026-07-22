@@ -3108,6 +3108,88 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
             "event": event,
         }
 
+    @app.post("/v1/devices/{device_id}/media/local")
+    async def device_local_media_control(
+        device_id: str,
+        request: RoomMediaCommand,
+        response: Response,
+        x_pilot_device_id: str = Header(),
+        authorization: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        """Control the authenticated device's own Sendspin playback queue.
+
+        The queue identifier is derived by Core and cannot be supplied by the
+        client. This keeps the Music Assistant credential private and prevents a
+        portable client from impersonating another phone player.
+        """
+
+        device = authenticated_device(device_id, x_pilot_device_id, authorization)
+        if "media-control" not in device["capabilities"]:
+            raise HTTPException(
+                status_code=403, detail="device does not have media-control capability"
+            )
+        if request.action not in {
+            "play",
+            "pause",
+            "stop",
+            "next",
+            "previous",
+            "seek",
+            "mute",
+            "set_volume",
+            "play_media",
+        }:
+            raise HTTPException(
+                status_code=422,
+                detail="action is not supported for local device playback",
+            )
+
+        queue_id = f"pilot-native-{device_id}"
+        command_map: dict[str, tuple[str, dict[str, Any]]] = {
+            "play": ("players/cmd/play", {"player_id": queue_id}),
+            "pause": ("players/cmd/pause", {"player_id": queue_id}),
+            "stop": ("players/cmd/stop", {"player_id": queue_id}),
+            "next": ("players/cmd/next", {"player_id": queue_id}),
+            "previous": ("players/cmd/previous", {"player_id": queue_id}),
+            "seek": (
+                "players/cmd/seek",
+                {"player_id": queue_id, "position": request.position_seconds},
+            ),
+            "mute": (
+                "players/cmd/volume_mute",
+                {"player_id": queue_id, "muted": request.muted},
+            ),
+            "set_volume": (
+                "players/cmd/volume_set",
+                {"player_id": queue_id, "volume_level": request.volume},
+            ),
+            "play_media": (
+                "player_queues/play_media",
+                {"queue_id": queue_id, "media": request.media_uri},
+            ),
+        }
+        command, args = command_map[request.action]
+        try:
+            result = await integrations.music_assistant(command, args)
+        except IntegrationUnavailable as error:
+            raise HTTPException(status_code=503, detail=str(error)) from None
+        except IntegrationRequestFailed as error:
+            raise HTTPException(status_code=502, detail=str(error)) from None
+
+        event = database.record_client_event(
+            "pilot.media.local-commanded.v1",
+            {"action": request.action, "queue_id": queue_id},
+            room_id=device["room_id"],
+            required_capability="media-control",
+        )
+        response.headers["Cache-Control"] = "no-store"
+        return {
+            "device_id": device_id,
+            "queue_id": queue_id,
+            "result": result,
+            "event": event,
+        }
+
     @app.post("/v1/devices/{device_id}/media/search")
     async def device_media_search(
         device_id: str,

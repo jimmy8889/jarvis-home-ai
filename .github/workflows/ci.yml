@@ -213,6 +213,8 @@ jobs:
             xcrun simctl list devices available -j |
               python3 -c 'import json,sys; data=json.load(sys.stdin); print(next(item["udid"] for rows in data["devices"].values() for item in rows if item["name"].startswith("iPhone")))'
           )"
+          # SendspinKit 1.0.1 is Swift 5 compatible, while Xcode 16.4's iOS
+          # 18.5 SDK rejects its UIDevice metadata helper in Swift 6 mode.
           xcodebuild \
             -project Pilot.xcodeproj \
             -scheme Pilot \
@@ -221,4 +223,5 @@ jobs:
             -derivedDataPath "$RUNNER_TEMP/PilotDerivedData" \
             GENERATE_INFOPLIST_FILE=YES \
             CODE_SIGNING_ALLOWED=NO \
+            SWIFT_VERSION=5.0 \
             test

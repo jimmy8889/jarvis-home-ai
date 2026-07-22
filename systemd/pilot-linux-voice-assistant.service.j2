@@ -8,7 +8,7 @@ Type=simple
 User={{ room_endpoint_user }}
 Group={{ room_endpoint_user }}
 WorkingDirectory=/opt/pilot/vendor/linux-voice-assistant-{{ room_endpoint_lva_version }}
-Environment=HOME=/home/{{ room_endpoint_user }}
+Environment=HOME={{ room_endpoint_home }}
 Environment=PATH=/opt/pilot/vendor/linux-voice-assistant-{{ room_endpoint_lva_version }}/.venv/bin:/usr/bin:/bin
 Environment=XDG_RUNTIME_DIR=/run/user/{{ room_endpoint_uid.stdout }}
 Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{{ room_endpoint_uid.stdout }}/bus

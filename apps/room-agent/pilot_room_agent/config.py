@@ -46,6 +46,8 @@ class Settings:
     video_enabled: bool = False
     video_ipc_path: str = "/run/user/1000/pilot-mpv.sock"
     video_media_roots: tuple[str, ...] = ()
+    video_wayland_display: str = ""
+    # Retained as a compatibility alias for pre-0.7 room.toml files.
     video_display: str = ""
     video_audio_device: str = "auto"
     video_hwdec: str = "auto-safe"

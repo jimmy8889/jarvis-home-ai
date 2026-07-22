@@ -7,7 +7,7 @@ Wants=network-online.target pilot-audio-defaults.service
 Type=simple
 User={{ room_endpoint_user }}
 Group={{ room_endpoint_user }}
-Environment=HOME=/home/{{ room_endpoint_user }}
+Environment=HOME={{ room_endpoint_home }}
 Environment=XDG_RUNTIME_DIR=/run/user/{{ room_endpoint_uid.stdout }}
 Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{{ room_endpoint_uid.stdout }}/bus
 ExecStart=/usr/bin/squeezelite -n "{{ room_endpoint_squeezelite_name }}" -o "{{ room_endpoint_squeezelite_output_device }}" -C 5{% if room_endpoint_squeezelite_server | length > 0 %} -s "{{ room_endpoint_squeezelite_server }}"{% endif %}

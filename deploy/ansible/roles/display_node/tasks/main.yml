@@ -29,11 +29,24 @@
     update_cache: true
     cache_valid_time: 3600
 
+- name: Assert display audio ownership is explicit
+  ansible.builtin.assert:
+    that:
+      - >-
+        not (display_node_sendspin_install | bool) or
+        (display_node_audio_services_enabled | bool)
+      - >-
+        not (display_node_sendspin_enabled | bool) or
+        (display_node_sendspin_install | bool)
+    fail_msg: >-
+      Display audio is opt-in. Set display_node_audio_services_enabled=true
+      before installing Sendspin, and install Sendspin before enabling it.
+
 - name: Install optional display audio-player packages
   ansible.builtin.apt:
     name: "{{ display_node_sendspin_packages }}"
     state: present
-  when: display_node_sendspin_install | bool
+  when: display_node_audio_services_enabled | bool
 
 - name: Set appliance hostname
   ansible.builtin.hostname:
@@ -69,11 +82,10 @@
   register: display_node_uid
   changed_when: false
 
-- name: Start display user manager for audio services
+- name: Start display user manager
   ansible.builtin.systemd_service:
     name: "user@{{ display_node_uid.stdout }}.service"
     state: started
-  when: display_node_sendspin_install | bool
 
 - name: Enable display-user PipeWire services
   ansible.builtin.command:
@@ -87,7 +99,7 @@
     - pipewire.socket
     - pipewire-pulse.socket
     - wireplumber.service
-  when: display_node_sendspin_install | bool
+  when: display_node_audio_services_enabled | bool
 
 - name: Create display appliance directories
   ansible.builtin.file:
@@ -363,6 +375,28 @@
   notify:
     - Reload systemd
     - Restart Pilot display kiosk
+
+- name: Inspect existing display Sendspin service
+  ansible.builtin.stat:
+    path: /etc/systemd/system/pilot-display-sendspin.service
+  register: display_node_sendspin_service
+
+- name: Stop stale display Sendspin service
+  ansible.builtin.systemd_service:
+    name: pilot-display-sendspin.service
+    enabled: false
+    state: stopped
+    daemon_reload: true
+  when:
+    - not (display_node_sendspin_install | bool)
+    - display_node_sendspin_service.stat.exists
+
+- name: Remove stale display Sendspin service
+  ansible.builtin.file:
+    path: /etc/systemd/system/pilot-display-sendspin.service
+    state: absent
+  when: not (display_node_sendspin_install | bool)
+  notify: Reload systemd
 
 - name: Install display Sendspin service
   ansible.builtin.template:

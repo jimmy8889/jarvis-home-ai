@@ -9,7 +9,10 @@ import os
 from pathlib import Path
 import shutil
 import socket
+import stat
 import tempfile
+from threading import Lock
+import time
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, urlencode, urlsplit
@@ -24,6 +27,10 @@ MAX_CLIENT_REQUEST_BYTES = 64_000
 DEFAULT_ARTWORK_HOSTS = ("resources.tidal.com",)
 DEFAULT_ARTWORK_CACHE = Path("/var/lib/pilot-display/artwork")
 MAX_ARTWORK_BYTES = 5_000_000
+DEFAULT_ARTWORK_CACHE_MAX_BYTES = 64_000_000
+DEFAULT_ARTWORK_CACHE_MAX_ITEMS = 256
+DEFAULT_ARTWORK_CACHE_MAX_AGE_SECONDS = 30 * 24 * 60 * 60
+_ARTWORK_CACHE_LOCK = Lock()
 
 
 def _bounded_text(path: Path, limit: int = 4096) -> str:
@@ -223,22 +230,81 @@ def _image_content_type(content: bytes) -> str | None:
     return None
 
 
+def _prune_artwork_cache(
+    cache_root: Path,
+    *,
+    max_bytes: int = DEFAULT_ARTWORK_CACHE_MAX_BYTES,
+    max_items: int = DEFAULT_ARTWORK_CACHE_MAX_ITEMS,
+    max_age_seconds: int = DEFAULT_ARTWORK_CACHE_MAX_AGE_SECONDS,
+    now: float | None = None,
+) -> None:
+    try:
+        candidates = list(cache_root.iterdir())
+    except OSError:
+        return
+    current_time = time.time() if now is None else now
+    cutoff = current_time - max(0, max_age_seconds)
+    entries: list[tuple[Path, os.stat_result]] = []
+    for path in candidates:
+        try:
+            details = path.stat(follow_symlinks=False)
+        except OSError:
+            continue
+        if not stat.S_ISREG(details.st_mode):
+            continue
+        if details.st_mtime < cutoff:
+            try:
+                path.unlink(missing_ok=True)
+            except OSError:
+                pass
+            continue
+        entries.append((path, details))
+
+    entries.sort(key=lambda item: (item[1].st_mtime, item[0].name))
+    total_bytes = sum(details.st_size for _, details in entries)
+    while entries and (len(entries) > max(0, max_items) or total_bytes > max(0, max_bytes)):
+        path, details = entries.pop(0)
+        try:
+            path.unlink(missing_ok=True)
+        except OSError:
+            continue
+        total_bytes -= details.st_size
+
+
 def _cached_artwork(
     remote_url: str,
     cache_root: Path,
     allowed_hosts: tuple[str, ...],
+    *,
+    max_cache_bytes: int = DEFAULT_ARTWORK_CACHE_MAX_BYTES,
+    max_cache_items: int = DEFAULT_ARTWORK_CACHE_MAX_ITEMS,
+    max_cache_age_seconds: int = DEFAULT_ARTWORK_CACHE_MAX_AGE_SECONDS,
 ) -> tuple[bytes, str]:
     if not _artwork_url_allowed(remote_url, allowed_hosts):
         raise ValueError("artwork host is not allowed")
     cache_key = hashlib.sha256(remote_url.encode()).hexdigest()
     cache_path = cache_root / cache_key
-    try:
-        cached = cache_path.read_bytes()
-    except OSError:
-        cached = b""
-    cached_type = _image_content_type(cached)
-    if cached_type:
-        return cached, cached_type
+    with _ARTWORK_CACHE_LOCK:
+        cache_root.mkdir(parents=True, exist_ok=True)
+        _prune_artwork_cache(
+            cache_root,
+            max_bytes=max_cache_bytes,
+            max_items=max_cache_items,
+            max_age_seconds=max_cache_age_seconds,
+        )
+        try:
+            cached = cache_path.read_bytes()
+        except OSError:
+            cached = b""
+        cached_type = _image_content_type(cached)
+        if cached_type:
+            try:
+                os.utime(cache_path, None, follow_symlinks=False)
+            except OSError:
+                pass
+            return cached, cached_type
+        if cached:
+            cache_path.unlink(missing_ok=True)
 
     request = Request(
         remote_url,
@@ -258,15 +324,35 @@ def _cached_artwork(
     if content_type is None:
         raise ValueError("artwork response is not a supported image")
 
-    cache_root.mkdir(parents=True, exist_ok=True)
-    with tempfile.NamedTemporaryFile(dir=cache_root, delete=False) as temporary:
-        temporary.write(content)
-        temporary_path = Path(temporary.name)
-    try:
-        os.replace(temporary_path, cache_path)
-    finally:
-        temporary_path.unlink(missing_ok=True)
+    with _ARTWORK_CACHE_LOCK:
+        cache_root.mkdir(parents=True, exist_ok=True)
+        with tempfile.NamedTemporaryFile(dir=cache_root, delete=False) as temporary:
+            temporary.write(content)
+            temporary_path = Path(temporary.name)
+        try:
+            os.replace(temporary_path, cache_path)
+        finally:
+            temporary_path.unlink(missing_ok=True)
+        _prune_artwork_cache(
+            cache_root,
+            max_bytes=max_cache_bytes,
+            max_items=max_cache_items,
+            max_age_seconds=max_cache_age_seconds,
+        )
     return content, content_type
+
+
+def _static_cache_control(path: str) -> str:
+    if path.startswith("/assets/"):
+        return "public, max-age=0, must-revalidate"
+    return "no-cache"
+
+
+def _positive_environment_integer(name: str, default: int) -> int:
+    try:
+        return max(1, int(os.environ.get(name, str(default))))
+    except ValueError:
+        return default
 
 
 def status_payload(
@@ -416,6 +502,9 @@ class DisplayHandler(BaseHTTPRequestHandler):
                     remote_url,
                     self.server.artwork_cache_root,
                     self.server.artwork_hosts,
+                    max_cache_bytes=self.server.artwork_cache_max_bytes,
+                    max_cache_items=self.server.artwork_cache_max_items,
+                    max_cache_age_seconds=self.server.artwork_cache_max_age_seconds,
                 )
             except ValueError as error:
                 self._send_json({"detail": str(error)}, HTTPStatus.BAD_REQUEST)
@@ -460,12 +549,7 @@ class DisplayHandler(BaseHTTPRequestHandler):
         except OSError:
             self.send_error(HTTPStatus.INTERNAL_SERVER_ERROR)
             return
-        cache_control = (
-            "public, max-age=31536000, immutable"
-            if path.startswith("/assets/")
-            else "no-cache"
-        )
-        self._send(content, content_type, cache_control=cache_control)
+        self._send(content, content_type, cache_control=_static_cache_control(path))
 
     def do_POST(self) -> None:  # noqa: N802
         path = self.path.partition("?")[0]
@@ -531,6 +615,9 @@ class DisplayServer(ThreadingHTTPServer):
         mode: str = "display",
         artwork_cache_root: Path = DEFAULT_ARTWORK_CACHE,
         artwork_hosts: tuple[str, ...] = DEFAULT_ARTWORK_HOSTS,
+        artwork_cache_max_bytes: int = DEFAULT_ARTWORK_CACHE_MAX_BYTES,
+        artwork_cache_max_items: int = DEFAULT_ARTWORK_CACHE_MAX_ITEMS,
+        artwork_cache_max_age_seconds: int = DEFAULT_ARTWORK_CACHE_MAX_AGE_SECONDS,
     ) -> None:
         super().__init__(address, DisplayHandler)
         self.core_url = core_url
@@ -539,6 +626,9 @@ class DisplayServer(ThreadingHTTPServer):
         self.mode = mode
         self.artwork_cache_root = artwork_cache_root
         self.artwork_hosts = artwork_hosts
+        self.artwork_cache_max_bytes = artwork_cache_max_bytes
+        self.artwork_cache_max_items = artwork_cache_max_items
+        self.artwork_cache_max_age_seconds = artwork_cache_max_age_seconds
 
 
 def main() -> None:
@@ -560,6 +650,16 @@ def main() -> None:
         ).split(",")
         if host.strip()
     )
+    artwork_cache_max_bytes = _positive_environment_integer(
+        "PILOT_ARTWORK_CACHE_MAX_BYTES", DEFAULT_ARTWORK_CACHE_MAX_BYTES
+    )
+    artwork_cache_max_items = _positive_environment_integer(
+        "PILOT_ARTWORK_CACHE_MAX_ITEMS", DEFAULT_ARTWORK_CACHE_MAX_ITEMS
+    )
+    artwork_cache_max_age_seconds = _positive_environment_integer(
+        "PILOT_ARTWORK_CACHE_MAX_AGE_SECONDS",
+        DEFAULT_ARTWORK_CACHE_MAX_AGE_SECONDS,
+    )
     server = DisplayServer(
         (host, port),
         core_url,
@@ -568,6 +668,9 @@ def main() -> None:
         mode,
         artwork_cache_root,
         artwork_hosts,
+        artwork_cache_max_bytes,
+        artwork_cache_max_items,
+        artwork_cache_max_age_seconds,
     )
     try:
         server.serve_forever()

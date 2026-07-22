@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 import tempfile
 import unittest
@@ -12,6 +13,8 @@ from pilot_display_node.server import (
     _core_surface,
     _cached_artwork,
     _artwork_url_allowed,
+    _prune_artwork_cache,
+    _static_cache_control,
 )
 
 
@@ -58,6 +61,39 @@ class CoreStatusTests(unittest.TestCase):
         self.assertEqual(first, (png, "image/png"))
         self.assertEqual(second, first)
         urlopen.assert_called_once()
+
+    def test_artwork_cache_is_bounded_by_age_count_and_bytes(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            now = 10_000.0
+            fixtures = {
+                "expired": (12, now - 500),
+                "oldest": (20, now - 30),
+                "middle": (25, now - 20),
+                "newest": (30, now - 10),
+            }
+            for name, (size, modified) in fixtures.items():
+                path = root / name
+                path.write_bytes(b"x" * size)
+                os.utime(path, (modified, modified))
+
+            _prune_artwork_cache(
+                root,
+                max_age_seconds=100,
+                max_items=2,
+                max_bytes=50,
+                now=now,
+            )
+
+            self.assertFalse((root / "expired").exists())
+            self.assertFalse((root / "oldest").exists())
+            self.assertFalse((root / "middle").exists())
+            self.assertTrue((root / "newest").exists())
+
+    def test_stable_static_asset_names_are_revalidated(self) -> None:
+        policy = _static_cache_control("/assets/house-day.png")
+        self.assertEqual(policy, "public, max-age=0, must-revalidate")
+        self.assertNotIn("immutable", policy)
 
     def test_rejects_non_http_core_url(self) -> None:
         self.assertEqual(
@@ -190,6 +226,11 @@ class CoreStatusTests(unittest.TestCase):
         self.assertIn("effective.position_seconds", script)
         self.assertIn("observedAt < lastMediaObservedAt", script)
         self.assertIn("room.id === deviceRoomId", script)
+        self.assertIn('const fallback = normalized === "media-console" ? "media" : "home";', script)
+        self.assertIn("window.history.replaceState", script)
+        self.assertIn("showPage(target);", script)
+        self.assertIn('const isDay = typeof configuredDay === "boolean" ? configuredDay : false;', script)
+        self.assertIn('image.removeAttribute("src")', script)
         self.assertNotIn("renderNowPlaying(value.surface", script)
         self.assertIn(".onscreen-keyboard", styles)
         self.assertIn("Showing the last known state", styles)
@@ -217,7 +258,6 @@ class CoreStatusTests(unittest.TestCase):
         ):
             self.assertIn(f'"/assets/{scene}"', server)
         self.assertIn("value.scene?.is_day", script)
-        self.assertIn("power.solar_w >= 100", script)
         self.assertIn("transition: opacity 450ms ease", styles)
         self.assertIn('data-page="media"', html)
         self.assertIn('id="music-results"', html)
@@ -230,6 +270,21 @@ class CoreStatusTests(unittest.TestCase):
         self.assertIn("resultArtwork", script)
         self.assertIn("/api/artwork?url=", script)
         self.assertIn(".media-console-stage", styles)
+
+    def test_n150_display_audio_is_opt_in_and_room_agent_owned(self) -> None:
+        repository = Path(__file__).parents[3]
+        role = repository / "deploy" / "ansible" / "roles" / "display_node"
+        defaults = (role / "defaults" / "main.yml").read_text(encoding="utf-8")
+        tasks = (role / "tasks" / "main.yml").read_text(encoding="utf-8")
+        inventory = (
+            repository / "deploy" / "ansible" / "inventory" / "hosts.example.yml"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("display_node_audio_services_enabled: false", defaults)
+        self.assertIn("Assert display audio ownership is explicit", tasks)
+        self.assertIn("when: display_node_audio_services_enabled | bool", tasks)
+        self.assertIn("display_node_audio_services_enabled: false", inventory)
+        self.assertIn("display_node_sendspin_enabled: false", inventory)
 
 
 if __name__ == "__main__":

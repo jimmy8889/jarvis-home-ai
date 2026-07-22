@@ -103,16 +103,44 @@ For this role the display-node Ansible variable is:
 display_node_mode: media-console
 display_node_force_resolution: false
 display_node_keyboard_layout: us
+display_node_audio_services_enabled: false
+display_node_sendspin_install: false
+display_node_sendspin_enabled: false
 ```
 
 The N150 inventory host must belong to both `pilot_endpoints` and
 `pilot_display_nodes`. The former installs Room Agent and the supervised mpv
 video adapter; the latter installs the loopback display service, Cage/Chromium
-kiosk, artwork cache and optional Sendspin renderer. The example inventory uses
-one `pilot-media-console` host identity in both groups and one Core device
+kiosk and bounded artwork cache. Room Agent is the sole owner of the shared
+PipeWire/WirePlumber graph and Sendspin process; the display role's audio
+services are deliberately opt-in and disabled for this combined N150. The
+example inventory uses one `pilot-media-console` host identity in both groups and one Core device
 credential for the `display`, `media-control`, and `video` capabilities. This
 is intentional; installing only the display group produces a beautiful shell
 but no local-video command consumer.
+
+### Wayland session contract
+
+Cage and Room Agent must use the same unprivileged Unix account on a combined
+N150. The reference inventory uses `pilot-display` for both roles. This is a
+security requirement as well as a launch requirement: Cage creates its socket
+below the owning user's mode-0700 `XDG_RUNTIME_DIR`, so a separate `pilot`
+process cannot safely connect to it. Do not make `/run/user/*` or the Wayland
+socket world-readable as a workaround.
+
+The reference launch environment is:
+
+```text
+User=pilot-display
+HOME=/var/lib/pilot-display
+XDG_RUNTIME_DIR=/run/user/<pilot-display uid>
+WAYLAND_DISPLAY=wayland-0
+```
+
+Set `room_endpoint_video_wayland_display` to the actual Cage socket name. Room
+Agent passes that name to mpv as `WAYLAND_DISPLAY`, explicitly selects mpv's
+Wayland GPU context, and does not use `--screen`: mpv's `--screen` option is a
+monitor selector and cannot identify a Wayland compositor socket.
 
 Deploy the complete native role pair with:
 
@@ -151,6 +179,24 @@ curl -fsS http://127.0.0.1:8780/healthz
 curl -fsS http://127.0.0.1:8780/api/status
 journalctl -b -u pilot-display-kiosk -u pilot-display-web --no-pager
 ```
+
+For a local-video window that never appears, verify the shared identity and
+socket before changing mpv decoding options:
+
+```bash
+uid=$(id -u pilot-display)
+systemctl show pilot-display-kiosk pilot-room-agent \
+  --property=User --property=Environment
+sudo -u pilot-display env \
+  XDG_RUNTIME_DIR=/run/user/$uid WAYLAND_DISPLAY=wayland-0 \
+  test -S /run/user/$uid/wayland-0
+journalctl -b -u pilot-room-agent -u pilot-display-kiosk --no-pager
+```
+
+If Cage selected a different socket after a failed or unclean compositor
+restart, inspect `/run/user/$uid/wayland-*`, update
+`room_endpoint_video_wayland_display`, and redeploy. Do not guess by changing
+mpv's `--screen` value.
 
 A local media-agent service validates Pilot commands and translates them into
 mpv, display, CEC, and launcher operations. The browser never receives a Pilot
@@ -216,8 +262,8 @@ administrator token or communicate directly with the N150.
 4. Add supervised mpv playback for a known-good local test library.
    **Software complete:** configured-root containment, extension allowlist,
    fixed mpv arguments, private JSON IPC, bounded seeking/track selection,
-   process supervision and status are implemented. Hardware acceptance on a
-   native-HDMI N150 remains pending.
+   process supervision, explicit Cage/Wayland launch environment and status
+   are implemented. Hardware acceptance on a native-HDMI N150 remains pending.
 5. Add Jellyfin browse, direct play, resume, subtitles, and audio tracks.
 6. Add the iOS room remote using the same Pilot Core product and media APIs.
    **Core and client control paths are implemented; physical iOS acceptance is

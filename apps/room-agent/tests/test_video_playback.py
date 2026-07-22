@@ -1,6 +1,8 @@
+import os
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from pilot_room_agent.config import Settings
 from pilot_room_agent.controls import ControlError
@@ -77,6 +79,32 @@ class MpvPlaybackTests(unittest.TestCase):
             self.player.execute("video_seek", {"seconds": 10_000})
         with self.assertRaisesRegex(ControlError, "between 0 and 128"):
             self.player.execute("video_audio_track", {"track": 999})
+
+    def test_wayland_launch_uses_display_session_environment_not_screen_option(self) -> None:
+        player = MpvPlayback(
+            Settings(
+                video_enabled=True,
+                video_ipc_path="/var/lib/pilot/mpv.sock",
+                video_wayland_display="wayland-0",
+            )
+        )
+        with patch.dict(os.environ, {"XDG_RUNTIME_DIR": "/run/user/4242"}):
+            environment = player._launch_environment()
+        command = player._launch_command(Path("/var/lib/pilot/mpv.sock"))
+
+        self.assertEqual(environment["XDG_RUNTIME_DIR"], "/run/user/4242")
+        self.assertEqual(environment["WAYLAND_DISPLAY"], "wayland-0")
+        self.assertIn("--gpu-context=wayland", command)
+        self.assertIn("--fullscreen=yes", command)
+        self.assertFalse(any(option.startswith("--screen=") for option in command))
+
+    def test_wayland_launch_fails_closed_without_display_runtime(self) -> None:
+        player = MpvPlayback(
+            Settings(video_enabled=True, video_wayland_display="wayland-0")
+        )
+        with patch.dict(os.environ, {}, clear=True):
+            with self.assertRaisesRegex(ControlError, "XDG_RUNTIME_DIR"):
+                player._launch_environment()
 
 
 if __name__ == "__main__":

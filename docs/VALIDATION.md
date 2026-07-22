@@ -127,6 +127,23 @@ Acceptance requires two consecutive clean reboots with the same devices, active
 services, successful capture and playback, and no USB/audio errors in the boot
 journal.
 
+For a combined N150 media console, also verify that Cage and Room Agent share
+the `pilot-display` identity and private Wayland session after each reboot:
+
+```bash
+uid=$(id -u pilot-display)
+systemctl show pilot-display-kiosk pilot-room-agent \
+  --property=User --property=Environment
+sudo -u pilot-display env \
+  XDG_RUNTIME_DIR=/run/user/$uid WAYLAND_DISPLAY=wayland-0 \
+  test -S /run/user/$uid/wayland-0
+```
+
+The room endpoint inventory must set
+`room_endpoint_video_wayland_display` to that socket. A successful source test
+does not replace physical confirmation that mpv becomes visible through Cage,
+uses the intended HDMI audio path, and returns cleanly to the Pilot shell.
+
 ## Stage 5: command transport
 
 After Pilot Core reports the room device as connected, start with a state-only

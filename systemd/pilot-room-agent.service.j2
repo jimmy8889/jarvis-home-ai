@@ -9,6 +9,9 @@ User={{ room_endpoint_user }}
 Group={{ room_endpoint_user }}
 Environment=XDG_RUNTIME_DIR=/run/user/{{ room_endpoint_uid.stdout }}
 Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{{ room_endpoint_uid.stdout }}/bus
+{% if room_endpoint_video_enabled | bool and room_endpoint_video_wayland_display | length > 0 %}
+Environment=WAYLAND_DISPLAY={{ room_endpoint_video_wayland_display }}
+{% endif %}
 Environment=PILOT_CONFIG=/etc/pilot/room.toml
 Environment=PYTHONPATH=/opt/pilot/current/apps/room-agent
 ExecStart=/opt/pilot/current/.venv/bin/python -m pilot_room_agent.main

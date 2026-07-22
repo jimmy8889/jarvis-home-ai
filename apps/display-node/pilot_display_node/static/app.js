@@ -60,9 +60,7 @@ function renderHouseScene(value, power, vehicle) {
   const images = [...document.querySelectorAll(".energy-house")];
   if (images.length !== 2) return;
   const configuredDay = value.scene?.is_day;
-  const isDay = typeof configuredDay === "boolean"
-    ? configuredDay
-    : (typeof power.solar_w !== "number" || power.solar_w >= 100);
+  const isDay = typeof configuredDay === "boolean" ? configuredDay : false;
   const scene = `house-${isDay ? "day" : "night"}${vehicle.connected ? "-tesla" : ""}`;
   const current = images[activeHouseSceneIndex];
   if (current?.dataset.scene === scene) return;
@@ -400,7 +398,11 @@ function makeTrackCard(player) {
   const image = document.createElement("img");
   image.alt = "";
   image.hidden = true;
-  image.addEventListener("error", () => { image.hidden = true; placeholder.hidden = false; });
+  image.addEventListener("error", () => {
+    image.hidden = true;
+    image.dataset.source = "";
+    placeholder.hidden = false;
+  });
   artwork.append(placeholder, image);
   const copy = textNode("div", "track-copy", "");
   copy.append(
@@ -472,12 +474,16 @@ function updateTrackCard(card, entry) {
   const image = card.querySelector(".track-artwork img");
   const placeholder = card.querySelector(".track-artwork span");
   const source = effectiveArtwork(effective);
-  if (source && image.dataset.source !== source) {
-    image.dataset.source = source;
-    image.src = source;
+  if (source) {
+    if (image.dataset.source !== source) {
+      image.dataset.source = source;
+      image.src = source;
+    }
     image.hidden = false;
     placeholder.hidden = true;
   } else if (!source) {
+    image.dataset.source = "";
+    image.removeAttribute("src");
     image.hidden = true;
     placeholder.hidden = false;
   }
@@ -540,6 +546,8 @@ function renderConsolePlayer(entries, roomId) {
     }
     elements.console_artwork.hidden = false;
   } else {
+    elements.console_artwork.dataset.source = "";
+    elements.console_artwork.removeAttribute("src");
     elements.console_artwork.hidden = true;
   }
   const playing = effective.playback_state === "playing";
@@ -553,6 +561,11 @@ function renderConsolePlayer(entries, roomId) {
     playing,
   );
 }
+
+elements.console_artwork?.addEventListener("error", () => {
+  elements.console_artwork.hidden = true;
+  elements.console_artwork.dataset.source = "";
+});
 
 function renderMusicControls(value) {
   mediaModel = value;
@@ -608,9 +621,13 @@ function applyDisplayMode(mode) {
   if (!["display", "media-console"].includes(mode)) return;
   const normalized = mode === "media-console" ? "media-console" : "display";
   document.body.dataset.mode = normalized;
-  if (normalized === "media-console" && !window.location.hash) {
-    showPage("media");
+  const requested = window.location.hash.slice(1);
+  const fallback = normalized === "media-console" ? "media" : "home";
+  const target = pageNames().includes(requested) ? requested : fallback;
+  if (requested !== target) {
+    window.history.replaceState(null, "", `#${target}`);
   }
+  showPage(target);
 }
 
 function mediaObservedAt(value) {

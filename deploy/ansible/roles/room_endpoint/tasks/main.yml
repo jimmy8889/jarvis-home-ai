@@ -58,7 +58,7 @@
     name: "{{ room_endpoint_user }}"
     system: true
     create_home: true
-    home: "/home/{{ room_endpoint_user }}"
+    home: "{{ room_endpoint_home }}"
     shell: /usr/sbin/nologin
     groups: audio,video,bluetooth
     append: true
@@ -72,6 +72,20 @@
   ansible.builtin.command: "id -u {{ room_endpoint_user }}"
   register: room_endpoint_uid
   changed_when: false
+
+- name: Validate shared Cage session identity for local video
+  ansible.builtin.assert:
+    that:
+      - room_endpoint_video_wayland_display | length > 0
+      - room_endpoint_user == (display_node_user | default('pilot-display'))
+    fail_msg: >-
+      A combined N150 display/video host must run Room Agent and Cage as the
+      same Unix user and set room_endpoint_video_wayland_display. Wayland
+      runtime directories are private; do not work around this with relaxed
+      socket permissions.
+  when:
+    - room_endpoint_video_enabled | bool
+    - inventory_hostname in (groups['pilot_display_nodes'] | default([]))
 
 - name: Start user manager for Pilot
   ansible.builtin.systemd_service:
@@ -142,7 +156,7 @@
       - "{{ room_endpoint_user }}"
       - --
       - env
-      - "HOME=/home/{{ room_endpoint_user }}"
+      - "HOME={{ room_endpoint_home }}"
       - ./script/setup
       - "--cxxflags=-O2 -g0"
       - "--makeflags=-j2"

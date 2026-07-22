@@ -99,17 +99,20 @@ Pilot Linux Display 0.6 now also implements:
   Room player and then fail Pilot Core's fixed-room authorization check;
 - a loopback artwork cache. TIDAL artwork is fetched only from explicitly
   allow-listed HTTPS hosts, validated as a bounded raster image and cached in
-  `/var/lib/pilot-display/artwork`; provider URLs and credentials never reach
-  durable browser storage;
+  `/var/lib/pilot-display/artwork`; the cache evicts by age, item count and a
+  64 MB byte ceiling, while provider URLs and credentials never reach durable
+  browser storage;
 - an optional pinned Sendspin 7.5.0 player so the Pi can become a Music
   Assistant output through a USB DAC.
 
 The production inventory installs the Pi's Sendspin runtime but intentionally
 leaves it stopped and disabled because no USB DAC is connected yet. After the
 DAC is attached, identify and accept its stable PipeWire sink, set
-`display_node_sendspin_audio_device`, then enable
-`display_node_sendspin_enabled`. Do not route it through an unverified default
-sink.
+`display_node_audio_services_enabled`, `display_node_sendspin_install` and
+`display_node_sendspin_enabled` to true, then set
+`display_node_sendspin_audio_device`. Do not route it through an unverified
+default sink. On a co-located N150, leave all three display audio settings false
+because Room Agent owns that host's one audio graph and Sendspin process.
 
 The updated Python service tests and JavaScript syntax check validate these
 source paths. They have not yet replaced the physically accepted Pi release

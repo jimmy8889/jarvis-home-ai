@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 import re
 import socket
@@ -130,25 +131,15 @@ class MpvPlayback:
         ipc = Path(self.settings.video_ipc_path)
         ipc.parent.mkdir(parents=True, exist_ok=True)
         ipc.unlink(missing_ok=True)
-        command = [
-            "mpv",
-            "--idle=yes",
-            "--force-window=yes",
-            "--no-terminal",
-            f"--input-ipc-server={ipc}",
-            f"--hwdec={self.settings.video_hwdec}",
-            f"--audio-device={self.settings.video_audio_device}",
-            "--save-position-on-quit=no",
-            "--watch-later-options=start",
-        ]
-        if self.settings.video_display:
-            command.append(f"--screen={self.settings.video_display}")
+        command = self._launch_command(ipc)
+        environment = self._launch_environment()
         try:
             self.process = self.process_factory(
                 command,
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
+                env=environment,
                 start_new_session=True,
             )
         except OSError as error:
@@ -161,6 +152,46 @@ class MpvPlayback:
                 return
             time.sleep(0.05)
         raise ControlError("mpv control socket did not become ready")
+
+    def _wayland_display(self) -> str:
+        # video_display was the original setting name. Treat it as a Wayland
+        # socket name rather than mpv's unrelated --screen selector.
+        return self.settings.video_wayland_display or self.settings.video_display
+
+    def _launch_environment(self) -> dict[str, str]:
+        environment = os.environ.copy()
+        wayland_display = self._wayland_display()
+        if not wayland_display:
+            return environment
+        if not environment.get("XDG_RUNTIME_DIR"):
+            raise ControlError(
+                "Wayland video requires XDG_RUNTIME_DIR from the display session"
+            )
+        environment["WAYLAND_DISPLAY"] = wayland_display
+        return environment
+
+    def _launch_command(self, ipc: Path) -> list[str]:
+        command = [
+            "mpv",
+            "--idle=yes",
+            "--force-window=yes",
+            "--no-terminal",
+            f"--input-ipc-server={ipc}",
+            f"--hwdec={self.settings.video_hwdec}",
+            f"--audio-device={self.settings.video_audio_device}",
+            "--save-position-on-quit=no",
+            "--watch-later-options=start",
+        ]
+        if self._wayland_display():
+            command.extend(
+                [
+                    "--vo=gpu-next",
+                    "--gpu-context=wayland",
+                    "--fullscreen=yes",
+                    "--wayland-app-id=pilot-video",
+                ]
+            )
+        return command
 
     def _ping(self) -> bool:
         try:

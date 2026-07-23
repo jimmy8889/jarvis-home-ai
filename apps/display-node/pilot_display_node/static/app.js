@@ -291,7 +291,7 @@ function renderLineChart(svg, series, options = {}) {
     gradient.setAttribute("id", gradientId);
     gradient.setAttribute("x1", "0"); gradient.setAttribute("x2", "0");
     gradient.setAttribute("y1", "0"); gradient.setAttribute("y2", "1");
-    for (const [offset, opacity] of [["0%", ".28"], ["58%", ".12"], ["100%", ".015"]]) {
+    for (const [offset, opacity] of [["0%", ".42"], ["58%", ".18"], ["100%", ".03"]]) {
       const stop = document.createElementNS(svgNamespace, "stop");
       stop.setAttribute("offset", offset);
       stop.setAttribute("stop-color", item.color || "#55b6ff");

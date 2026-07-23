@@ -273,6 +273,7 @@ class CoreStatusTests(unittest.TestCase):
         self.assertIn("value.history?.started_at", script)
         self.assertIn("showTimeAxis: true", script)
         self.assertIn("loads plotted below zero from midnight to midnight", html)
+        self.assertIn("Today · midnight to midnight", html)
         self.assertIn('window.matchMedia("(prefers-reduced-motion: reduce)")', script)
         self.assertIn("!homeVisible || reducedMotion.matches", script)
         self.assertIn('data-performance-profile="low-power"', styles)

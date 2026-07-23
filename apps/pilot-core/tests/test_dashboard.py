@@ -157,6 +157,10 @@ class DashboardServiceTests(unittest.IsolatedAsyncioTestCase):
             result["history"]["series"][3]["points"][0]["value"],
             -4540,
         )
+        self.assertEqual(result["history"]["series"][1]["activity_threshold_w"], 100)
+        self.assertEqual(result["history"]["series"][1]["render_mode"], "step")
+        self.assertEqual(result["history"]["series"][3]["activity_threshold_w"], 100)
+        self.assertEqual(result["history"]["series"][3]["render_mode"], "step")
         started_at = datetime.fromisoformat(result["history"]["started_at"])
         ended_at = datetime.fromisoformat(result["history"]["ended_at"])
         self.assertEqual((started_at.hour, started_at.minute), (0, 0))
@@ -205,6 +209,26 @@ class DashboardServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["vehicle"]["power_w"], 1.6)
         self.assertFalse(result["power"]["flow_active"]["vehicle"])
         self.assertEqual(result["power"]["directions"]["vehicle"], "idle")
+
+    async def test_battery_flow_uses_one_hundred_watt_deadband(self) -> None:
+        settings = IntegrationSettings(
+            energy_battery_power_entity_id="sensor.battery",
+        )
+        integrations = AsyncMock()
+        integrations.home_assistant_selected_states.return_value = {
+            "sensor.battery": state("sensor.battery", 76, "W"),
+        }
+        integrations.home_assistant_history.return_value = {}
+        integrations.home_assistant_weather.return_value = {
+            "entity_id": "",
+            "current": {},
+            "forecast_response": {},
+        }
+
+        result = await DashboardService(settings, integrations).snapshot()
+
+        self.assertFalse(result["power"]["flow_active"]["battery"])
+        self.assertEqual(result["power"]["directions"]["battery"], "idle")
 
     def test_scene_falls_back_to_unknown_when_sun_is_not_configured(self) -> None:
         service = DashboardService(IntegrationSettings(), AsyncMock())

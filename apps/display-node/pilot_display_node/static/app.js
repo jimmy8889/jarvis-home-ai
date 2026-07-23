@@ -183,10 +183,13 @@ function renderEnergy(energy = {}) {
   elements.energy_solar.textContent = watts(solar);
   elements.energy_home.textContent = watts(home);
   elements.energy_grid.textContent = watts(grid);
-  elements.energy_battery.textContent = watts(battery);
+  const batteryActive = typeof battery === "number" && Math.abs(battery) >= 100;
+  elements.energy_battery.textContent = batteryActive ? watts(battery) : "";
   elements.energy_soc.textContent = typeof soc === "number" ? `${number.format(soc)}%` : "—";
   elements.energy_grid_direction.textContent = directions.grid || energy.grid?.direction || "Unknown";
-  elements.energy_battery_direction.textContent = directions.battery || energy.battery?.direction || "Unknown";
+  elements.energy_battery_direction.textContent = batteryActive
+    ? (directions.battery || energy.battery?.direction || "Unknown")
+    : "Idle";
   elements.energy_state.textContent = energy.status === "ok" ? "Live" : "Unavailable";
   elements.energy_state.className = `data-state ${energy.status === "ok" ? "online" : "offline"}`;
   const clampedSoc = typeof soc === "number" ? Math.max(0, Math.min(100, soc)) : 0;
@@ -200,6 +203,7 @@ function renderEnergy(energy = {}) {
     elements.node_battery,
     battery,
     battery < 0,
+    100,
   );
   setFlow(elements.flow_home, elements.particles_home, elements.node_home, home);
   const batteryDirection = directions.battery || energy.battery?.direction;
@@ -239,7 +243,7 @@ function renderLineChart(svg, series, options = {}) {
   const startedAt = Date.parse(options.startedAt || "");
   const endedAt = Date.parse(options.endedAt || "");
   const hasTimeDomain = Number.isFinite(startedAt) && Number.isFinite(endedAt) && endedAt > startedAt;
-  const all = series.flatMap((item) => item.points || []).map((point) => point.value)
+  const all = series.flatMap((item) => visibleHistorySegments(item).flat()).map((point) => point.value)
     .filter((value) => typeof value === "number");
   if (!all.length) {
     const message = document.createElementNS(svgNamespace, "text");
@@ -280,12 +284,8 @@ function renderLineChart(svg, series, options = {}) {
   zeroLine.setAttribute("stroke-width", "1.5");
   svg.append(zeroLine);
   series.forEach((item, seriesIndex) => {
-    const points = item.points || [];
-    if (!points.length) return;
-    const coordinates = points.map((point, index) => ({
-      x: xFor(point, index, points.length),
-      y: yFor(point.value),
-    }));
+    const segments = visibleHistorySegments(item);
+    if (!segments.length) return;
     const gradientId = `pilot-chart-gradient-${seriesIndex}`;
     const gradient = document.createElementNS(svgNamespace, "linearGradient");
     gradient.setAttribute("id", gradientId);
@@ -299,21 +299,33 @@ function renderLineChart(svg, series, options = {}) {
       gradient.append(stop);
     }
     definitions.append(gradient);
-    const area = document.createElementNS(svgNamespace, "path");
-    area.setAttribute(
-      "d",
-      `M ${coordinates[0].x.toFixed(1)} ${zeroY.toFixed(1)} ` +
-      coordinates.map((point) => `L ${point.x.toFixed(1)} ${point.y.toFixed(1)}`).join(" ") +
-      ` L ${coordinates.at(-1).x.toFixed(1)} ${zeroY.toFixed(1)} Z`,
-    );
-    area.setAttribute("fill", `url(#${gradientId})`);
-    svg.append(area);
-    const path = document.createElementNS(svgNamespace, "polyline");
-    path.setAttribute("fill", "none"); path.setAttribute("stroke", item.color || "#55b6ff");
-    path.setAttribute("stroke-width", options.strokeWidth || "4");
-    path.setAttribute("stroke-linecap", "round"); path.setAttribute("stroke-linejoin", "round");
-    path.setAttribute("points", coordinates.map((point) => `${point.x.toFixed(1)},${point.y.toFixed(1)}`).join(" "));
-    svg.append(path);
+    segments.forEach((points) => {
+      if (!points.length) return;
+      const rawCoordinates = points.map((point, index) => ({
+        x: xFor(point, index, points.length),
+        y: yFor(point.value),
+      }));
+      const coordinates = item.render_mode === "step"
+        ? rawCoordinates.flatMap((point, index) => (
+          index === 0 ? [point] : [{ x: point.x, y: rawCoordinates[index - 1].y }, point]
+        ))
+        : rawCoordinates;
+      const area = document.createElementNS(svgNamespace, "path");
+      area.setAttribute(
+        "d",
+        `M ${coordinates[0].x.toFixed(1)} ${zeroY.toFixed(1)} ` +
+        coordinates.map((point) => `L ${point.x.toFixed(1)} ${point.y.toFixed(1)}`).join(" ") +
+        ` L ${coordinates.at(-1).x.toFixed(1)} ${zeroY.toFixed(1)} Z`,
+      );
+      area.setAttribute("fill", `url(#${gradientId})`);
+      svg.append(area);
+      const path = document.createElementNS(svgNamespace, "polyline");
+      path.setAttribute("fill", "none"); path.setAttribute("stroke", item.color || "#55b6ff");
+      path.setAttribute("stroke-width", options.strokeWidth || "4");
+      path.setAttribute("stroke-linecap", "round"); path.setAttribute("stroke-linejoin", "round");
+      path.setAttribute("points", coordinates.map((point) => `${point.x.toFixed(1)},${point.y.toFixed(1)}`).join(" "));
+      svg.append(path);
+    });
   });
   if (options.showTimeAxis && hasTimeDomain) {
     const formatTime = new Intl.DateTimeFormat([], { hour: "numeric" });
@@ -330,6 +342,24 @@ function renderLineChart(svg, series, options = {}) {
       svg.append(label);
     }
   }
+}
+
+function visibleHistorySegments(item = {}) {
+  const points = item.points || [];
+  const threshold = Number(item.activity_threshold_w);
+  if (!Number.isFinite(threshold) || threshold <= 0) return points.length ? [points] : [];
+  const segments = [];
+  let active = [];
+  points.forEach((point) => {
+    if (typeof point.value === "number" && Math.abs(point.value) >= threshold) {
+      active.push(point);
+    } else if (active.length) {
+      segments.push(active);
+      active = [];
+    }
+  });
+  if (active.length) segments.push(active);
+  return segments;
 }
 
 function weatherGlyph(condition = "") {

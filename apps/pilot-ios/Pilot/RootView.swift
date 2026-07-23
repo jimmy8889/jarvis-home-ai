@@ -53,6 +53,7 @@ enum PilotTheme {
 }
 
 enum EnergyScenePolicy {
+    static let batteryFlowDeadbandWatts = 100.0
     static let vehicleFlowDeadbandWatts = 100.0
 
     static func vehicleIsDrawingPower(_ watts: Double?) -> Bool {
@@ -603,8 +604,11 @@ private struct EnergyFlowPage: View {
     }
 
     private var batteryStatus: String {
-        guard abs(snapshot.power.batteryWatts ?? 0) > 25 else { return "Idle" }
-        return snapshot.power.directions["battery"] == "charging" || (snapshot.power.batteryWatts ?? 0) < -25
+        guard abs(snapshot.power.batteryWatts ?? 0) >= EnergyScenePolicy.batteryFlowDeadbandWatts else {
+            return "Idle"
+        }
+        return snapshot.power.directions["battery"] == "charging"
+            || (snapshot.power.batteryWatts ?? 0) <= -EnergyScenePolicy.batteryFlowDeadbandWatts
             ? "Charging"
             : "Supplying"
     }
@@ -788,10 +792,16 @@ private struct EnergyFlowLines: View {
             points: route([hub, (0.72, 0.63), (0.72, 0.70)], size: size),
             color: PilotTheme.mint,
             watts: power.batteryWatts,
-            threshold: 25,
-            active: flowIsActive("battery", watts: power.batteryWatts, threshold: 25),
-            forward: power.directions["battery"] == "charging" || (power.batteryWatts ?? 0) < -25,
-            date: date
+            threshold: EnergyScenePolicy.batteryFlowDeadbandWatts,
+            active: flowIsActive(
+                "battery",
+                watts: power.batteryWatts,
+                threshold: EnergyScenePolicy.batteryFlowDeadbandWatts
+            ),
+            forward: power.directions["battery"] == "charging"
+                || (power.batteryWatts ?? 0) <= -EnergyScenePolicy.batteryFlowDeadbandWatts,
+            date: date,
+            showInactiveTrack: false
         )
         drawFlow(
             context: &context,
@@ -805,7 +815,8 @@ private struct EnergyFlowLines: View {
                 threshold: EnergyScenePolicy.vehicleFlowDeadbandWatts
             ),
             forward: true,
-            date: date
+            date: date,
+            showInactiveTrack: false
         )
         drawFlow(
             context: &context,
@@ -866,7 +877,8 @@ private struct EnergyFlowLines: View {
         threshold: Double,
         active: Bool,
         forward: Bool,
-        date: Date?
+        date: Date?,
+        showInactiveTrack: Bool = true
     ) {
         guard let first = points.first else { return }
         var path = Path()
@@ -874,16 +886,18 @@ private struct EnergyFlowLines: View {
         for point in points.dropFirst() { path.addLine(to: point) }
         let magnitude = abs(watts ?? 0)
         let strength = min(1, max(0.16, magnitude / 7_500))
-        context.stroke(
-            path,
-            with: .color(color.opacity(active ? 0.25 + strength * 0.28 : 0.10)),
-            style: StrokeStyle(
-                lineWidth: active ? 2.8 + strength * 2.5 : 1.5,
-                lineCap: .round,
-                lineJoin: .round
+        if active || showInactiveTrack {
+            context.stroke(
+                path,
+                with: .color(color.opacity(active ? 0.25 + strength * 0.28 : 0.10)),
+                style: StrokeStyle(
+                    lineWidth: active ? 2.8 + strength * 2.5 : 1.5,
+                    lineCap: .round,
+                    lineJoin: .round
+                )
             )
-        )
-        guard active, magnitude > threshold, let date else { return }
+        }
+        guard active, magnitude >= threshold, let date else { return }
         let speed = min(1.25, max(0.22, magnitude / 5_000))
         let period = 3.2 / speed
         let phase = date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: period) / period
@@ -982,9 +996,12 @@ private struct AnimatedHomeBatteryNode: View {
     let direction: String?
 
     private var magnitude: Double { abs(powerWatts ?? 0) }
-    private var active: Bool { magnitude > 25 }
+    private var active: Bool { magnitude >= EnergyScenePolicy.batteryFlowDeadbandWatts }
     private var charging: Bool {
-        active && (direction == "charging" || (powerWatts ?? 0) < -25)
+        active && (
+            direction == "charging"
+                || (powerWatts ?? 0) <= -EnergyScenePolicy.batteryFlowDeadbandWatts
+        )
     }
     private var discharging: Bool {
         active && !charging
@@ -1051,8 +1068,10 @@ private struct AnimatedHomeBatteryNode: View {
             }
             .shadow(color: PilotTheme.mint.opacity(active ? pulse * 0.55 : 0), radius: 9)
 
-            Text(Self.power(powerWatts))
-                .font(.system(size: 10, weight: .heavy, design: .monospaced))
+            if active {
+                Text(Self.power(powerWatts))
+                    .font(.system(size: 10, weight: .heavy, design: .monospaced))
+            }
             Text(status)
                 .font(.system(size: 8, weight: .semibold))
                 .foregroundStyle(charging ? PilotTheme.cyan : discharging ? PilotTheme.mint : .secondary)
@@ -1170,6 +1189,10 @@ private struct EnergyHistoryPage: View {
         selectedDate ?? snapshot.history.series.flatMap(\.points).map(\.date).max()
     }
 
+    private var chartSegments: [EnergyHistoryChartSegment] {
+        snapshot.history.series.flatMap { EnergyHistoryChartSegment.segments(for: $0) }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
@@ -1189,32 +1212,32 @@ private struct EnergyHistoryPage: View {
                     .frame(height: 250)
             } else {
                 Chart {
-                    ForEach(snapshot.history.series) { series in
-                        ForEach(series.points) { point in
+                    ForEach(chartSegments) { segment in
+                        ForEach(segment.points) { point in
                             AreaMark(
                                 x: .value("Time", point.date),
                                 yStart: .value("Zero", 0),
                                 yEnd: .value("Power", point.value / 1_000),
-                                series: .value("Fill", series.label)
+                                series: .value("Fill", segment.id)
                             )
                             .foregroundStyle(
                                 LinearGradient(
                                     colors: [
-                                        Self.color(series.color).opacity(0.28),
-                                        Self.color(series.color).opacity(0.015),
+                                        Self.color(segment.series.color).opacity(0.28),
+                                        Self.color(segment.series.color).opacity(0.015),
                                     ],
-                                    startPoint: series.isLoad ? .bottom : .top,
-                                    endPoint: series.isLoad ? .top : .bottom
+                                    startPoint: segment.series.isLoad ? .bottom : .top,
+                                    endPoint: segment.series.isLoad ? .top : .bottom
                                 )
                             )
-                            .interpolationMethod(.monotone)
+                            .interpolationMethod(segment.isStep ? .stepEnd : .monotone)
                             LineMark(
                                 x: .value("Time", point.date),
                                 y: .value("Power", point.value / 1_000),
-                                series: .value("Series", series.label)
+                                series: .value("Series", segment.id)
                             )
-                            .foregroundStyle(Self.color(series.color))
-                            .interpolationMethod(.monotone)
+                            .foregroundStyle(Self.color(segment.series.color))
+                            .interpolationMethod(segment.isStep ? .stepEnd : .monotone)
                         }
                     }
                     if let inspectionDate {
@@ -1276,7 +1299,10 @@ private struct EnergyHistoryPage: View {
         in series: DashboardHistorySeries,
         to date: Date
     ) -> DashboardHistoryPoint? {
-        series.points.min {
+        series.points.filter {
+            guard let threshold = series.activityThresholdWatts else { return true }
+            return abs($0.value) >= threshold
+        }.min {
             abs($0.date.timeIntervalSince(date)) < abs($1.date.timeIntervalSince(date))
         }
     }
@@ -1286,6 +1312,44 @@ private struct EnergyHistoryPage: View {
         return Color(red: Double((value >> 16) & 0xff) / 255,
                      green: Double((value >> 8) & 0xff) / 255,
                      blue: Double(value & 0xff) / 255)
+    }
+}
+
+private struct EnergyHistoryChartSegment: Identifiable {
+    let id: String
+    let series: DashboardHistorySeries
+    let points: [DashboardHistoryPoint]
+
+    var isStep: Bool { series.renderMode == "step" }
+
+    static func segments(for series: DashboardHistorySeries) -> [Self] {
+        guard let threshold = series.activityThresholdWatts else {
+            return series.points.isEmpty
+                ? []
+                : [Self(id: "\(series.id)-0", series: series, points: series.points)]
+        }
+        var result: [Self] = []
+        var active: [DashboardHistoryPoint] = []
+        func finish() {
+            guard !active.isEmpty else { return }
+            result.append(
+                Self(
+                    id: "\(series.id)-\(result.count)",
+                    series: series,
+                    points: active
+                )
+            )
+            active.removeAll(keepingCapacity: true)
+        }
+        for point in series.points {
+            if abs(point.value) >= threshold {
+                active.append(point)
+            } else {
+                finish()
+            }
+        }
+        finish()
+        return result
     }
 }
 

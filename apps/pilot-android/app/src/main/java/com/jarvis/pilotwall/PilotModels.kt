@@ -123,7 +123,14 @@ data class DashboardDaily(val generatedKWh: Double?, val homeKWh: Double?, val e
 data class DashboardVehicle(val connected: Boolean?, val charging: Boolean, val powerW: Double?, val socPercent: Double?)
 data class DashboardTemperature(val id: String, val label: String, val temperatureC: Double?)
 data class DashboardPoint(val at: Instant?, val value: Double)
-data class DashboardSeries(val id: String, val label: String, val color: String, val points: List<DashboardPoint>)
+data class DashboardSeries(
+    val id: String,
+    val label: String,
+    val color: String,
+    val points: List<DashboardPoint>,
+    val activityThresholdW: Double? = null,
+    val renderMode: String? = null,
+)
 data class DashboardForecast(val at: Instant?, val condition: String?, val highC: Double?, val lowC: Double?, val rainPercent: Double?)
 data class DashboardWeather(
     val condition: String?, val temperatureC: Double?, val humidityPercent: Double?,
@@ -509,6 +516,8 @@ internal object PilotJson {
                     points = series.optJSONArray("points").objects().mapNotNull { point ->
                         point.optFiniteDouble("value")?.let { DashboardPoint(point.optInstant("at"), it) }
                     },
+                    activityThresholdW = series.optFiniteDouble("activity_threshold_w"),
+                    renderMode = series.optNullableString("render_mode"),
                 )
             },
             weather = DashboardWeather(

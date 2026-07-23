@@ -612,7 +612,15 @@ struct DashboardHistorySeries: Codable, Identifiable, Equatable, Sendable {
     let label: String
     let color: String
     let unit: String
+    let activityThresholdWatts: Double?
+    let renderMode: String?
     let points: [DashboardHistoryPoint]
+
+    enum CodingKeys: String, CodingKey {
+        case id, label, color, unit, points
+        case activityThresholdWatts = "activity_threshold_w"
+        case renderMode = "render_mode"
+    }
 }
 
 struct DashboardHistory: Codable, Equatable, Sendable {

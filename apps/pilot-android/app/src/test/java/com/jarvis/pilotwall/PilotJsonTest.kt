@@ -48,6 +48,7 @@ class PilotJsonTest {
                       },
                       {
                         "id": "tesla", "label": "Tesla charging", "color": "#D970FF",
+                        "activity_threshold_w": 100, "render_mode": "step",
                         "points": [{"at": "2026-07-22T03:00:00Z", "value": -4540}]
                       }
                     ]
@@ -83,6 +84,8 @@ class PilotJsonTest {
         assertEquals(8820.0, dashboard.history.first().points.single().value, 0.01)
         assertEquals(-5610.0, dashboard.history[1].points.single().value, 0.01)
         assertEquals(-4540.0, dashboard.history[2].points.single().value, 0.01)
+        assertEquals(100.0, dashboard.history[2].activityThresholdW!!, 0.01)
+        assertEquals("step", dashboard.history[2].renderMode)
         assertEquals("calendar_day", dashboard.historyWindow)
         assertEquals(
             "2026-07-21T14:00:00Z",

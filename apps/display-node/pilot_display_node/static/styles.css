@@ -300,6 +300,8 @@ body[data-mode="media-console"] .track-card {
 .battery-flow { stroke: url("#battery-gradient"); filter: drop-shadow(0 0 7px rgba(0,230,190,.72)); }
 .home-flow { stroke: url("#home-gradient"); filter: drop-shadow(0 0 7px rgba(97,230,168,.72)); }
 .home-flow-base { stroke: rgba(97,230,168,.24); }
+.battery-flow-base,
+.vehicle-flow-base { display: none; }
 .battery-feeding-home .home-flow.active { stroke-width: 8; }
 @keyframes energy-flow-forward { to { stroke-dashoffset: -28; } }
 @keyframes energy-flow-reverse { to { stroke-dashoffset: 28; } }
@@ -309,6 +311,12 @@ body[data-mode="media-console"] .track-card {
   transition: opacity .3s ease;
 }
 .flow-particles.active { opacity: 1; }
+.battery-flow,
+.vehicle-flow,
+.battery-particles,
+.vehicle-particles {
+  transition: none;
+}
 .flow-particles .particles-reverse { display: none; }
 .flow-particles.reverse .particles-forward { display: none; }
 .flow-particles.reverse .particles-reverse { display: inline; }

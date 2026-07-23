@@ -237,6 +237,7 @@ final class PilotTests: XCTestCase {
                   {"id":"home_load","label":"Home load","color":"#FF5D6C","unit":"W",
                     "points":[{"at":"2026-07-22T03:00:00Z","value":-5610}]},
                   {"id":"tesla","label":"Tesla charging","color":"#D970FF","unit":"W",
+                    "activity_threshold_w":100,"render_mode":"step",
                     "points":[{"at":"2026-07-22T03:00:00Z","value":-4540}]}
                 ]},
               "weather":{"status":"ok","condition":"sunny","temperature_c":24,
@@ -261,6 +262,8 @@ final class PilotTests: XCTestCase {
         XCTAssertEqual(value.history.startedAt, "2026-07-22T00:00:00+10:00")
         XCTAssertEqual(value.history.series[1].points.first?.value, -5610)
         XCTAssertEqual(value.history.series[2].color, "#D970FF")
+        XCTAssertEqual(value.history.series[2].activityThresholdWatts, 100)
+        XCTAssertEqual(value.history.series[2].renderMode, "step")
         XCTAssertEqual(value.weather.forecast.first?.highTemperatureCelsius, 26)
         XCTAssertEqual(value.controls.chargingMode.value, "Solar")
         XCTAssertTrue(value.controls.mediaRoomMode.available)

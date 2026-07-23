@@ -14,6 +14,7 @@ from .integrations import IntegrationRequestFailed, IntegrationUnavailable, Inte
 
 FLOW_IDLE_WATTS = 25.0
 GRID_FLOW_IDLE_WATTS = 100.0
+BATTERY_FLOW_IDLE_WATTS = 100.0
 VEHICLE_FLOW_IDLE_WATTS = 100.0
 DASHBOARD_CACHE_SECONDS = 10.0
 
@@ -228,7 +229,12 @@ class DashboardService:
             "vehicle_w": vehicle,
             "directions": {
                 "grid": self._direction(grid, "importing", "exporting", GRID_FLOW_IDLE_WATTS),
-                "battery": self._direction(battery, "discharging", "charging", FLOW_IDLE_WATTS),
+                "battery": self._direction(
+                    battery,
+                    "discharging",
+                    "charging",
+                    BATTERY_FLOW_IDLE_WATTS,
+                ),
                 "vehicle": (
                     "charging"
                     if vehicle is not None and vehicle >= VEHICLE_FLOW_IDLE_WATTS
@@ -239,7 +245,10 @@ class DashboardService:
             "flow_active": {
                 "solar": solar is not None and solar >= FLOW_IDLE_WATTS,
                 "grid": grid is not None and abs(grid) >= GRID_FLOW_IDLE_WATTS,
-                "battery": battery is not None and abs(battery) >= FLOW_IDLE_WATTS,
+                "battery": (
+                    battery is not None
+                    and abs(battery) >= BATTERY_FLOW_IDLE_WATTS
+                ),
                 "home": home is not None and home >= FLOW_IDLE_WATTS,
                 "server_rack": server is not None and server >= FLOW_IDLE_WATTS,
                 "vehicle": vehicle is not None and vehicle >= VEHICLE_FLOW_IDLE_WATTS,
@@ -384,6 +393,8 @@ class DashboardService:
                 "#FF5D6C",
                 self.settings.energy_home_load_entity_id,
                 True,
+                None,
+                "smooth",
             ),
             (
                 "battery",
@@ -391,6 +402,8 @@ class DashboardService:
                 "#55B6FF",
                 self.settings.energy_battery_power_entity_id,
                 False,
+                BATTERY_FLOW_IDLE_WATTS,
+                "step",
             ),
             (
                 "solar",
@@ -398,6 +411,8 @@ class DashboardService:
                 "#FFC247",
                 self.settings.energy_solar_power_entity_id,
                 False,
+                None,
+                "smooth",
             ),
             (
                 "tesla",
@@ -405,6 +420,8 @@ class DashboardService:
                 "#D970FF",
                 self.settings.energy_vehicle_power_entity_id,
                 True,
+                VEHICLE_FLOW_IDLE_WATTS,
+                "step",
             ),
         )
         return {
@@ -418,13 +435,23 @@ class DashboardService:
                     "label": label,
                     "color": color,
                     "unit": "W",
+                    "activity_threshold_w": activity_threshold,
+                    "render_mode": render_mode,
                     "points": self._history_points(
                         history.get(entity_id, []),
                         negative=negative,
                         default_unit=self._state_unit(states, entity_id),
                     ),
                 }
-                for identifier, label, color, entity_id, negative in configured
+                for (
+                    identifier,
+                    label,
+                    color,
+                    entity_id,
+                    negative,
+                    activity_threshold,
+                    render_mode,
+                ) in configured
                 if entity_id
             ],
         }

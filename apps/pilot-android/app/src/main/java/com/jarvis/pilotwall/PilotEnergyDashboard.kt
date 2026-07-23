@@ -69,6 +69,7 @@ private enum class DashboardPage(val title: String) { Flow("Flow"), History("His
 
 internal const val ENERGY_ACTIVITY_THRESHOLD_W = 25.0
 internal const val GRID_ACTIVITY_THRESHOLD_W = 100.0
+internal const val BATTERY_ACTIVITY_THRESHOLD_W = 100.0
 internal const val VEHICLE_ACTIVITY_THRESHOLD_W = 100.0
 
 internal fun isDayEnergyScene(solarW: Double?): Boolean = (solarW ?: 0.0) >= GRID_ACTIVITY_THRESHOLD_W
@@ -281,8 +282,9 @@ private fun EnergyFlowCanvas(
             listOf(Offset(size.width * .72f, size.height * .70f), Offset(size.width * .72f, size.height * .57f), centre),
             power.batteryW,
             PilotMint,
-            abs(power.batteryW ?: 0.0) >= ENERGY_ACTIVITY_THRESHOLD_W,
+            abs(power.batteryW ?: 0.0) >= BATTERY_ACTIVITY_THRESHOLD_W,
             reverse = power.batteryDirection == "charging",
+            showInactiveTrack = false,
         )
         flow(
             listOf(centre, Offset(size.width * .23f, size.height * .51f), Offset(size.width * .23f, size.height * .72f)),
@@ -414,7 +416,7 @@ private fun AnimatedBatteryTower(
     val targetSoc = ((soc ?: 0.0) / 100.0).toFloat().coerceIn(0f, 1f)
     val changingSoc by animateFloatAsState(targetSoc, tween(900), label = "battery-soc")
     val animatedSoc = if (animationsEnabled) changingSoc else targetSoc
-    val active = abs(powerW ?: 0.0) >= ENERGY_ACTIVITY_THRESHOLD_W
+    val active = abs(powerW ?: 0.0) >= BATTERY_ACTIVITY_THRESHOLD_W
     val charging = direction == "charging"
     val motion = if (animationsEnabled) {
         val transition = rememberInfiniteTransition(label = "battery-motion")
@@ -614,51 +616,81 @@ private fun DashboardLineChart(
             1.5f,
         )
         series.forEach { item ->
-            if (item.points.size < 2) return@forEach
             val durationMillis = if (startedAt != null && endedAt != null) {
                 Duration.between(startedAt, endedAt).toMillis().coerceAtLeast(1)
             } else null
-            val coordinates = item.points.mapIndexed { index, point ->
-                val fraction = if (durationMillis != null && point.at != null) {
-                    Duration.between(startedAt, point.at).toMillis()
-                        .toDouble().div(durationMillis).coerceIn(0.0, 1.0)
-                } else {
-                    index.toDouble() / (item.points.size - 1).coerceAtLeast(1)
+            visibleHistorySegments(item).forEach { segment ->
+                if (segment.size < 2) return@forEach
+                val rawCoordinates = segment.mapIndexed { index, point ->
+                    val fraction = if (durationMillis != null && point.at != null) {
+                        Duration.between(startedAt, point.at).toMillis()
+                            .toDouble().div(durationMillis).coerceIn(0.0, 1.0)
+                    } else {
+                        index.toDouble() / (segment.size - 1).coerceAtLeast(1)
+                    }
+                    Offset(
+                        size.width * fraction.toFloat(),
+                        size.height * (1 - ((point.value - low) / (high - low))).toFloat(),
+                    )
                 }
-                Offset(
-                    size.width * fraction.toFloat(),
-                    size.height * (1 - ((point.value - low) / (high - low))).toFloat(),
-                )
-            }
-            val path = Path()
-            coordinates.forEachIndexed { index, point ->
-                if (index == 0) path.moveTo(point.x, point.y)
-                else path.lineTo(point.x, point.y)
-            }
-            val area = Path().apply {
-                moveTo(coordinates.first().x, zeroY)
-                coordinates.forEach { lineTo(it.x, it.y) }
-                lineTo(coordinates.last().x, zeroY)
-                close()
-            }
-            val seriesColor = color(item.color)
-            val seriesTop = min(zeroY, coordinates.minOf { it.y })
-            val seriesBottom = max(zeroY, coordinates.maxOf { it.y })
-            drawPath(
-                area,
-                brush = Brush.verticalGradient(
-                    colors = listOf(
-                        seriesColor.copy(alpha = .04f),
-                        seriesColor.copy(alpha = .28f),
-                        seriesColor.copy(alpha = .04f),
+                val coordinates = if (item.renderMode == "step") {
+                    buildList {
+                        add(rawCoordinates.first())
+                        rawCoordinates.drop(1).forEach { point ->
+                            add(Offset(point.x, last().y))
+                            add(point)
+                        }
+                    }
+                } else {
+                    rawCoordinates
+                }
+                val path = Path()
+                coordinates.forEachIndexed { index, point ->
+                    if (index == 0) path.moveTo(point.x, point.y)
+                    else path.lineTo(point.x, point.y)
+                }
+                val area = Path().apply {
+                    moveTo(coordinates.first().x, zeroY)
+                    coordinates.forEach { lineTo(it.x, it.y) }
+                    lineTo(coordinates.last().x, zeroY)
+                    close()
+                }
+                val seriesColor = color(item.color)
+                val seriesTop = min(zeroY, coordinates.minOf { it.y })
+                val seriesBottom = max(zeroY, coordinates.maxOf { it.y })
+                drawPath(
+                    area,
+                    brush = Brush.verticalGradient(
+                        colors = listOf(
+                            seriesColor.copy(alpha = .04f),
+                            seriesColor.copy(alpha = .28f),
+                            seriesColor.copy(alpha = .04f),
+                        ),
+                        startY = seriesTop,
+                        endY = max(seriesTop + 1f, seriesBottom),
                     ),
-                    startY = seriesTop,
-                    endY = max(seriesTop + 1f, seriesBottom),
-                ),
-            )
-            drawPath(path, seriesColor, style = Stroke(width = 5f, cap = StrokeCap.Round))
+                )
+                drawPath(path, seriesColor, style = Stroke(width = 5f, cap = StrokeCap.Round))
+            }
         }
     }
+}
+
+internal fun visibleHistorySegments(series: DashboardSeries): List<List<DashboardPoint>> {
+    val threshold = series.activityThresholdW ?: return listOf(series.points).filter { it.isNotEmpty() }
+    val segments = mutableListOf<List<DashboardPoint>>()
+    var active = mutableListOf<DashboardPoint>()
+    fun finish() {
+        if (active.isNotEmpty()) {
+            segments += active
+            active = mutableListOf()
+        }
+    }
+    series.points.forEach { point ->
+        if (abs(point.value) >= threshold) active += point else finish()
+    }
+    finish()
+    return segments
 }
 
 @Composable

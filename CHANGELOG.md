@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.29.3 — 2026-07-23
+
+- Battery and Tesla live flows now use a 100 W idle deadband and remain fully
+  hidden while inactive.
+- Energy history marks battery and Tesla as thresholded step series. Pilot
+  clients split inactive periods into gaps and snap active readings into place
+  instead of drawing misleading ramps from zero.
+- Pilot Linux Display 0.7.1, Pilot Android 0.4.1 and the iOS dashboard consume
+  the shared behavior, including instant flow activation and hidden idle power.
+
 ## 0.29.2 — 2026-07-23
 
 - Fixed energy-history unit normalization when Home Assistant's minimal

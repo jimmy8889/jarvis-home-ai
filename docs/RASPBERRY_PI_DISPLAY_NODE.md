@@ -77,7 +77,7 @@ Assistant, or Pilot administrator credentials.
 
 ## Current source release
 
-Pilot Linux Display 0.7.0 now also implements:
+Pilot Linux Display 0.7.1 now also implements:
 
 - a configurable `display` or `media-console` presentation mode;
 - the shared Flow, History, Daily and Climate monitoring surfaces, including
@@ -216,9 +216,12 @@ The previously deployed Pi release passed:
 - no current or historical thermal throttling
 - two-way application rollback
 
-The 0.7.0 service release is deployed on the Pi as immutable release
-`20260723T184153`, with healthy web/kiosk services, Core connectivity and an
-intact rollback pair. Repeat the reboot check and measure Chromium CPU and
+The 0.7.1 service release is deployed on the Pi as immutable release
+`20260723T224400`, with healthy web/kiosk services, Core connectivity and
+release `20260723T184153` retained for rollback. Battery and Tesla live paths
+are now completely absent below 100 W and activate without a fade; their
+history is split around idle periods and rendered as steps rather than ramps.
+Repeat the reboot check and measure Chromium CPU and
 temperature with several simultaneous
 flows; the low-power profile now uses solid speed-optimized SVG strokes, caps
 dash paint updates at 10 per second and pauses all motion off-page or under

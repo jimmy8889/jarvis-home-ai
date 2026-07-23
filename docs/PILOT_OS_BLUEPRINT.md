@@ -111,8 +111,8 @@ Music streams: TCP 8097
 Sendspin server: TCP 8927
 Pilot Core: 10.0.1.64:8770
 Pilot Core host: debian-docker / Debian 12
-Pilot Core target image: jarvis-home-ai/pilot-core:core-0.29.2-20260723.1
-Pilot Core deployed commit: 6a1136bb6465ef47fa178015132fb1efea414d44
+Pilot Core target image: jarvis-home-ai/pilot-core:core-0.29.3-20260723.1
+Pilot Core deployed commit: b1eb94ddc6ac174986d5c461647b1d08bd6f4c3f
 ```
 
 That image is the deployed production baseline. Pilot Core 0.29 retains the
@@ -301,7 +301,7 @@ Hardware: Raspberry Pi 4 Model B, 2 GB / 16 GB microSD
 Display: 10-inch 1024 x 600 HDMI with ILITEK USB touch
 OS: 64-bit Debian 13 Trixie
 Runtime: Cage Wayland compositor + Chromium kiosk
-Deployed surface: Pilot Linux Display 0.7.0
+Deployed surface: Pilot Linux Display 0.7.1
 Active release: /opt/pilot-display/releases/20260723T184153
 ```
 
@@ -328,7 +328,7 @@ display surface. The Pi remains room-bound to Office and now has the narrow
 `display` and `media-control` capabilities; its browser still receives no
 credential and cannot bypass Pilot Core.
 
-Display 0.7.0 provides the shared James House
+Display 0.7.1 provides the shared James House
 monitoring experience: animated watt-scaled solar, grid, battery, Tesla and
 server-rack paths; midnight-to-midnight solar/battery/home/Tesla history with
 up to 288 points and gradient fills; daily generation, consumption and export;
@@ -338,7 +338,7 @@ as magenta negative power on every Pilot client. Grid values below 100 W remain
 visible but do not animate. It also adds artwork-led artist/album/playlist drill-down and a
 reproducible Sendspin player for the future Pi USB DAC. The runtime is installed
 but disabled until that DAC and its stable PipeWire sink are physically
-accepted. The immutable 0.7.0 release is active with healthy web and kiosk
+accepted. The immutable 0.7.1 release is active with healthy web and kiosk
 services and the preceding release retained as its rollback target. The N150
 media-console build is tested but its deployment remains pending while
 `10.0.1.53` is offline.
@@ -1180,3 +1180,15 @@ deployed integration, hardware boundary, or milestone status changes.
   SHA-256 `f7c753df56de25e8939554ac53177a90dbf9f31ebd94bd7381b3f3a39d311f96`.
   Production validation confirmed 288 Tesla samples, 276 visible charging
   samples, a `-12.1 kW` peak and no history error.
+- **4.10** — Added shared 100 W battery/Tesla idle boundaries and segmented
+  step-history rendering. Idle live paths and power labels are hidden; active
+  values snap into place without opacity fades or chart ramps. Commit
+  `b1eb94d` was promoted as immutable Pilot Core 0.29.3 image
+  `core-0.29.3-20260723.1`; the guarded deploy created rollback archive
+  `pilot-core-20260723T124247Z-pre-deploy-core-0.29.3-20260723.1.tar.gz` with
+  SHA-256 `12ac70705ebc082e261980e0af3c0bb0623dfb4c904cac3266a250367c050e69`.
+  Pilot Linux Display 0.7.1 is active on the Pi as immutable release
+  `20260723T224400`, with release `20260723T184153` retained for rollback.
+  Core, Home Assistant, Music Assistant and TTS diagnostics passed; both Pi
+  services are active and the live contract exposes thresholded `step` series
+  for battery and Tesla with no history error.

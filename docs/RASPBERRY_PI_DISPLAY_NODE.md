@@ -217,7 +217,7 @@ The previously deployed Pi release passed:
 - two-way application rollback
 
 The 0.7.0 service release is deployed on the Pi as immutable release
-`20260723T183056`, with healthy web/kiosk services, Core connectivity and an
+`20260723T184153`, with healthy web/kiosk services, Core connectivity and an
 intact rollback pair. Repeat the reboot check and measure Chromium CPU and
 temperature with several simultaneous
 flows; the low-power profile now uses solid speed-optimized SVG strokes, caps

@@ -302,7 +302,7 @@ Display: 10-inch 1024 x 600 HDMI with ILITEK USB touch
 OS: 64-bit Debian 13 Trixie
 Runtime: Cage Wayland compositor + Chromium kiosk
 Deployed surface: Pilot Linux Display 0.7.0
-Active release: /opt/pilot-display/releases/20260723T183056
+Active release: /opt/pilot-display/releases/20260723T184153
 ```
 
 This node is deployed as a minimal appliance rather than a full desktop. A
@@ -1160,4 +1160,4 @@ deployed integration, hardware boundary, or milestone status changes.
   SHA-256 `056838f14bffd7215149ad98ea1d52feb262a5d1773020400ac5cde98865c32f`;
   readiness, Home Assistant, Music Assistant and TTS diagnostics passed. Pilot
   Linux Display 0.7.0 is active on the Raspberry Pi at release
-  `20260723T183056`; the N150 rollout remains queued while the host is offline.
+  `20260723T184153`; the N150 rollout remains queued while the host is offline.

@@ -174,6 +174,22 @@ final class PilotTests: XCTestCase {
         XCTAssertEqual(info[MPNowPlayingInfoPropertyPlaybackRate] as? Double, 0)
     }
 
+    @MainActor
+    func testPhoneArtworkCanBeRequestedFromMediaPlayersBackgroundQueue() {
+        let image = UIGraphicsImageRenderer(size: CGSize(width: 48, height: 48))
+            .image { context in
+                UIColor.systemTeal.setFill()
+                context.fill(CGRect(x: 0, y: 0, width: 48, height: 48))
+            }
+        let artwork = PhonePlaybackController.makeSystemArtwork(from: image)
+
+        let rendered = DispatchQueue.global(qos: .userInitiated).sync {
+            artwork.image(at: CGSize(width: 24, height: 24))
+        }
+
+        XCTAssertNotNil(rendered)
+    }
+
     func testPortableEnergyContractMapsPartialSnapshot() throws {
         let data = Data(
             """

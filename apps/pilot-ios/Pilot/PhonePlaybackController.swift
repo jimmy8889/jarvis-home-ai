@@ -8,6 +8,14 @@ import UIKit
 @MainActor
 @Observable
 final class PhonePlaybackController {
+    private final class ArtworkImageBox: @unchecked Sendable {
+        let image: UIImage
+
+        init(_ image: UIImage) {
+            self.image = image
+        }
+    }
+
     enum Status: Equatable {
         case idle
         case connecting
@@ -386,14 +394,24 @@ final class PhonePlaybackController {
                     let image = UIImage(data: data)
                 else { return }
                 guard let self, artworkURL == url else { return }
-                nowPlayingArtwork = MPMediaItemArtwork(
-                    boundsSize: image.size
-                ) { _ in image }
+                nowPlayingArtwork = Self.makeSystemArtwork(from: image)
                 publishSystemNowPlaying()
             } catch {
                 // Metadata remains useful without artwork; a later track update
                 // retries with the next URL without disturbing audio playback.
             }
+        }
+    }
+
+    nonisolated static func makeSystemArtwork(
+        from image: UIImage
+    ) -> MPMediaItemArtwork {
+        // MediaPlayer evaluates this callback on its private accessQueue.
+        // Build it outside MainActor isolation and capture only an immutable
+        // image snapshot so Swift's executor checks remain valid.
+        let snapshot = ArtworkImageBox(image)
+        return MPMediaItemArtwork(boundsSize: image.size) { _ in
+            snapshot.image
         }
     }
 

@@ -254,7 +254,7 @@ administrator token or communicate directly with the N150.
 1. Build the media-console agent, capability, health model, and authenticated
    command contract. **Source complete.**
 2. Build the fullscreen shell with music, assistant-overlay, stale/offline, and
-   recovery states. **Source complete in Pilot Linux Display 0.6.2**, including
+   recovery states. **Source complete in Pilot Linux Display 0.7.0**, including
    the direct media-home startup route and 1920 x 1080 visual acceptance.
 3. Add Music Assistant now-playing, progress and queue presentation.
    **Source complete**, including artist/album/playlist drill-down; target

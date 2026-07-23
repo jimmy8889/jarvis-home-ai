@@ -111,8 +111,8 @@ Music streams: TCP 8097
 Sendspin server: TCP 8927
 Pilot Core: 10.0.1.64:8770
 Pilot Core host: debian-docker / Debian 12
-Pilot Core target image: jarvis-home-ai/pilot-core:core-0.29.1-20260723.1
-Pilot Core deployed commit: 40698cb92b9a7a9004023ea440c9cf5d442f005e
+Pilot Core target image: jarvis-home-ai/pilot-core:core-0.29.2-20260723.1
+Pilot Core deployed commit: 6a1136bb6465ef47fa178015132fb1efea414d44
 ```
 
 That image is the deployed production baseline. Pilot Core 0.29 retains the
@@ -1171,3 +1171,12 @@ deployed integration, hardware boundary, or milestone status changes.
   dashboard validation confirmed the configured entity, 288 bounded Tesla
   points, negative magenta projection, and the current non-charging `0 W`
   state.
+- **4.9** — Fixed the Tesla history scale for Home Assistant minimal-history
+  responses, which omit unit attributes from most samples. Pilot Core now
+  applies the current entity's `kW` unit to those samples before projecting
+  them as watts. Commit `6a1136b` was promoted as immutable Pilot Core 0.29.2
+  image `core-0.29.2-20260723.1`; the guarded deploy created rollback archive
+  `pilot-core-20260723T122016Z-pre-deploy-core-0.29.2-20260723.1.tar.gz` with
+  SHA-256 `f7c753df56de25e8939554ac53177a90dbf9f31ebd94bd7381b3f3a39d311f96`.
+  Production validation confirmed 288 Tesla samples, 276 visible charging
+  samples, a `-12.1 kW` peak and no history error.

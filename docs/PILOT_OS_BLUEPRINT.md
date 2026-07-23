@@ -111,8 +111,8 @@ Music streams: TCP 8097
 Sendspin server: TCP 8927
 Pilot Core: 10.0.1.64:8770
 Pilot Core host: debian-docker / Debian 12
-Pilot Core target image: jarvis-home-ai/pilot-core:core-0.29.0-20260723.1
-Pilot Core deployed commit: e684728da3d2d157f00ef34577534167a2e6ff4b
+Pilot Core target image: jarvis-home-ai/pilot-core:core-0.29.1-20260723.1
+Pilot Core deployed commit: 40698cb92b9a7a9004023ea440c9cf5d442f005e
 ```
 
 That image is the deployed production baseline. Pilot Core 0.29 retains the
@@ -1161,3 +1161,13 @@ deployed integration, hardware boundary, or milestone status changes.
   readiness, Home Assistant, Music Assistant and TTS diagnostics passed. Pilot
   Linux Display 0.7.0 is active on the Raspberry Pi at release
   `20260723T184153`; the N150 rollout remains queued while the host is offline.
+- **4.8** — Corrected the authoritative Tesla power source to
+  `sensor.tesla_charging_power` and promoted commit `40698cb` as immutable
+  Pilot Core 0.29.1 image `core-0.29.1-20260723.1`. The guarded deploy created
+  rollback archive
+  `pilot-core-20260723T120845Z-pre-deploy-core-0.29.1-20260723.1.tar.gz` with
+  SHA-256 `da7b7f91c8de470f6cfa79f9399f0746d4d1d15345f2a10148bb62a507835120`.
+  Readiness, Home Assistant, Music Assistant and TTS diagnostics passed. Live
+  dashboard validation confirmed the configured entity, 288 bounded Tesla
+  points, negative magenta projection, and the current non-charging `0 W`
+  state.

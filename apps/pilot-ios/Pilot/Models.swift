@@ -627,6 +627,32 @@ struct DashboardHistory: Codable, Equatable, Sendable {
     static let empty = DashboardHistory(periodHours: 24, series: [])
 }
 
+enum PilotDateParser {
+    private static let fractional = Date.ISO8601FormatStyle(
+        dateSeparator: .dash,
+        dateTimeSeparator: .standard,
+        timeSeparator: .colon,
+        timeZoneSeparator: .colon,
+        includingFractionalSeconds: true,
+        timeZone: .gmt
+    )
+    private static let wholeSeconds = Date.ISO8601FormatStyle(
+        dateSeparator: .dash,
+        dateTimeSeparator: .standard,
+        timeSeparator: .colon,
+        timeZoneSeparator: .colon,
+        includingFractionalSeconds: false,
+        timeZone: .gmt
+    )
+
+    static func parse(_ value: String) -> Date? {
+        if let date = try? fractional.parse(value) {
+            return date
+        }
+        return try? wholeSeconds.parse(value)
+    }
+}
+
 struct DashboardForecast: Codable, Identifiable, Equatable, Sendable {
     let at: String?
     let condition: String?
@@ -707,7 +733,7 @@ struct EnergyMeasurement: Codable, Sendable {
 
     var observedDate: Date? {
         guard let observedAt else { return nil }
-        return ISO8601DateFormatter().date(from: observedAt)
+        return PilotDateParser.parse(observedAt)
     }
 }
 

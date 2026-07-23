@@ -1625,19 +1625,19 @@ private struct TemperatureDetailSheet: View {
 }
 
 private extension DashboardHistoryPoint {
-    var date: Date { ISO8601DateFormatter().date(from: at) ?? .distantPast }
+    var date: Date { PilotDateParser.parse(at) ?? .distantPast }
 }
 
 private extension DashboardTariffPoint {
     var date: Date? {
         guard let at else { return nil }
-        return ISO8601DateFormatter().date(from: at)
+        return PilotDateParser.parse(at)
     }
 }
 
 private extension DashboardForecast {
     var dateLabel: String {
-        guard let at, let date = ISO8601DateFormatter().date(from: at) else { return "—" }
+        guard let at, let date = PilotDateParser.parse(at) else { return "—" }
         return date.formatted(.dateTime.weekday(.abbreviated))
     }
 }
@@ -2662,8 +2662,7 @@ private struct MeetingDetailView: View {
     }
 
     private static func date(_ value: String) -> String {
-        let formatter = ISO8601DateFormatter()
-        guard let date = formatter.date(from: value) else { return value }
+        guard let date = PilotDateParser.parse(value) else { return value }
         return date.formatted(date: .abbreviated, time: .shortened)
     }
 }
@@ -2730,8 +2729,7 @@ private struct MeetingCard: View {
     }
 
     private static func date(_ value: String) -> String {
-        let formatter = ISO8601DateFormatter()
-        guard let date = formatter.date(from: value) else { return value }
+        guard let date = PilotDateParser.parse(value) else { return value }
         return date.formatted(date: .abbreviated, time: .shortened)
     }
 }

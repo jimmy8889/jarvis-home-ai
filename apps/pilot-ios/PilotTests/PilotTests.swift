@@ -59,6 +59,36 @@ final class PilotTests: XCTestCase {
         XCTAssertNotNil(EnergySnapshot.awaitingBackend.detail)
     }
 
+    func testPilotDateParserAcceptsHomeAssistantFractionalTimestamps() throws {
+        let first = try XCTUnwrap(
+            PilotDateParser.parse("2026-07-22T05:38:31.345797+00:00")
+        )
+        let second = try XCTUnwrap(
+            PilotDateParser.parse("2026-07-23T05:26:24.749572+00:00")
+        )
+
+        XCTAssertEqual(second.timeIntervalSince(first), 85_673.403775, accuracy: 0.001)
+    }
+
+    func testPilotDateParserAcceptsWholeSecondTimestamps() throws {
+        let parsed = try XCTUnwrap(
+            PilotDateParser.parse("2026-07-22T03:00:00Z")
+        )
+        XCTAssertEqual(
+            parsed.formatted(
+                Date.ISO8601FormatStyle(
+                    dateSeparator: .dash,
+                    dateTimeSeparator: .standard,
+                    timeSeparator: .colon,
+                    timeZoneSeparator: .omitted,
+                    includingFractionalSeconds: false,
+                    timeZone: .gmt
+                )
+            ),
+            "2026-07-22T03:00:00Z"
+        )
+    }
+
     func testEnergySceneUsesAuthoritativeSunAndTeslaDeadband() {
         XCTAssertFalse(EnergyScenePolicy.vehicleIsDrawingPower(1.6))
         XCTAssertFalse(EnergyScenePolicy.vehicleIsDrawingPower(99.9))

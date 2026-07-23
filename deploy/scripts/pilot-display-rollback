@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+current_link=/opt/pilot-display/current
+previous_file=/var/lib/pilot-display/previous_release
+release_root=/opt/pilot-display/releases
+
+if [[ ${EUID} -ne 0 ]]; then
+  printf '%s\n' 'Run pilot-display-rollback as root.' >&2
+  exit 1
+fi
+if [[ ! -L "$current_link" || ! -f "$previous_file" ]]; then
+  printf '%s\n' 'No display rollback release is recorded.' >&2
+  exit 1
+fi
+
+current="$(readlink -f "$current_link")"
+previous="$(tr -d '\r\n' < "$previous_file")"
+case "$previous" in
+  "$release_root"/*) ;;
+  *)
+    printf '%s\n' 'Recorded rollback path is outside the release directory.' >&2
+    exit 1
+    ;;
+esac
+if [[ ! -d "$previous" || "$previous" == "$current" ]]; then
+  printf '%s\n' 'Recorded rollback release is unavailable or already active.' >&2
+  exit 1
+fi
+
+temporary="${current_link}.new"
+ln -sfn "$previous" "$temporary"
+mv -Tf "$temporary" "$current_link"
+printf '%s\n' "$current" > "$previous_file"
+systemctl restart pilot-display-web.service pilot-display-kiosk.service
+
+for _ in $(seq 1 20); do
+  if curl --fail --silent http://127.0.0.1:8780/healthz >/dev/null; then
+    printf 'Pilot display rolled back to %s.\n' "$previous"
+    exit 0
+  fi
+  sleep 1
+done
+
+printf '%s\n' 'Rollback activated, but the display health check failed.' >&2
+exit 1

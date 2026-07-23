@@ -4,10 +4,16 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pilot-core"
-version = "0.1.0"
+version = "0.29.3"
 description = "Central room and player registry for Pilot OS"
 requires-python = ">=3.11"
-dependencies = []
+dependencies = [
+  "fastapi>=0.116,<1",
+  "httpx>=0.28,<1",
+  "segno==1.6.6",
+  "uvicorn>=0.35,<1",
+  "websockets>=15,<17",
+]
 
 [project.scripts]
 pilot-core = "pilot_core.main:main"
@@ -15,3 +21,6 @@ pilot-core = "pilot_core.main:main"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["pilot_core*"]
+
+[tool.setuptools.package-data]
+pilot_core = ["dashboard/*.html", "dashboard/*.css", "dashboard/*.js", "dashboard/*.png"]

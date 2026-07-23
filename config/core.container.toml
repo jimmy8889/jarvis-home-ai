@@ -1,0 +1,184 @@
+[server]
+listen_host = "0.0.0.0"
+listen_port = 8770
+database_path = "/data/pilot.db"
+audio_asset_path = "/data/audio"
+audio_asset_max_bytes = 20000000
+audio_asset_retention_seconds = 3600
+meeting_asset_path = "/data/meetings"
+meeting_asset_max_bytes = 2000000000
+firmware_asset_path = "/data/firmware"
+firmware_asset_max_bytes = 8000000
+voice_audio_max_bytes = 1000000
+conversation_session_ttl_seconds = 900
+conversation_max_turns = 20
+admin_token_env = "PILOT_CORE_ADMIN_TOKEN"
+bootstrap_token_env = "PILOT_CORE_BOOTSTRAP_TOKEN"
+legacy_bootstrap_enabled = false
+
+[integrations]
+music_assistant_url = "http://10.0.2.72:8095"
+music_assistant_token_env = "MUSIC_ASSISTANT_TOKEN"
+home_assistant_url = "http://10.0.2.72:8123"
+home_assistant_token_env = "HOME_ASSISTANT_TOKEN"
+home_assistant_assist_pipeline_id = "01kxkqhhw28z558e2b99nwzk0z"
+home_assistant_assist_language = "en"
+home_assistant_assist_timeout_seconds = 60
+weather_entity_id = "weather.geebung"
+sun_entity_id = "sun.sun"
+outdoor_temperature_entity_id = "sensor.gw1100c_outdoor_temperature"
+indoor_temperature_entity_id = "sensor.temp3_temperature"
+temperature_history_hours = 24
+home_timezone = "Australia/Brisbane"
+energy_solar_power_entity_id = "sensor.pv_power_mqtt_abs"
+energy_grid_power_entity_id = "sensor.saj_ct_grid_power_total"
+energy_battery_power_entity_id = "sensor.saj_battery_power_2"
+energy_battery_soc_entity_id = "sensor.saj_battery_1_soc"
+energy_home_load_entity_id = "sensor.saj_home_load"
+energy_server_power_entity_id = "sensor.server_desk_power"
+energy_vehicle_connected_entity_id = "binary_sensor.tesla_wall_connector_vehicle_connected"
+energy_vehicle_power_entity_id = "sensor.tesla_charging_power"
+energy_vehicle_soc_entity_id = "sensor.jarvis_battery"
+energy_solar_today_entity_ids = ["sensor.saj_power_current_day", "sensor.saj_today_pv_energy_2", "sensor.saj_today_pv_energy_3"]
+energy_home_today_entity_id = "sensor.saj_total_today_load"
+energy_grid_export_today_entity_id = "sensor.saj_sum_all_phases_sell_today"
+energy_history_hours = 24
+amber_import_price_entity_id = "sensor.amber_01k9pncwz9prbf508wt588p9mn_amber_price_now"
+amber_feed_in_price_entity_id = "sensor.amber_01k9pncwz9prbf508wt588p9mn_amber_fit_now"
+amber_feed_in_forecast_entity_id = "sensor.amber_express_home_feed_in_price"
+tesla_charging_mode_entity_id = "input_select.tesla_charging_mode"
+media_room_mode_on_script_id = "script.movie_mode_on"
+media_room_mode_off_script_id = "script.movie_mode_off"
+temperature_office_entity_id = "sensor.office_broadlink_temperature"
+temperature_tv_room_entity_id = "sensor.gw1100c_indoor_temperature"
+temperature_bedroom_entity_id = "sensor.temp3_temperature"
+temperature_media_room_entity_id = "sensor.media_room_broadlink_temperature"
+tts_provider = "home_assistant"
+tts_url = ""
+tts_token_env = "PILOT_TTS_TOKEN"
+tts_engine_id = "tts.piper"
+tts_model = "tts-1"
+tts_voice = "en_US-amy-low"
+tts_format = "wav"
+tts_language = "en_US"
+tts_sample_rate = 16000
+tts_sample_channels = 1
+tts_sample_bytes = 2
+tts_timeout_seconds = 60
+llm_provider = "openai"
+llm_url = "http://10.0.1.20:11434/v1"
+llm_token_env = "PILOT_LLM_TOKEN"
+llm_model = "qwen3.5:9b"
+llm_reasoning_effort = "none"
+llm_timeout_seconds = 60
+llm_max_tool_rounds = 4
+llm_context_turns = 12
+meeting_stt_url = ""
+meeting_stt_token_env = "PILOT_MEETING_STT_TOKEN"
+meeting_stt_model = "whisper-1"
+meeting_stt_timeout_seconds = 600
+meeting_analysis_model = "gemma4:12b"
+meeting_transcript_max_characters = 500000
+
+[[rooms]]
+id = "bedroom"
+name = "Bedroom"
+music_enabled = false
+home_area_ids = ["bedroom"]
+response_player_id = "bedroom-display-speaker"
+default_music_player_id = "bedroom-music"
+default_device_id = "pilot-bedroom-display"
+agent_url = ""
+
+[[players]]
+id = "bedroom-display-speaker"
+room_id = "bedroom"
+name = "Bedroom Display Speaker"
+protocol = "pilot-device"
+kind = "response"
+endpoint = "pilot-bedroom-display"
+control_enabled = false
+
+[[players]]
+id = "bedroom-music"
+room_id = "bedroom"
+name = "Bedroom Music"
+protocol = "future"
+kind = "music"
+endpoint = ""
+control_enabled = false
+
+[[rooms]]
+id = "office"
+name = "Office"
+home_area_ids = ["office", "james_office"]
+response_player_id = "office-assistant"
+default_music_player_id = "office-music"
+default_device_id = "pilot-office"
+agent_url = ""
+assist_satellite_entity_id = "assist_satellite.pilot_office_assist_satellite_2"
+
+[[players]]
+id = "office-assistant"
+room_id = "office"
+name = "Office Assistant"
+protocol = "pipewire"
+kind = "response"
+endpoint = "homeai"
+
+[[players]]
+id = "office-music"
+room_id = "office"
+name = "Pilot Office Music"
+protocol = "sendspin"
+kind = "music"
+endpoint = "ws://10.0.2.72:8927/sendspin"
+external_id = "uppilotoffice"
+
+[[players]]
+id = "office-airplay"
+room_id = "office"
+name = "Pilot Office"
+protocol = "airplay"
+kind = "music-input"
+endpoint = "homeai.local:5000"
+
+[[rooms]]
+id = "media-room"
+name = "Media Room"
+home_area_ids = ["media_room"]
+response_player_id = "media-room-assistant"
+default_music_player_id = "media-room-heos"
+default_device_id = ""
+agent_url = ""
+
+[[players]]
+id = "media-room-assistant"
+room_id = "media-room"
+name = "Media Room Assistant"
+protocol = "heos"
+kind = "response"
+endpoint = "media_player.media_room"
+external_id = "1174905188"
+control_enabled = false
+
+[[players]]
+id = "media-room-heos"
+room_id = "media-room"
+name = "Media Room"
+protocol = "heos"
+kind = "music"
+endpoint = "media_player.media_room"
+control_endpoint = "media_player.media_room_3"
+external_id = "1174905188"
+control_enabled = true
+
+[[players]]
+id = "media-room-shield"
+room_id = "media-room"
+name = "SHIELD"
+protocol = "universal_player"
+kind = "video"
+endpoint = ""
+external_id = "upb0713734fca0742d2bf2125b59cbf3b1"
+control_enabled = false

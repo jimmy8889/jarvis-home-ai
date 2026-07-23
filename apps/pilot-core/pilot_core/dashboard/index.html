@@ -1,0 +1,439 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="dark">
+    <meta
+      name="description"
+      content="Pilot Core operations dashboard for Jarvis Home AI."
+    >
+    <title>Pilot Core · Operations</title>
+    <link rel="stylesheet" href="/dashboard/assets/app.css">
+    <script src="/dashboard/assets/app.js" defer></script>
+  </head>
+  <body>
+    <div class="ambient-grid" aria-hidden="true"></div>
+    <header class="topbar">
+      <a class="brand" href="/dashboard" aria-label="Pilot Core dashboard">
+        <span class="brand-mark" aria-hidden="true">P</span>
+        <span>
+          <strong>Pilot Core</strong>
+          <small>Jarvis Home AI</small>
+        </span>
+      </a>
+      <div class="topbar-actions">
+        <span id="connection-pill" class="status-pill status-neutral">
+          <span class="status-dot"></span>
+          Awaiting access
+        </span>
+        <button id="refresh-button" class="button button-quiet" type="button" hidden>
+          Refresh
+        </button>
+        <button id="disconnect-button" class="button button-quiet" type="button" hidden>
+          Lock
+        </button>
+      </div>
+    </header>
+
+    <main>
+      <section id="access-panel" class="access-panel" aria-labelledby="access-title">
+        <div class="access-copy">
+          <p class="eyebrow">Private operations surface</p>
+          <h1 id="access-title">Your home intelligence, held locally.</h1>
+          <p>
+            Connect with the Pilot Core administrator token. It is kept only for
+            this browser tab and is cleared when the session closes.
+          </p>
+          <ul class="access-points" aria-label="Dashboard capabilities">
+            <li>Live room and device telemetry</li>
+            <li>Home Assistant and Music Assistant health</li>
+            <li>Fail-closed audio activation visibility</li>
+          </ul>
+        </div>
+        <form id="access-form" class="access-form">
+          <label for="token-input">Administrator token</label>
+          <div class="token-row">
+            <input
+              id="token-input"
+              name="token"
+              type="password"
+              autocomplete="off"
+              spellcheck="false"
+              required
+              aria-describedby="access-note"
+            >
+            <button class="button button-primary" type="submit">Open dashboard</button>
+          </div>
+          <p id="access-note" class="form-note">
+            Nothing is persisted to local storage, cookies, or Pilot Core.
+          </p>
+          <p id="access-error" class="form-error" role="alert" hidden></p>
+        </form>
+      </section>
+
+      <section id="dashboard" class="dashboard" hidden>
+        <section class="hero">
+          <div>
+            <p class="eyebrow">Operations / Home state</p>
+            <h1>One calm view of every room.</h1>
+            <p id="hero-subtitle" class="hero-subtitle">
+              Reading current state from Pilot Core.
+            </p>
+          </div>
+          <div class="hero-signal" aria-label="Pilot Core overall status">
+            <div id="hero-orbit" class="signal-orbit">
+              <span class="signal-core"></span>
+            </div>
+            <div>
+              <small>System posture</small>
+              <strong id="system-posture">Checking</strong>
+            </div>
+          </div>
+        </section>
+
+        <section class="metric-grid" aria-label="System summary">
+          <article class="metric-card">
+            <span class="metric-label">Rooms</span>
+            <strong id="metric-rooms">—</strong>
+            <small id="metric-rooms-detail">Registered spaces</small>
+          </article>
+          <article class="metric-card">
+            <span class="metric-label">Endpoints</span>
+            <strong id="metric-devices">—</strong>
+            <small id="metric-devices-detail">Connected devices</small>
+          </article>
+          <article class="metric-card">
+            <span class="metric-label">Integrations</span>
+            <strong id="metric-integrations">—</strong>
+            <small id="metric-integrations-detail">Healthy providers</small>
+          </article>
+          <article class="metric-card metric-safety">
+            <span class="metric-label">Audio safety</span>
+            <strong id="metric-safety">—</strong>
+            <small id="metric-safety-detail">Activation gate</small>
+          </article>
+        </section>
+
+        <section class="section-block" aria-labelledby="pairing-title">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Device trust</p>
+              <h2 id="pairing-title">Pair a Pilot surface</h2>
+            </div>
+            <span class="status-pill status-good">
+              <span class="status-dot"></span>
+              Single use
+            </span>
+          </div>
+          <article class="panel pairing-panel">
+            <form id="pairing-form" class="pairing-form">
+              <label>
+                <span>Device name</span>
+                <input id="pairing-name" type="text" value="Media Room Pilot TV" maxlength="200" required>
+              </label>
+              <label>
+                <span>Device ID</span>
+                <input id="pairing-device-id" type="text" value="pilot-tv-media-room" pattern="[a-z0-9-]+" maxlength="128" required>
+              </label>
+              <label>
+                <span>Room</span>
+                <select id="pairing-room" required></select>
+              </label>
+              <label>
+                <span>Capability profile</span>
+                <select id="pairing-profile">
+                  <option value="tv">Media-room TV</option>
+                  <option value="wall">Wall tablet</option>
+                  <option value="personal">Personal phone</option>
+                  <option value="display">Read-only display</option>
+                </select>
+              </label>
+              <button class="button button-primary" type="submit">Create pairing code</button>
+            </form>
+            <div id="pairing-result" class="pairing-result" hidden>
+              <img id="pairing-qr" alt="Scan this one-time Pilot pairing code">
+              <div>
+                <span class="eyebrow">One-time code</span>
+                <code id="pairing-code"></code>
+                <p id="pairing-expiry" class="panel-copy"></p>
+              </div>
+              <button id="pairing-copy" class="button button-quiet" type="button">Copy code</button>
+            </div>
+            <p class="panel-copy pairing-note">
+              The code expires quickly and can be redeemed once. The resulting device credential is narrowly scoped, independently revocable, and never exposes Home Assistant, Music Assistant, or administrator secrets.
+            </p>
+          </article>
+        </section>
+
+        <section class="section-block" aria-labelledby="home-intelligence-title">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Home intelligence</p>
+              <h2 id="home-intelligence-title">Semantic catalogue</h2>
+            </div>
+            <div class="section-heading-actions">
+              <span id="home-sync-status" class="status-pill status-neutral">
+                <span class="status-dot"></span>
+                Not synchronized
+              </span>
+              <button id="home-sync-button" class="button button-quiet button-small" type="button">
+                Synchronize
+              </button>
+            </div>
+          </div>
+
+          <div class="home-intelligence-grid">
+            <article class="panel catalogue-panel" aria-labelledby="catalogue-coverage-title">
+              <div class="panel-heading">
+                <div>
+                  <p class="eyebrow">Coverage</p>
+                  <h2 id="catalogue-coverage-title">What Pilot can see</h2>
+                </div>
+                <strong id="catalogue-total" class="catalogue-total">—</strong>
+              </div>
+              <div class="catalogue-metrics">
+                <div>
+                  <span>Available</span>
+                  <strong id="catalogue-available">—</strong>
+                </div>
+                <div>
+                  <span>Unavailable</span>
+                  <strong id="catalogue-unavailable">—</strong>
+                </div>
+                <div>
+                  <span>Stale</span>
+                  <strong id="catalogue-stale">—</strong>
+                </div>
+                <div>
+                  <span>Areas</span>
+                  <strong id="catalogue-areas">—</strong>
+                </div>
+              </div>
+              <div id="catalogue-domains" class="domain-list"></div>
+            </article>
+
+            <article class="panel" aria-labelledby="catalogue-search-title">
+              <div class="panel-heading">
+                <div>
+                  <p class="eyebrow">Resolver</p>
+                  <h2 id="catalogue-search-title">Find any entity</h2>
+                </div>
+              </div>
+              <form id="catalogue-search-form" class="catalogue-search">
+                <label class="sr-only" for="catalogue-search-input">Search the Home Assistant catalogue</label>
+                <input
+                  id="catalogue-search-input"
+                  type="search"
+                  placeholder="Bedroom temperature, office lights…"
+                  autocomplete="off"
+                  spellcheck="false"
+                >
+                <button class="button button-primary button-small" type="submit">Search</button>
+              </form>
+              <p id="catalogue-search-note" class="panel-copy">
+                Search uses bounded names, aliases, rooms, domains, and entity identifiers.
+              </p>
+              <div id="catalogue-search-results" class="entity-results"></div>
+            </article>
+
+            <article class="panel energy-panel" aria-labelledby="energy-title">
+              <div class="panel-heading">
+                <div>
+                  <p class="eyebrow">Live energy</p>
+                  <h2 id="energy-title">Home flow</h2>
+                </div>
+                <span id="energy-freshness" class="timestamp">Awaiting state</span>
+              </div>
+              <div class="energy-flow" aria-label="Current home energy state">
+                <div class="energy-node">
+                  <span>Solar</span>
+                  <strong id="energy-solar">—</strong>
+                </div>
+                <div class="energy-node energy-node-home">
+                  <span>Home</span>
+                  <strong id="energy-home">—</strong>
+                </div>
+                <div class="energy-node">
+                  <span>Grid</span>
+                  <strong id="energy-grid">—</strong>
+                </div>
+                <div class="energy-node">
+                  <span>Battery</span>
+                  <strong id="energy-battery">—</strong>
+                  <small id="energy-battery-soc">—</small>
+                </div>
+              </div>
+              <p id="energy-summary" class="panel-copy">
+                Pilot will explain the normalized direction and freshness of every configured energy sensor.
+              </p>
+            </article>
+          </div>
+        </section>
+
+        <section class="section-block" aria-labelledby="rooms-title">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Room fabric</p>
+              <h2 id="rooms-title">Live rooms</h2>
+            </div>
+            <span id="last-updated" class="timestamp">Not yet refreshed</span>
+          </div>
+          <div id="room-list" class="room-list"></div>
+        </section>
+
+        <section class="split-grid">
+          <article class="panel" aria-labelledby="integrations-title">
+            <div class="panel-heading">
+              <div>
+                <p class="eyebrow">Service boundary</p>
+                <h2 id="integrations-title">Integrations</h2>
+              </div>
+            </div>
+            <div id="integration-list" class="integration-list"></div>
+          </article>
+
+          <article class="panel safety-panel" aria-labelledby="safety-title">
+            <div class="panel-heading">
+              <div>
+                <p class="eyebrow">Fail closed</p>
+                <h2 id="safety-title">Audio activation</h2>
+              </div>
+              <span id="safety-badge" class="status-pill status-warning">
+                <span class="status-dot"></span>
+                Locked
+              </span>
+            </div>
+            <p id="safety-copy" class="panel-copy">
+              Loading the current activation state.
+            </p>
+            <div class="safety-rule"></div>
+            <dl class="definition-grid">
+              <div>
+                <dt>Audible actions</dt>
+                <dd id="audible-action-state">Blocked</dd>
+              </div>
+              <div>
+                <dt>Supervised rooms</dt>
+                <dd id="armed-room-count">0</dd>
+              </div>
+              <div>
+                <dt>Pending commands</dt>
+                <dd id="pending-command-count">0</dd>
+              </div>
+            </dl>
+          </article>
+        </section>
+
+        <section class="activity-grid" aria-label="Assistant intelligence">
+          <article class="panel" aria-labelledby="assistant-title">
+            <div class="panel-heading">
+              <div>
+                <p class="eyebrow">Local intelligence</p>
+                <h2 id="assistant-title">Assistant engine</h2>
+              </div>
+              <span id="assistant-status" class="status-pill status-neutral">
+                <span class="status-dot"></span>
+                Checking
+              </span>
+            </div>
+            <p id="assistant-copy" class="panel-copy">
+              Reading the current conversation and model configuration.
+            </p>
+            <dl class="definition-grid">
+              <div>
+                <dt>Session owner</dt>
+                <dd id="assistant-session-owner">—</dd>
+              </div>
+              <div>
+                <dt>Fast path</dt>
+                <dd id="assistant-fast-path">—</dd>
+              </div>
+              <div>
+                <dt>Reasoning model</dt>
+                <dd id="assistant-model">—</dd>
+              </div>
+            </dl>
+          </article>
+
+          <article class="panel" aria-labelledby="conversations-title">
+            <div class="panel-heading">
+              <div>
+                <p class="eyebrow">Room context</p>
+                <h2 id="conversations-title">Recent conversations</h2>
+              </div>
+              <span id="conversation-total" class="counter">0</span>
+            </div>
+            <div id="conversation-list" class="timeline"></div>
+          </article>
+        </section>
+
+        <section class="section-block" aria-labelledby="alerts-title">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Observability</p>
+              <h2 id="alerts-title">Active attention</h2>
+            </div>
+            <div class="section-heading-actions">
+              <span id="observability-status" class="status-pill status-neutral">
+                <span class="status-dot"></span>
+                Checking
+              </span>
+              <span id="alert-total" class="counter">0</span>
+            </div>
+          </div>
+          <div id="alert-list" class="timeline"></div>
+        </section>
+
+        <section class="activity-grid">
+          <article class="panel" aria-labelledby="commands-title">
+            <div class="panel-heading">
+              <div>
+                <p class="eyebrow">Execution ledger</p>
+                <h2 id="commands-title">Recent commands</h2>
+              </div>
+              <span id="command-total" class="counter">0</span>
+            </div>
+            <div id="command-list" class="timeline"></div>
+          </article>
+
+          <article class="panel" aria-labelledby="events-title">
+            <div class="panel-heading">
+              <div>
+                <p class="eyebrow">Telemetry</p>
+                <h2 id="events-title">Recent events</h2>
+              </div>
+              <span id="event-total" class="counter">0</span>
+            </div>
+            <div id="event-list" class="timeline"></div>
+          </article>
+        </section>
+
+        <section class="deployment-strip" aria-label="Pilot Core deployment">
+          <div>
+            <span>Release</span>
+            <strong id="deployment-release">—</strong>
+          </div>
+          <div>
+            <span>Core version</span>
+            <strong id="deployment-version">—</strong>
+          </div>
+          <div>
+            <span>Uptime</span>
+            <strong id="deployment-uptime">—</strong>
+          </div>
+          <div>
+            <span>Registry</span>
+            <strong id="deployment-registry">—</strong>
+          </div>
+        </section>
+      </section>
+    </main>
+
+    <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+    <footer>
+      <span>Pilot Core keeps control local.</span>
+      <a href="/docs">API reference</a>
+    </footer>
+  </body>
+</html>

@@ -1,0 +1,70 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import argparse
+import json
+import os
+from pathlib import Path
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
+
+
+def repository_root() -> Path:
+    return Path(__file__).resolve().parents[2]
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        description="Run Pilot's silent Piper to Faster Whisper acceptance test"
+    )
+    parser.add_argument("--core-url", default="http://127.0.0.1:8770")
+    parser.add_argument(
+        "--admin-token-file",
+        type=Path,
+        default=repository_root() / "infra" / "secrets" / "pilot_core_admin_token",
+    )
+    parser.add_argument("--json", action="store_true")
+    args = parser.parse_args()
+    token = os.environ.get("PILOT_CORE_ADMIN_TOKEN", "").strip()
+    if not token and args.admin_token_file.is_file():
+        token = args.admin_token_file.read_text(encoding="utf-8").strip()
+    if not token:
+        raise SystemExit("Pilot Core admin token is required")
+    request = Request(
+        f"{args.core_url.rstrip('/')}/v1/voice/acceptance",
+        data=b"",
+        method="POST",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    try:
+        with urlopen(request, timeout=120) as response:
+            result = json.load(response)
+    except HTTPError as error:
+        detail = error.read().decode(errors="replace")
+        print(f"Pilot Core returned HTTP {error.code}: {detail}")
+        return 1
+    except (OSError, URLError, ValueError) as error:
+        print(f"Voice acceptance failed: {error}")
+        return 1
+    if args.json:
+        print(json.dumps(result, indent=2, sort_keys=True))
+    else:
+        print("PASS  Local TTS -> STT round-trip")
+        print(
+            f"PASS  {result['tts']['engine']} / {result['tts']['voice']} -> "
+            f"{result['stt']['provider']}"
+        )
+        print(
+            f"PASS  transcript={result['transcript']!r} "
+            f"word_coverage={result['word_coverage']:.3f}"
+        )
+        audio = result["audio"]
+        print(
+            f"PASS  {audio['sample_rate']} Hz, {audio['channels']} channel, "
+            f"{audio['sample_width'] * 8}-bit PCM"
+        )
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

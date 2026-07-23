@@ -1,0 +1,92 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import argparse
+import json
+import os
+from pathlib import Path
+import tempfile
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
+
+
+def read_admin_token(path: Path | None) -> str:
+    value = os.environ.get("PILOT_CORE_ADMIN_TOKEN", "").strip()
+    file_name = os.environ.get("PILOT_CORE_ADMIN_TOKEN_FILE", "").strip()
+    selected = path or (Path(file_name) if file_name else None)
+    if value:
+        return value
+    if selected:
+        return selected.read_text(encoding="utf-8").strip()
+    return ""
+
+
+def write_private_json(path: Path, payload: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(
+        mode="w", encoding="utf-8", dir=path.parent, delete=False
+    ) as handle:
+        temporary = Path(handle.name)
+        json.dump(payload, handle, indent=2, sort_keys=True)
+        handle.write("\n")
+        handle.flush()
+        os.fsync(handle.fileno())
+    try:
+        os.chmod(temporary, 0o600)
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        description="Issue a short-lived, one-time Pilot device bootstrap grant"
+    )
+    parser.add_argument("--core-url", required=True)
+    parser.add_argument("--device-id", required=True)
+    parser.add_argument("--room-id", required=True)
+    parser.add_argument("--name", required=True)
+    parser.add_argument("--capability", action="append", default=[])
+    parser.add_argument("--expires-in-seconds", type=int, default=600)
+    parser.add_argument("--admin-token-file", type=Path)
+    parser.add_argument("--output", type=Path, required=True)
+    args = parser.parse_args()
+    token = read_admin_token(args.admin_token_file)
+    if not token:
+        raise SystemExit("Pilot Core admin token is required")
+    body = json.dumps(
+        {
+            "device_id": args.device_id,
+            "room_id": args.room_id,
+            "name": args.name,
+            "capabilities": args.capability,
+            "expires_in_seconds": args.expires_in_seconds,
+        }
+    ).encode()
+    request = Request(
+        f"{args.core_url.rstrip('/')}/v1/bootstrap-grants",
+        data=body,
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with urlopen(request, timeout=10) as response:
+            result = json.load(response)
+    except HTTPError as error:
+        detail = error.read().decode(errors="replace")
+        raise SystemExit(f"Pilot Core returned HTTP {error.code}: {detail}") from error
+    except (OSError, URLError, ValueError) as error:
+        raise SystemExit(f"unable to issue bootstrap grant: {error}") from error
+    write_private_json(args.output, result)
+    print(
+        f"One-time bootstrap grant for {result['device_id']} written to "
+        f"{args.output}; expires at {result['expires_at']}."
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

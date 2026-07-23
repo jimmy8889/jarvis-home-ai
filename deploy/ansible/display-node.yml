@@ -1,0 +1,7 @@
+---
+- name: Configure Pilot display nodes
+  hosts: pilot_display_nodes
+  become: true
+  gather_facts: true
+  roles:
+    - display_node

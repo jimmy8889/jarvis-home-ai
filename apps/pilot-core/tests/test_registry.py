@@ -2,7 +2,13 @@ from __future__ import annotations
 
 import unittest
 
-from pilot_core.config import Player, Room, ServerSettings, Settings
+from pilot_core.config import (
+    IntegrationSettings,
+    Player,
+    Room,
+    ServerSettings,
+    Settings,
+)
 from pilot_core.registry import Registry
 
 
@@ -10,6 +16,7 @@ class RegistryTests(unittest.TestCase):
     def setUp(self) -> None:
         self.settings = Settings(
             server=ServerSettings(),
+            integrations=IntegrationSettings(),
             rooms=(
                 Room(
                     id="office",
@@ -41,6 +48,7 @@ class RegistryTests(unittest.TestCase):
         view = registry.room_view("office")
         self.assertEqual(view["default_music_player_id"], "office-music")
         self.assertEqual(len(view["players"]), 2)
+        self.assertTrue(view["players"][1]["control_enabled"])
 
     def test_revision_is_deterministic(self) -> None:
         first = Registry.from_settings(self.settings)

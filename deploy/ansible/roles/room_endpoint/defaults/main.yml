@@ -1,5 +1,6 @@
 ---
 room_endpoint_user: pilot
+room_endpoint_home: "/home/{{ room_endpoint_user }}"
 room_endpoint_room_id: unconfigured
 room_endpoint_listen_host: 127.0.0.1
 room_endpoint_listen_port: 8765
@@ -17,7 +18,7 @@ room_endpoint_lva_client_name: Pilot Office
 room_endpoint_lva_wake_model: okay_nabu
 room_endpoint_lva_audio_input_device: ""
 room_endpoint_lva_audio_output_device: ""
-room_endpoint_lva_network_interface: ens18
+room_endpoint_lva_network_interface: "{{ ansible_facts['default_ipv4']['interface'] }}"
 room_endpoint_lva_host: "{{ ansible_facts['default_ipv4']['address'] }}"
 room_endpoint_lva_port: 6053
 room_endpoint_airplay_install: false
@@ -40,6 +41,38 @@ room_endpoint_sendspin_server_url: ""
 room_endpoint_sendspin_server_port: 8927
 room_endpoint_sendspin_audio_device: default
 room_endpoint_sendspin_interface: "{{ ansible_facts['default_ipv4']['address'] }}"
+room_endpoint_core_reporting_enabled: false
+room_endpoint_core_url: ""
+room_endpoint_core_device_id: "pilot-{{ room_endpoint_room_id }}"
+room_endpoint_core_device_token: ""
+room_endpoint_core_device_token_source_file: ""
+room_endpoint_core_device_token_file: /etc/pilot/device-token
+room_endpoint_core_report_interval_seconds: 15
+room_endpoint_core_commands_enabled: false
+room_endpoint_core_command_journal_path: /var/lib/pilot/commands.db
+room_endpoint_core_command_heartbeat_seconds: 20
+room_endpoint_core_command_reconnect_min_seconds: 2
+room_endpoint_core_command_reconnect_max_seconds: 30
+room_endpoint_audio_cache_path: /var/lib/pilot/audio
+room_endpoint_audio_max_bytes: 20000000
+room_endpoint_audio_download_timeout_seconds: 15
+room_endpoint_audio_cache_retention_seconds: 86400
+room_endpoint_audio_activation_required: true
+room_endpoint_audio_activation_state_path: /etc/pilot/audio-activation.json
+room_endpoint_audio_focus_enabled: false
+room_endpoint_audio_focus_duck_gain: 0.2
+room_endpoint_audio_focus_interval_seconds: 1
+room_endpoint_video_install: false
+room_endpoint_video_enabled: false
+room_endpoint_video_ipc_path: /var/lib/pilot/mpv.sock
+room_endpoint_video_media_roots: []
+# Socket name exported by the Cage session. room_endpoint_video_display remains
+# a compatibility alias for inventories created before the explicit name.
+room_endpoint_video_wayland_display: "{{ room_endpoint_video_display }}"
+room_endpoint_video_display: ""
+room_endpoint_video_audio_device: auto
+room_endpoint_video_hwdec: auto-safe
+room_endpoint_video_start_timeout_seconds: 5
 room_endpoint_release_id: "{{ ansible_facts['date_time']['iso8601_basic_short'] }}"
 room_endpoint_project_root: "{{ role_path }}/../../../.."
 room_endpoint_packages:
@@ -51,6 +84,7 @@ room_endpoint_packages:
   - libspa-0.2-bluetooth
   - pipewire
   - pipewire-alsa
+  - pipewire-bin
   - pipewire-pulse
   - python3
   - python3-venv
@@ -76,3 +110,5 @@ room_endpoint_squeezelite_packages:
 room_endpoint_sendspin_packages:
   - ffmpeg
   - libportaudio2
+room_endpoint_video_packages:
+  - mpv

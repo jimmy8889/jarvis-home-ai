@@ -1,0 +1,68 @@
+---
+display_node_user: pilot-display
+display_node_hostname: pilot-display
+display_node_timezone: Australia/Brisbane
+display_node_core_url: http://10.0.1.64:8770
+display_node_device_id: ""
+display_node_device_token_source_file: ""
+display_node_mode: display
+display_node_video_enabled: false
+# Auto selects the bounded profile on Raspberry Pi hardware and balanced on
+# x86 media consoles. It can be pinned to low-power or balanced per host.
+display_node_performance_profile: auto
+display_node_listen_host: 127.0.0.1
+display_node_listen_port: 8780
+display_node_start_page: "{{ 'media' if display_node_mode == 'media-console' else 'home' }}"
+display_node_kiosk_url: "http://127.0.0.1:{{ display_node_listen_port }}/#{{ display_node_start_page }}"
+display_node_keyboard_layout: us
+display_node_keyboard_model: pc105
+display_node_artwork_cache_dir: /var/lib/pilot-display/artwork
+display_node_artwork_cache_max_bytes: 64000000
+display_node_artwork_cache_max_items: 256
+display_node_artwork_cache_max_age_seconds: 2592000
+display_node_artwork_hosts:
+  - resources.tidal.com
+display_node_resolution: 1024x600
+display_node_refresh_rate: 60
+display_node_hdmi_connector: HDMI-A-1
+display_node_force_resolution: true
+display_node_release_id: "{{ ansible_facts['date_time']['iso8601_basic_short'] }}"
+display_node_project_root: "{{ role_path }}/../../../.."
+display_node_chromium_disk_cache_bytes: 52428800
+display_node_chromium_media_cache_bytes: 10485760
+# False by default so a co-located room_endpoint remains the only owner of
+# PipeWire, WirePlumber and room music playback on an N150.
+display_node_audio_services_enabled: false
+display_node_sendspin_install: false
+display_node_sendspin_enabled: false
+display_node_sendspin_version: 7.5.0
+display_node_sendspin_name: "Pilot Office Display Music"
+display_node_sendspin_id: "pilot-office-display"
+display_node_sendspin_server_url: ""
+display_node_sendspin_server_port: 8927
+display_node_sendspin_audio_device: default
+display_node_sendspin_interface: "{{ ansible_facts['default_ipv4']['address'] }}"
+display_node_sendspin_packages:
+  - alsa-utils
+  - ffmpeg
+  - libportaudio2
+  - pipewire
+  - pipewire-alsa
+  - pipewire-bin
+  - pipewire-pulse
+  - wireplumber
+display_node_packages:
+  - ca-certificates
+  - cage
+  - chromium
+  - dbus-user-session
+  - fonts-noto-color-emoji
+  - fonts-noto-core
+  - evtest
+  - libinput-tools
+  - python3
+  - python3-packaging
+  - python3-venv
+  - seatd
+  - unattended-upgrades
+  - wlr-randr

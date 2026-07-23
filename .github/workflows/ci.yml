@@ -1,0 +1,227 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  python:
+    name: Python services
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: |
+            apps/pilot-core/pyproject.toml
+            apps/room-agent/pyproject.toml
+      - name: Install services and checks
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e apps/pilot-core -e apps/room-agent ruff
+      - name: Lint
+        run: >-
+          ruff check
+          apps/pilot-core
+          apps/room-agent
+          deploy/scripts/pilot-register-device
+          deploy/scripts/pilot-command
+          deploy/scripts/pilot-media
+          deploy/scripts/pilot-audio
+          deploy/scripts/pilot-speak
+          deploy/scripts/pilot-media-room-acceptance
+          deploy/scripts/pilot-bootstrap-device
+          deploy/scripts/pilot-core-backup
+          deploy/scripts/pilot-core-diagnose
+          deploy/scripts/pilot-core-restore
+          deploy/scripts/pilot-secrets
+          infra/pilot-core/volume_archive.py
+          infra/pilot-core/tests
+      - name: Test room agent
+        run: python -m unittest discover -s apps/room-agent/tests -v
+      - name: Test Pilot Core
+        run: python -m unittest discover -s apps/pilot-core/tests -v
+      - name: Test Pilot Core backup archive
+        run: python -m unittest discover -s infra/pilot-core/tests -v
+      - name: Test Raspberry Pi display node
+        env:
+          PYTHONPATH: apps/display-node
+        run: python -m unittest discover -s apps/display-node/tests -v
+      - name: Validate display JavaScript
+        run: |
+          node --check apps/display-node/pilot_display_node/static/app.js
+          node --check apps/pilot-core/pilot_core/dashboard/app.js
+      - name: Compile services
+        run: >-
+          python -m compileall -q
+          apps/pilot-core/pilot_core
+          apps/room-agent/pilot_room_agent
+          apps/display-node/pilot_display_node
+      - name: Validate product schema JSON
+        run: |
+          for schema in packages/event-schema/*.json; do
+            python -m json.tool "$schema" >/dev/null
+          done
+
+  deployment:
+    name: Deployment definitions
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install Ansible
+        run: python -m pip install ansible-core
+      - name: Check shell scripts
+        run: |
+          bash -n deploy/scripts/pilot-hardware-inventory
+          bash -n deploy/scripts/pilot-activate
+          bash -n deploy/scripts/pilot-core-deploy
+          bash -n deploy/scripts/pilot-firmware-publish
+          bash -n deploy/scripts/pilot-rollback
+          bash -n deploy/scripts/pilot-validate
+          bash -n firmware/pilot-display-node/scripts/build.sh
+          bash -n firmware/pilot-display-node/scripts/flash.sh
+          bash -n firmware/pilot-display-node/scripts/package-release.sh
+      - name: Check Python deployment scripts
+        run: >-
+          python -m py_compile
+          deploy/scripts/pilot-register-device
+          deploy/scripts/pilot-command
+          deploy/scripts/pilot-media
+          deploy/scripts/pilot-audio
+          deploy/scripts/pilot-speak
+          deploy/scripts/pilot-media-room-acceptance
+          deploy/scripts/pilot-bootstrap-device
+          deploy/scripts/pilot-core-backup
+          deploy/scripts/pilot-core-diagnose
+          deploy/scripts/pilot-core-restore
+          deploy/scripts/pilot-secrets
+          infra/pilot-core/volume_archive.py
+      - name: Smoke-test production container and authenticated secrets
+        run: |
+          cleanup() {
+            docker compose -f infra/docker-compose.yml down -v --remove-orphans || true
+            sudo rm -rf infra/secrets
+          }
+          trap cleanup EXIT
+          sudo deploy/scripts/pilot-secrets \
+            --directory infra/secrets \
+            --runtime-gid 10001 \
+            init
+          sudo deploy/scripts/pilot-secrets \
+            --directory infra/secrets \
+            --runtime-gid 10001 \
+            check
+          docker compose -f infra/docker-compose.yml config --quiet
+          docker compose -f infra/docker-compose.yml build pilot-core
+          docker compose -f infra/docker-compose.yml up -d --no-build pilot-core
+          docker compose -f infra/docker-compose.yml exec -T pilot-core \
+            python -c 'import websockets'
+          for attempt in {1..30}; do
+            if curl --fail --silent http://127.0.0.1:8770/readyz >/dev/null; then
+              break
+            fi
+            if [[ "$attempt" == 30 ]]; then
+              docker compose -f infra/docker-compose.yml logs pilot-core
+              exit 1
+            fi
+            sleep 1
+          done
+          admin_token="$(sudo cat infra/secrets/pilot_core_admin_token)"
+          curl --fail --silent \
+            -H "Authorization: Bearer ${admin_token}" \
+            http://127.0.0.1:8770/v1/integrations/diagnostics \
+            >/dev/null
+          unset admin_token
+      - name: Check playbook syntax
+        run: >-
+          ansible-playbook
+          -i deploy/ansible/inventory/hosts.example.yml
+          deploy/ansible/site.yml
+          --syntax-check
+
+  android-tv:
+    name: Shield TV
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: apps/shield-tv
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+          cache-dependency-path: |
+            apps/shield-tv/*.gradle.kts
+            apps/shield-tv/gradle/wrapper/gradle-wrapper.properties
+            apps/shield-tv/app/build.gradle.kts
+      - name: Test, lint, and assemble Pilot TV
+        run: ./gradlew testDebugUnitTest lintDebug assembleDebug
+
+  android-wall:
+    name: Android wall tablet
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: apps/pilot-android
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+          cache-dependency-path: |
+            apps/pilot-android/*.gradle.kts
+            apps/pilot-android/gradle/wrapper/gradle-wrapper.properties
+            apps/pilot-android/app/build.gradle.kts
+      - name: Test, lint, and assemble Pilot Wall
+        run: ./gradlew testDebugUnitTest lintDebug assembleDebug
+
+  ios:
+    name: Pilot iOS
+    runs-on: macos-15
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: apps/pilot-ios
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build and test Pilot for iPhone and iPad
+        shell: bash
+        run: |
+          destination_id="$(
+            xcrun simctl list devices available -j |
+              python3 -c 'import json,sys; data=json.load(sys.stdin); print(next(item["udid"] for rows in data["devices"].values() for item in rows if item["name"].startswith("iPhone")))'
+          )"
+          # SendspinKit 1.0.1 is Swift 5 compatible, while Xcode 16.4's iOS
+          # 18.5 SDK rejects its UIDevice metadata helper in Swift 6 mode.
+          xcodebuild \
+            -project Pilot.xcodeproj \
+            -scheme Pilot \
+            -sdk iphonesimulator \
+            -destination "platform=iOS Simulator,id=${destination_id}" \
+            -derivedDataPath "$RUNNER_TEMP/PilotDerivedData" \
+            GENERATE_INFOPLIST_FILE=YES \
+            CODE_SIGNING_ALLOWED=NO \
+            SWIFT_VERSION=5.0 \
+            test

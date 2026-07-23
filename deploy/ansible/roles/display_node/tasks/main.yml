@@ -1,0 +1,529 @@
+---
+- name: Read Raspberry Pi model
+  ansible.builtin.slurp:
+    src: /proc/device-tree/model
+  register: display_node_model
+  failed_when: false
+
+- name: Assert supported Raspberry Pi platform
+  ansible.builtin.assert:
+    that:
+      - ansible_facts.distribution == "Debian"
+      - ansible_facts.distribution_major_version == "13"
+      - >-
+        (
+          ansible_facts.architecture == "aarch64" and
+          'Raspberry Pi' in ((display_node_model.content | default('')) | b64decode)
+        ) or (
+          ansible_facts.architecture == "x86_64" and
+          display_node_mode == "media-console"
+        )
+    fail_msg: >-
+      The display role supports Debian 13 ARM64 Raspberry Pi displays and
+      Debian 13 x86_64 N150 media consoles.
+
+- name: Assert supported display performance profile
+  ansible.builtin.assert:
+    that:
+      - display_node_performance_profile in ['auto', 'balanced', 'low-power']
+    fail_msg: >-
+      display_node_performance_profile must be auto, balanced, or low-power.
+
+- name: Install minimal display appliance packages
+  ansible.builtin.apt:
+    name: "{{ display_node_packages }}"
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Assert display audio ownership is explicit
+  ansible.builtin.assert:
+    that:
+      - >-
+        not (display_node_sendspin_install | bool) or
+        (display_node_audio_services_enabled | bool)
+      - >-
+        not (display_node_sendspin_enabled | bool) or
+        (display_node_sendspin_install | bool)
+    fail_msg: >-
+      Display audio is opt-in. Set display_node_audio_services_enabled=true
+      before installing Sendspin, and install Sendspin before enabling it.
+
+- name: Install optional display audio-player packages
+  ansible.builtin.apt:
+    name: "{{ display_node_sendspin_packages }}"
+    state: present
+  when: display_node_audio_services_enabled | bool
+
+- name: Set appliance hostname
+  ansible.builtin.hostname:
+    name: "{{ display_node_hostname }}"
+
+- name: Read configured timezone
+  ansible.builtin.command: timedatectl show --property=Timezone --value
+  register: display_node_current_timezone
+  changed_when: false
+
+- name: Set appliance timezone
+  ansible.builtin.command: "timedatectl set-timezone {{ display_node_timezone }}"
+  when: display_node_current_timezone.stdout != display_node_timezone
+  changed_when: true
+
+- name: Create unprivileged display user
+  ansible.builtin.user:
+    name: "{{ display_node_user }}"
+    system: true
+    create_home: true
+    home: /var/lib/pilot-display
+    shell: /usr/sbin/nologin
+    groups: audio,input,render,tty,video
+    append: true
+
+- name: Enable lingering for display session
+  ansible.builtin.command: "loginctl enable-linger {{ display_node_user }}"
+  args:
+    creates: "/var/lib/systemd/linger/{{ display_node_user }}"
+
+- name: Resolve display user ID
+  ansible.builtin.command: "id -u {{ display_node_user }}"
+  register: display_node_uid
+  changed_when: false
+
+- name: Start display user manager
+  ansible.builtin.systemd_service:
+    name: "user@{{ display_node_uid.stdout }}.service"
+    state: started
+
+- name: Unmask display-user audio services when this role owns audio
+  ansible.builtin.command:
+    cmd: >-
+      runuser -u {{ display_node_user }} -- env
+      HOME=/var/lib/pilot-display
+      XDG_RUNTIME_DIR=/run/user/{{ display_node_uid.stdout }}
+      DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{{ display_node_uid.stdout }}/bus
+      systemctl --user unmask {{ item }}
+  changed_when: false
+  loop:
+    - pipewire.service
+    - pipewire.socket
+    - pipewire-pulse.service
+    - pipewire-pulse.socket
+    - wireplumber.service
+  when: display_node_audio_services_enabled | bool
+
+- name: Enable display-user PipeWire services
+  ansible.builtin.command:
+    cmd: >-
+      runuser -u {{ display_node_user }} -- env
+      XDG_RUNTIME_DIR=/run/user/{{ display_node_uid.stdout }}
+      DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{{ display_node_uid.stdout }}/bus
+      systemctl --user enable --now {{ item }}
+  changed_when: false
+  loop:
+    - pipewire.socket
+    - pipewire-pulse.socket
+    - wireplumber.service
+  when: display_node_audio_services_enabled | bool
+
+- name: Mask display-user audio services when Room Agent owns audio
+  ansible.builtin.command:
+    cmd: >-
+      runuser -u {{ display_node_user }} -- env
+      HOME=/var/lib/pilot-display
+      XDG_RUNTIME_DIR=/run/user/{{ display_node_uid.stdout }}
+      DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{{ display_node_uid.stdout }}/bus
+      systemctl --user mask --now {{ item }}
+  changed_when: false
+  loop:
+    - pipewire.service
+    - pipewire.socket
+    - pipewire-pulse.service
+    - pipewire-pulse.socket
+    - wireplumber.service
+  when: not (display_node_audio_services_enabled | bool)
+
+- name: Create display appliance directories
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: "{{ item.owner | default('root') }}"
+    group: "{{ item.group | default('root') }}"
+    mode: "{{ item.mode }}"
+  loop:
+    - path: /etc/pilot-display
+      owner: root
+      group: "{{ display_node_user }}"
+      mode: "0750"
+    - { path: /opt/pilot-display/releases, mode: "0755" }
+    - { path: /var/backups/pilot-display, mode: "0700" }
+    - path: /var/lib/pilot-display
+      owner: "{{ display_node_user }}"
+      group: "{{ display_node_user }}"
+      mode: "0750"
+    - path: /var/lib/pilot-display/chromium
+      owner: "{{ display_node_user }}"
+      group: "{{ display_node_user }}"
+      mode: "0750"
+    - path: "{{ display_node_artwork_cache_dir }}"
+      owner: "{{ display_node_user }}"
+      group: "{{ display_node_user }}"
+      mode: "0750"
+    - path: "/opt/pilot-display/releases/{{ display_node_release_id }}"
+      mode: "0755"
+    - { path: /etc/systemd/journald.conf.d, mode: "0755" }
+
+- name: Validate display device credential settings
+  ansible.builtin.assert:
+    that:
+      - display_node_device_id | length > 0
+      - display_node_device_token_source_file | length > 0
+    fail_msg: >-
+      Set display_node_device_id and a private
+      display_node_device_token_source_file for the authenticated surface.
+
+- name: Inspect display device token on controller
+  ansible.builtin.stat:
+    path: "{{ display_node_device_token_source_file }}"
+  delegate_to: localhost
+  become: false
+  register: display_node_device_token_source
+
+- name: Assert display device token is private
+  ansible.builtin.assert:
+    that:
+      - display_node_device_token_source.stat.exists
+      - display_node_device_token_source.stat.isreg
+      - display_node_device_token_source.stat.mode == "0600"
+    fail_msg: >-
+      The display device token must exist on the controller as a mode-0600 file.
+
+- name: Install display device token
+  ansible.builtin.copy:
+    src: "{{ display_node_device_token_source_file }}"
+    dest: /etc/pilot-display/device-token
+    owner: root
+    group: "{{ display_node_user }}"
+    mode: "0640"
+  no_log: true
+  notify: Restart Pilot display web
+
+- name: Back up boot configuration
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: "/var/backups/pilot-display/{{ item | basename }}.pre-{{ display_node_release_id }}"
+    remote_src: true
+    owner: root
+    group: root
+    mode: "0600"
+    force: false
+  loop:
+    - /boot/firmware/config.txt
+    - /boot/firmware/cmdline.txt
+  when: display_node_force_resolution | bool
+
+- name: Read kernel command line
+  ansible.builtin.slurp:
+    src: /boot/firmware/cmdline.txt
+  register: display_node_cmdline
+  when: display_node_force_resolution | bool
+
+- name: Filter existing native display arguments
+  ansible.builtin.set_fact:
+    display_node_cmdline_tokens: >-
+      {{
+        (display_node_cmdline.content | b64decode).split()
+        | reject(
+            'match',
+            '^video=' + display_node_hdmi_connector + ':'
+          )
+        | list
+      }}
+  when: display_node_force_resolution | bool
+
+- name: Build native display kernel command line
+  ansible.builtin.set_fact:
+    display_node_cmdline_value: >-
+      {{ display_node_cmdline_tokens | join(' ') }}
+      video={{ display_node_hdmi_connector }}:{{ display_node_resolution }}M@{{ display_node_refresh_rate }}D
+  when: display_node_force_resolution | bool
+
+- name: Install native display kernel command line
+  ansible.builtin.copy:
+    content: "{{ display_node_cmdline_value }}\n"
+    dest: /boot/firmware/cmdline.txt
+    owner: root
+    group: root
+    mode: "0755"
+  register: display_node_cmdline_change
+  when: display_node_force_resolution | bool
+
+- name: Read running kernel command line
+  ansible.builtin.slurp:
+    src: /proc/cmdline
+  register: display_node_running_cmdline
+  when: display_node_force_resolution | bool
+
+- name: Record pending display-mode reboot
+  ansible.builtin.file:
+    path: /var/lib/pilot-display/reboot-required
+    state: touch
+    owner: root
+    group: root
+    mode: "0600"
+  when: >-
+    display_node_force_resolution | bool and
+    (
+      display_node_cmdline_change.changed | default(false) or
+      (
+        'video=' + display_node_hdmi_connector + ':' +
+        display_node_resolution + 'M@' +
+        (display_node_refresh_rate | string) + 'D'
+      ) not in (display_node_running_cmdline.content | b64decode)
+    )
+
+- name: Copy display application into immutable release
+  ansible.builtin.copy:
+    src: "{{ display_node_project_root }}/apps/display-node/"
+    dest: "/opt/pilot-display/releases/{{ display_node_release_id }}/apps/display-node/"
+    owner: root
+    group: root
+    mode: preserve
+
+- name: Create display Sendspin directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ display_node_user }}"
+    group: "{{ display_node_user }}"
+    mode: "0750"
+  loop:
+    - /opt/pilot-display/vendor
+    - /var/lib/pilot-display/sendspin
+  when: display_node_sendspin_install | bool
+
+- name: Create pinned display Sendspin environment
+  ansible.builtin.command:
+    cmd: >-
+      python3 -m venv
+      /opt/pilot-display/vendor/sendspin-{{ display_node_sendspin_version }}
+    creates: >-
+      /opt/pilot-display/vendor/sendspin-{{ display_node_sendspin_version }}/bin/python
+  when: display_node_sendspin_install | bool
+
+- name: Install pinned display Sendspin client
+  ansible.builtin.pip:
+    name: "sendspin=={{ display_node_sendspin_version }}"
+    virtualenv: "/opt/pilot-display/vendor/sendspin-{{ display_node_sendspin_version }}"
+  when: display_node_sendspin_install | bool
+
+- name: Create display application virtual environment
+  ansible.builtin.command:
+    cmd: "python3 -m venv /opt/pilot-display/releases/{{ display_node_release_id }}/.venv"
+    creates: "/opt/pilot-display/releases/{{ display_node_release_id }}/.venv/bin/python"
+
+- name: Install display application
+  ansible.builtin.pip:
+    name: "/opt/pilot-display/releases/{{ display_node_release_id }}/apps/display-node"
+    virtualenv: "/opt/pilot-display/releases/{{ display_node_release_id }}/.venv"
+
+- name: Inspect current release
+  ansible.builtin.stat:
+    path: /opt/pilot-display/current
+    follow: false
+  register: display_node_current_link
+
+- name: Read current release target
+  ansible.builtin.command: readlink -f /opt/pilot-display/current
+  register: display_node_current_release
+  changed_when: false
+  when: display_node_current_link.stat.islnk | default(false)
+
+- name: Record previous release
+  ansible.builtin.copy:
+    content: "{{ display_node_current_release.stdout }}\n"
+    dest: /var/lib/pilot-display/previous_release
+    owner: root
+    group: root
+    mode: "0600"
+  when: >-
+    display_node_current_link.stat.islnk | default(false) and
+    display_node_current_release.stdout | length > 0
+
+- name: Activate display release
+  ansible.builtin.file:
+    src: "/opt/pilot-display/releases/{{ display_node_release_id }}"
+    dest: /opt/pilot-display/current
+    state: link
+    force: true
+    follow: false
+  notify:
+    - Restart Pilot display web
+    - Restart Pilot display kiosk
+
+- name: Find display releases
+  ansible.builtin.find:
+    paths: /opt/pilot-display/releases
+    file_type: directory
+    recurse: false
+  register: display_node_releases
+
+- name: Remove releases outside the rollback pair
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: absent
+  loop: "{{ display_node_releases.files }}"
+  when:
+    - item.path != "/opt/pilot-display/releases/" + display_node_release_id
+    - >-
+      item.path !=
+      (display_node_current_release.stdout | default(''))
+
+- name: Install display environment
+  ansible.builtin.template:
+    src: pilot-display.env.j2
+    dest: /etc/pilot-display/display.env
+    owner: root
+    group: "{{ display_node_user }}"
+    mode: "0640"
+  notify: Restart Pilot display web
+
+- name: Install bounded journal configuration
+  ansible.builtin.template:
+    src: journald-pilot-display.conf.j2
+    dest: /etc/systemd/journald.conf.d/pilot-display.conf
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Install display web service
+  ansible.builtin.template:
+    src: pilot-display-web.service.j2
+    dest: /etc/systemd/system/pilot-display-web.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify:
+    - Reload systemd
+    - Restart Pilot display web
+
+- name: Install display kiosk service
+  ansible.builtin.template:
+    src: pilot-display-kiosk.service.j2
+    dest: /etc/systemd/system/pilot-display-kiosk.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify:
+    - Reload systemd
+    - Restart Pilot display kiosk
+
+- name: Inspect existing display Sendspin service
+  ansible.builtin.stat:
+    path: /etc/systemd/system/pilot-display-sendspin.service
+  register: display_node_sendspin_service
+
+- name: Stop stale display Sendspin service
+  ansible.builtin.systemd_service:
+    name: pilot-display-sendspin.service
+    enabled: false
+    state: stopped
+    daemon_reload: true
+  when:
+    - not (display_node_sendspin_install | bool)
+    - display_node_sendspin_service.stat.exists
+
+- name: Remove stale display Sendspin service
+  ansible.builtin.file:
+    path: /etc/systemd/system/pilot-display-sendspin.service
+    state: absent
+  when: not (display_node_sendspin_install | bool)
+  notify: Reload systemd
+
+- name: Install display Sendspin service
+  ansible.builtin.template:
+    src: pilot-display-sendspin.service.j2
+    dest: /etc/systemd/system/pilot-display-sendspin.service
+    owner: root
+    group: root
+    mode: "0644"
+  when: display_node_sendspin_install | bool
+  notify:
+    - Reload systemd
+    - Restart Pilot display Sendspin
+
+- name: Install display rollback command
+  ansible.builtin.copy:
+    src: "{{ display_node_project_root }}/deploy/scripts/pilot-display-rollback"
+    dest: /usr/local/sbin/pilot-display-rollback
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Disable console login on display VT
+  ansible.builtin.systemd_service:
+    name: getty@tty1.service
+    enabled: false
+    state: stopped
+
+- name: Enable display services
+  ansible.builtin.systemd_service:
+    name: "{{ item }}"
+    enabled: true
+    state: started
+    daemon_reload: true
+  loop:
+    - seatd.service
+    - pilot-display-web.service
+    - pilot-display-kiosk.service
+
+- name: Configure display Sendspin service state
+  ansible.builtin.systemd_service:
+    name: pilot-display-sendspin.service
+    enabled: "{{ display_node_sendspin_enabled | bool }}"
+    state: "{{ 'started' if display_node_sendspin_enabled | bool else 'stopped' }}"
+    daemon_reload: true
+  when: display_node_sendspin_install | bool
+
+- name: Flush handlers before validation
+  ansible.builtin.meta: flush_handlers
+
+- name: Validate local display web service
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ display_node_listen_port }}/healthz"
+    status_code: 200
+  register: display_node_health
+  retries: 10
+  delay: 2
+  until: display_node_health.status == 200
+
+- name: Enable automatic security updates without automatic reboot
+  ansible.builtin.copy:
+    content: |
+      APT::Periodic::Update-Package-Lists "1";
+      APT::Periodic::Unattended-Upgrade "1";
+      Unattended-Upgrade::Automatic-Reboot "false";
+    dest: /etc/apt/apt.conf.d/52pilot-display
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Remove downloaded package archives
+  ansible.builtin.command: apt-get clean
+  changed_when: false
+
+- name: Inspect pending display-mode reboot
+  ansible.builtin.stat:
+    path: /var/lib/pilot-display/reboot-required
+  register: display_node_reboot_required
+
+- name: Reboot for native display mode
+  ansible.builtin.reboot:
+    reboot_timeout: 300
+    post_reboot_delay: 10
+  when: display_node_reboot_required.stat.exists
+
+- name: Clear completed display-mode reboot
+  ansible.builtin.file:
+    path: /var/lib/pilot-display/reboot-required
+    state: absent
+  when: display_node_reboot_required.stat.exists

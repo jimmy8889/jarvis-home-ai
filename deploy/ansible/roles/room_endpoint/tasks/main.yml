@@ -45,12 +45,20 @@
     cache_valid_time: 3600
   when: room_endpoint_sendspin_install | bool
 
+- name: Install supervised local-video runtime
+  ansible.builtin.apt:
+    name: "{{ room_endpoint_video_packages }}"
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+  when: room_endpoint_video_install | bool
+
 - name: Create Pilot service user
   ansible.builtin.user:
     name: "{{ room_endpoint_user }}"
     system: true
     create_home: true
-    home: "/home/{{ room_endpoint_user }}"
+    home: "{{ room_endpoint_home }}"
     shell: /usr/sbin/nologin
     groups: audio,video,bluetooth
     append: true
@@ -64,6 +72,20 @@
   ansible.builtin.command: "id -u {{ room_endpoint_user }}"
   register: room_endpoint_uid
   changed_when: false
+
+- name: Validate shared Cage session identity for local video
+  ansible.builtin.assert:
+    that:
+      - room_endpoint_video_wayland_display | length > 0
+      - room_endpoint_user == (display_node_user | default('pilot-display'))
+    fail_msg: >-
+      A combined N150 display/video host must run Room Agent and Cage as the
+      same Unix user and set room_endpoint_video_wayland_display. Wayland
+      runtime directories are private; do not work around this with relaxed
+      socket permissions.
+  when:
+    - room_endpoint_video_enabled | bool
+    - inventory_hostname in (groups['pilot_display_nodes'] | default([]))
 
 - name: Start user manager for Pilot
   ansible.builtin.systemd_service:
@@ -84,6 +106,10 @@
       mode: "0750"
     - { path: /opt/pilot/releases, mode: "0755" }
     - path: /var/lib/pilot
+      owner: "{{ room_endpoint_user }}"
+      group: "{{ room_endpoint_user }}"
+      mode: "0750"
+    - path: "{{ room_endpoint_audio_cache_path }}"
       owner: "{{ room_endpoint_user }}"
       group: "{{ room_endpoint_user }}"
       mode: "0750"
@@ -130,7 +156,7 @@
       - "{{ room_endpoint_user }}"
       - --
       - env
-      - "HOME=/home/{{ room_endpoint_user }}"
+      - "HOME={{ room_endpoint_home }}"
       - ./script/setup
       - "--cxxflags=-O2 -g0"
       - "--makeflags=-j2"
@@ -183,6 +209,12 @@
     cmd: "python3 -m venv /opt/pilot/releases/{{ room_endpoint_release_id }}/.venv"
     creates: "/opt/pilot/releases/{{ room_endpoint_release_id }}/.venv/bin/python"
 
+- name: Install room-agent and runtime dependencies
+  ansible.builtin.pip:
+    name: >-
+      /opt/pilot/releases/{{ room_endpoint_release_id }}/apps/room-agent
+    virtualenv: "/opt/pilot/releases/{{ room_endpoint_release_id }}/.venv"
+
 - name: Render room configuration
   ansible.builtin.template:
     src: room.toml.j2
@@ -191,6 +223,60 @@
     group: "{{ room_endpoint_user }}"
     mode: "0640"
   notify: Restart Pilot room-agent
+
+- name: Inspect installed Pilot Core device credential
+  ansible.builtin.stat:
+    path: "{{ room_endpoint_core_device_token_file }}"
+  register: room_endpoint_core_device_token_remote
+  when: >-
+    room_endpoint_core_reporting_enabled | bool or
+    room_endpoint_core_commands_enabled | bool
+
+- name: Validate Pilot Core reporting credentials
+  ansible.builtin.assert:
+    that:
+      - room_endpoint_core_url | length > 0
+      - room_endpoint_core_device_id | length > 0
+      - >-
+        room_endpoint_core_device_token | length > 0 or
+        room_endpoint_core_device_token_source_file | length > 0 or
+        room_endpoint_core_device_token_remote.stat.isreg | default(false)
+    fail_msg: >-
+      Pilot Core URL, device ID, and either a new or already-installed device
+      token are required when reporting or commands are enabled.
+  when: >-
+    room_endpoint_core_reporting_enabled | bool or
+    room_endpoint_core_commands_enabled | bool
+  no_log: true
+
+- name: Install Pilot Core device credential
+  ansible.builtin.copy:
+    content: "{{ room_endpoint_core_device_token }}\n"
+    dest: "{{ room_endpoint_core_device_token_file }}"
+    owner: "{{ room_endpoint_user }}"
+    group: "{{ room_endpoint_user }}"
+    mode: "0600"
+  when: >-
+    (room_endpoint_core_reporting_enabled | bool or
+    room_endpoint_core_commands_enabled | bool) and
+    room_endpoint_core_device_token | length > 0
+  notify: Restart Pilot room-agent
+  no_log: true
+
+- name: Install Pilot Core device credential from controller file
+  ansible.builtin.copy:
+    src: "{{ room_endpoint_core_device_token_source_file }}"
+    dest: "{{ room_endpoint_core_device_token_file }}"
+    owner: "{{ room_endpoint_user }}"
+    group: "{{ room_endpoint_user }}"
+    mode: "0600"
+  when: >-
+    (room_endpoint_core_reporting_enabled | bool or
+    room_endpoint_core_commands_enabled | bool) and
+    room_endpoint_core_device_token | length == 0 and
+    room_endpoint_core_device_token_source_file | length > 0
+  notify: Restart Pilot room-agent
+  no_log: true
 
 - name: Inspect current release link
   ansible.builtin.stat:
@@ -328,6 +414,7 @@
     mode: "0755"
   loop:
     - pilot-hardware-inventory
+    - pilot-activate
     - pilot-rollback
     - pilot-validate
 

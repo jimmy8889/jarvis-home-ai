@@ -1,0 +1,188 @@
+#!/usr/bin/env python3
+"""Read-only Media Room readiness checks for staged in-person acceptance."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+from pathlib import Path
+import sys
+from typing import Any
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
+
+
+EXPECTED_PLAYERS = {
+    "media-room-heos": "1174905188",
+    "media-room-shield": "upb0713734fca0742d2bf2125b59cbf3b1",
+}
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description=(
+            "Validate Media Room discovery and safety state without sending "
+            "power, source, playback, grouping, or volume commands."
+        )
+    )
+    parser.add_argument(
+        "--core-url",
+        default=os.environ.get("PILOT_CORE_URL", "http://10.0.1.64:8770"),
+    )
+    parser.add_argument(
+        "--token-file",
+        default=os.environ.get("PILOT_CORE_ADMIN_TOKEN_FILE", ""),
+        help="Path containing the Pilot Core administrator token.",
+    )
+    parser.add_argument(
+        "--phase",
+        choices=("discovery", "control-ready"),
+        default="discovery",
+        help=(
+            "discovery requires controls to remain disabled; control-ready "
+            "requires the accepted players to be enabled."
+        ),
+    )
+    parser.add_argument("--json", action="store_true", dest="as_json")
+    return parser.parse_args()
+
+
+def token(args: argparse.Namespace) -> str:
+    direct = os.environ.get("PILOT_CORE_ADMIN_TOKEN", "").strip()
+    if direct:
+        return direct
+    if not args.token_file:
+        raise ValueError("set PILOT_CORE_ADMIN_TOKEN or provide --token-file")
+    value = Path(args.token_file).read_text(encoding="utf-8").strip()
+    if not value:
+        raise ValueError("administrator token file is empty")
+    return value
+
+
+def get_json(base_url: str, path: str, bearer: str | None = None) -> Any:
+    headers = {"Accept": "application/json"}
+    if bearer:
+        headers["Authorization"] = f"Bearer {bearer}"
+    request = Request(
+        f"{base_url.rstrip('/')}{path}",
+        headers=headers,
+        method="GET",
+    )
+    with urlopen(request, timeout=12) as response:  # noqa: S310
+        return json.load(response)
+
+
+def check(
+    checks: list[dict[str, Any]],
+    check_id: str,
+    passed: bool,
+    detail: str,
+) -> None:
+    checks.append({"id": check_id, "passed": passed, "detail": detail})
+
+
+def evaluate(
+    readiness: dict[str, Any],
+    observability: dict[str, Any],
+    media: dict[str, Any],
+    phase: str,
+) -> dict[str, Any]:
+    checks: list[dict[str, Any]] = []
+    check(checks, "core-ready", readiness.get("ready") is True, "Pilot Core ready")
+    check(
+        checks,
+        "room-registered",
+        media.get("room_id") == "media-room",
+        "Media Room registry scope is exact",
+    )
+
+    providers = media.get("providers") or {}
+    for provider_id in ("music_assistant", "home_assistant"):
+        status = (providers.get(provider_id) or {}).get("status")
+        check(
+            checks,
+            f"{provider_id}-state",
+            status == "ok",
+            f"{provider_id.replace('_', ' ').title()} status: {status}",
+        )
+
+    players = media.get("players") or {}
+    for player_id, external_id in EXPECTED_PLAYERS.items():
+        state = players.get(player_id)
+        player = (state or {}).get("player") or {}
+        discovered = state is not None and state.get("status") == "ok"
+        check(
+            checks,
+            f"{player_id}-discovered",
+            discovered,
+            f"{player.get('name') or player_id}: {(state or {}).get('status', 'missing')}",
+        )
+        check(
+            checks,
+            f"{player_id}-identity",
+            player.get("external_id") == external_id,
+            "Configured provider identity matches the accepted inventory",
+        )
+        expected_control = phase == "control-ready" and player_id == "media-room-heos"
+        check(
+            checks,
+            f"{player_id}-control-gate",
+            player.get("control_enabled") is expected_control,
+            (
+                "Accepted Denon music controls enabled"
+                if expected_control
+                else "Control path remains fail-closed"
+            ),
+        )
+
+    warning_count = (observability.get("summary") or {}).get("warning_alert_count", 0)
+    check(
+        checks,
+        "observability",
+        observability.get("status") in {"healthy", "guarded", "degraded"},
+        (
+            f"Central status {observability.get('status')} "
+            f"with {warning_count} warning alerts"
+        ),
+    )
+    return {
+        "phase": phase,
+        "read_only": True,
+        "passed": all(item["passed"] for item in checks),
+        "checks": checks,
+        "media_observed_at": media.get("observed_at"),
+        "observability_status": observability.get("status"),
+    }
+
+
+def main() -> int:
+    args = parse_args()
+    try:
+        bearer = token(args)
+        readiness = get_json(args.core_url, "/readyz")
+        observability = get_json(args.core_url, "/v1/observability", bearer)
+        media = get_json(args.core_url, "/v1/rooms/media-room/media-state", bearer)
+        report = evaluate(readiness, observability, media, args.phase)
+    except (HTTPError, URLError, OSError, ValueError, json.JSONDecodeError) as error:
+        print(f"Media Room acceptance check failed: {error}", file=sys.stderr)
+        return 2
+
+    if args.as_json:
+        print(json.dumps(report, indent=2, sort_keys=True))
+    else:
+        print(
+            f"Media Room {report['phase']} acceptance: "
+            f"{'PASS' if report['passed'] else 'FAIL'}"
+        )
+        print(
+            "No receiver, Shield, playback, power, source, or volume command was sent."
+        )
+        for item in report["checks"]:
+            marker = "PASS" if item["passed"] else "FAIL"
+            print(f"[{marker}] {item['id']}: {item['detail']}")
+    return 0 if report["passed"] else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

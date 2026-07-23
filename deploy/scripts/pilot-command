@@ -1,0 +1,119 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import sys
+import time
+from urllib.error import HTTPError, URLError
+from urllib.parse import quote
+from urllib.request import Request, urlopen
+
+
+ACTIONS = (
+    "play",
+    "pause",
+    "stop",
+    "set_volume",
+    "start_listening",
+    "stop_listening",
+    "assistant_start",
+    "assistant_end",
+    "announcement_start",
+    "announcement_end",
+    "cancel",
+)
+
+
+def request_json(
+    url: str, token: str, method: str = "GET", payload: dict | None = None
+) -> dict:
+    body = json.dumps(payload).encode() if payload is not None else None
+    request = Request(
+        url,
+        data=body,
+        method=method,
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+        },
+    )
+    with urlopen(request, timeout=10) as response:
+        return json.load(response)
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Send an authenticated control command through Pilot Core"
+    )
+    parser.add_argument("--core-url", required=True)
+    target = parser.add_mutually_exclusive_group(required=True)
+    target.add_argument("--room-id")
+    target.add_argument("--device-id")
+    parser.add_argument("--token-env", default="PILOT_CORE_ADMIN_TOKEN")
+    parser.add_argument("--source", choices=("room", "music", "airplay", "all"))
+    parser.add_argument("--volume", type=float)
+    parser.add_argument("--critical", action="store_true")
+    parser.add_argument("--ttl-seconds", type=int)
+    parser.add_argument("--expires-in-seconds", type=int, default=30)
+    parser.add_argument("--wait", type=float, default=0, metavar="SECONDS")
+    parser.add_argument("action", choices=ACTIONS)
+    return parser.parse_args()
+
+
+def main() -> int:
+    args = parse_args()
+    token = os.environ.get(args.token_env, "")
+    if not token:
+        print(f"{args.token_env} is not set", file=sys.stderr)
+        return 2
+    payload: dict[str, object] = {
+        "action": args.action,
+        "expires_in_seconds": args.expires_in_seconds,
+    }
+    if args.source is not None:
+        payload["source"] = args.source
+    if args.volume is not None:
+        payload["volume"] = args.volume
+    if args.critical:
+        payload["critical"] = True
+    if args.ttl_seconds is not None:
+        payload["ttl_seconds"] = args.ttl_seconds
+
+    base_url = args.core_url.rstrip("/")
+    target_id = quote(args.room_id or args.device_id, safe="")
+    target_type = "rooms" if args.room_id else "devices"
+    endpoint = (
+        f"{base_url}/v1/{target_type}/{target_id}/control"
+        if args.room_id
+        else f"{base_url}/v1/{target_type}/{target_id}/commands"
+    )
+    try:
+        response = request_json(endpoint, token, "POST", payload)
+        command = response.get("command", response)
+        deadline = time.monotonic() + max(args.wait, 0)
+        while args.wait > 0 and command["status"] in {"queued", "delivered"}:
+            if time.monotonic() >= deadline:
+                break
+            time.sleep(0.5)
+            command = request_json(
+                f"{base_url}/v1/commands/{command['id']}", token
+            )
+        if "command" in response:
+            response["command"] = command
+        else:
+            response = command
+    except HTTPError as error:
+        detail = error.read().decode(errors="replace")
+        print(f"Pilot Core returned HTTP {error.code}: {detail}", file=sys.stderr)
+        return 1
+    except (OSError, URLError, ValueError, KeyError) as error:
+        print(f"Pilot command failed: {error}", file=sys.stderr)
+        return 1
+    print(json.dumps(response, indent=2, sort_keys=True))
+    return 0 if command["status"] not in {"failed", "expired"} else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

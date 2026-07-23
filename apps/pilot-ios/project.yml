@@ -1,0 +1,55 @@
+name: Pilot
+options:
+  bundleIdPrefix: com.jameshazell
+  deploymentTarget:
+    iOS: "17.0"
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+packages:
+  SendspinKit:
+    url: https://github.com/Sendspin/SendspinKit.git
+    from: 1.0.1
+targets:
+  Pilot:
+    type: application
+    platform: iOS
+    sources:
+      - Pilot
+    info:
+      path: Pilot/Info.plist
+      properties:
+        CFBundleDisplayName: Pilot
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
+        NSLocalNetworkUsageDescription: Pilot connects to your local Pilot Core server and room audio devices.
+        NSCameraUsageDescription: Pilot uses the camera only when you choose to scan a single-use Pilot Core pairing code.
+        NSMicrophoneUsageDescription: Pilot records meetings you explicitly start and uploads them to your private Pilot Core for local transcription.
+        UIBackgroundModes:
+          - audio
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+        UIApplicationSupportsIndirectInputEvents: true
+        UILaunchScreen: {}
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.jameshazell.pilot
+        PRODUCT_NAME: Pilot
+        DEVELOPMENT_TEAM: 362V48U65C
+        SUPPORTS_MACCATALYST: YES
+        TARGETED_DEVICE_FAMILY: "1,2"
+    dependencies:
+      - package: SendspinKit
+    scheme:
+      testTargets:
+        - PilotTests
+  PilotTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - PilotTests
+    dependencies:
+      - target: Pilot
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES

@@ -1,0 +1,22 @@
+{
+  "exposure_policy": "automatic",
+  "included": true,
+  "hidden": false,
+  "reason": "user_facing_domain",
+  "category": "control",
+  "priority": 85,
+  "room": {
+    "id": "office",
+    "area_id": "james_office",
+    "trust": "registry",
+    "authoritative": true
+  },
+  "display_name": "Office Lamp",
+  "icon": null,
+  "section": "Controls",
+  "control": "light",
+  "canonical_id": "light.office_lamp",
+  "duplicate_of": null,
+  "updated_at": null,
+  "supported_actions": ["turn_on", "turn_off", "toggle", "set_brightness"]
+}

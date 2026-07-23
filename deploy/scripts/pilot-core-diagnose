@@ -1,0 +1,129 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import argparse
+import json
+import os
+from pathlib import Path
+from typing import Any
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
+
+
+def repository_root() -> Path:
+    return Path(__file__).resolve().parents[2]
+
+
+def read_token(path: Path | None) -> str:
+    value = os.environ.get("PILOT_CORE_ADMIN_TOKEN", "").strip()
+    file_name = os.environ.get("PILOT_CORE_ADMIN_TOKEN_FILE", "").strip()
+    selected = path or (Path(file_name) if file_name else None)
+    if value:
+        return value
+    if selected and selected.is_file():
+        return selected.read_text(encoding="utf-8").strip()
+    return ""
+
+
+def get_json(url: str, token: str = "") -> dict[str, Any]:
+    headers = {"Authorization": f"Bearer {token}"} if token else {}
+    request = Request(url, headers=headers)
+    with urlopen(request, timeout=15) as response:
+        result = json.load(response)
+    if not isinstance(result, dict):
+        raise ValueError("response is not a JSON object")
+    return result
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        description="Run silent Pilot Core and integration diagnostics"
+    )
+    parser.add_argument("--core-url", default="http://127.0.0.1:8770")
+    parser.add_argument(
+        "--admin-token-file",
+        type=Path,
+        default=repository_root() / "infra" / "secrets" / "pilot_core_admin_token",
+    )
+    parser.add_argument("--require-room", action="append", default=[])
+    parser.add_argument("--require-armed-room", action="append", default=[])
+    parser.add_argument("--require-home-assistant", action="store_true")
+    parser.add_argument("--require-music-assistant", action="store_true")
+    parser.add_argument("--require-tts", action="store_true")
+    parser.add_argument("--json", action="store_true")
+    args = parser.parse_args()
+    token = read_token(args.admin_token_file)
+    if not token:
+        raise SystemExit("Pilot Core admin token is required")
+    base = args.core_url.rstrip("/")
+    report: dict[str, Any] = {"core_url": base, "checks": {}}
+    failures: list[str] = []
+    try:
+        report["checks"]["health"] = get_json(f"{base}/healthz")
+        report["checks"]["readiness"] = get_json(f"{base}/readyz")
+        diagnostics = get_json(
+            f"{base}/v1/integrations/diagnostics", token
+        )["integrations"]
+        report["checks"]["integrations"] = diagnostics
+        state = get_json(f"{base}/v1/state", token)
+        report["checks"]["state"] = state
+    except HTTPError as error:
+        failures.append(f"Pilot Core returned HTTP {error.code}")
+    except (OSError, URLError, ValueError, KeyError) as error:
+        failures.append(f"Pilot Core diagnostic failed: {error}")
+    if not failures:
+        required_integrations = {
+            "home_assistant": args.require_home_assistant,
+            "music_assistant": args.require_music_assistant,
+        }
+        for name, required in required_integrations.items():
+            status = diagnostics[name]
+            if required and status["status"] != "ok":
+                failures.append(f"{name} is required but not healthy")
+            elif status["configured"] and status["status"] != "ok":
+                failures.append(f"configured {name} is not healthy")
+        if args.require_tts and not diagnostics["tts"]["configured"]:
+            failures.append("TTS is required but not configured")
+        for room_id in args.require_room:
+            room = state.get("rooms", {}).get(room_id)
+            if room is None:
+                failures.append(f"required room is unknown: {room_id}")
+            elif not any(device.get("connected") for device in room["devices"]):
+                failures.append(f"required room has no connected device: {room_id}")
+        for room_id in args.require_armed_room:
+            room = state.get("rooms", {}).get(room_id)
+            if room is None:
+                failures.append(f"required armed room is unknown: {room_id}")
+                continue
+            armed = any(
+                device.get("connected")
+                and (
+                    device.get("health", {})
+                    .get("payload", {})
+                    .get("audio_activation", {})
+                    .get("allowed")
+                    is True
+                )
+                for device in room["devices"]
+            )
+            if not armed:
+                failures.append(
+                    f"required room has no connected armed endpoint: {room_id}"
+                )
+    report["ok"] = not failures
+    report["failures"] = failures
+    if args.json:
+        print(json.dumps(report, indent=2, sort_keys=True))
+    else:
+        print(f"{'PASS' if report['ok'] else 'FAIL'}  Pilot Core silent diagnostics")
+        for failure in failures:
+            print(f"FAIL  {failure}")
+        if not failures:
+            for name, status in diagnostics.items():
+                state_name = status.get("status", "configured" if status.get("configured") else "not_configured")
+                print(f"PASS  {name}: {state_name}")
+    return 0 if report["ok"] else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -1,0 +1,67 @@
+services:
+  pilot-core:
+    image: "jarvis-home-ai/pilot-core:${PILOT_CORE_IMAGE_TAG:-local}"
+    build:
+      context: ..
+      dockerfile: infra/pilot-core/Dockerfile
+    container_name: pilot-core
+    restart: unless-stopped
+    init: true
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 256
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m
+    ports:
+      - "${PILOT_CORE_BIND_ADDRESS:-127.0.0.1}:${PILOT_CORE_PORT:-8770}:8770"
+    environment:
+      PILOT_CORE_RELEASE: "${PILOT_CORE_IMAGE_TAG:-local}"
+      PILOT_CORE_ADMIN_TOKEN_FILE: /run/secrets/pilot_core_admin_token
+      PILOT_CORE_BOOTSTRAP_TOKEN_FILE: /run/secrets/pilot_core_bootstrap_token
+      MUSIC_ASSISTANT_TOKEN_FILE: /run/secrets/music_assistant_token
+      HOME_ASSISTANT_TOKEN_FILE: /run/secrets/home_assistant_token
+      PILOT_TTS_TOKEN_FILE: /run/secrets/tts_token
+    secrets:
+      - pilot_core_admin_token
+      - pilot_core_bootstrap_token
+      - music_assistant_token
+      - home_assistant_token
+      - tts_token
+    volumes:
+      - ../config/core.container.toml:/config/core.toml:ro
+      - pilot-core-data:/data
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - >-
+          import urllib.request;
+          urllib.request.urlopen('http://127.0.0.1:8770/readyz', timeout=3)
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
+volumes:
+  pilot-core-data:
+
+secrets:
+  pilot_core_admin_token:
+    file: ./secrets/pilot_core_admin_token
+  pilot_core_bootstrap_token:
+    file: ./secrets/pilot_core_bootstrap_token
+  music_assistant_token:
+    file: ./secrets/music_assistant_token
+  home_assistant_token:
+    file: ./secrets/home_assistant_token
+  tts_token:
+    file: ./secrets/tts_token

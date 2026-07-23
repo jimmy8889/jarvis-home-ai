@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pilot.local/schemas/pilot-device-manifest-v1.schema.json",
+  "title": "Pilot device manifest v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "core_version",
+    "registry_revision",
+    "device",
+    "features",
+    "endpoints",
+    "realtime"
+  ],
+  "properties": {
+    "schema_version": {"const": "pilot.client.v1"},
+    "core_version": {"type": "string"},
+    "registry_revision": {"type": "string"},
+    "device": {
+      "type": "object",
+      "required": [
+        "id",
+        "name",
+        "room_id",
+        "capabilities",
+        "credential_revision",
+        "credential_status"
+      ],
+      "properties": {
+        "id": {"type": "string"},
+        "name": {"type": "string"},
+        "room_id": {"type": "string"},
+        "capabilities": {"type": "array", "items": {"type": "string"}},
+        "credential_revision": {"type": "integer", "minimum": 1},
+        "credential_status": {"enum": ["active", "revoked"]}
+      },
+      "additionalProperties": false
+    },
+    "features": {
+      "type": "object",
+      "additionalProperties": {"type": "boolean"}
+    },
+    "endpoints": {
+      "type": "object",
+      "additionalProperties": {"type": "string", "pattern": "^/v1/"}
+    },
+    "realtime": {
+      "type": "object",
+      "required": ["transport", "cursor", "resume_supported", "snapshot_recovery"],
+      "properties": {
+        "transport": {
+          "type": "array",
+          "items": {"enum": ["long-poll", "websocket"]}
+        },
+        "cursor": {"type": "string", "pattern": "^[0-9]+$"},
+        "resume_supported": {"const": true},
+        "snapshot_recovery": {"const": true}
+      },
+      "additionalProperties": false
+    }
+  }
+}

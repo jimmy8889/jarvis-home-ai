@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 from pilot_room_agent.config import Settings
 from pilot_room_agent.status import (
-    _airplay_playback_status,
+    _mpris_playback_status,
     _tcp_port_status,
     _tcp_remote_port_status,
     collect_status,
@@ -19,6 +19,7 @@ class StatusTests(unittest.TestCase):
         status = collect_status(Settings(room_id="office"))
         self.assertTrue(status["ready"])
         self.assertEqual(status["room_id"], "office")
+        self.assertFalse(status["audio_activation"]["allowed"])
         self.assertEqual(command_status.call_count, 3)
 
     @patch("pilot_room_agent.status._command_status")
@@ -75,7 +76,7 @@ class StatusTests(unittest.TestCase):
             {"available": True, "ok": True, "detail": 's "Playing"'},
             {"available": True, "ok": True, "detail": "d 0.333333"},
         ]
-        status = _airplay_playback_status()
+        status = _mpris_playback_status("org.mpris.MediaPlayer2.Test")
         self.assertEqual(status["state"], "Playing")
         self.assertAlmostEqual(status["volume"], 0.333333)
 
@@ -89,10 +90,12 @@ class StatusTests(unittest.TestCase):
         self.assertEqual(status["connection_count"], 1)
 
     @patch("pilot_room_agent.status._tcp_remote_port_status")
+    @patch("pilot_room_agent.status._sendspin_bus_name")
     @patch("pilot_room_agent.status._command_status")
     def test_music_assistant_connection_is_required(
         self,
         command_status,
+        sendspin_bus_name,
         remote_port_status,
     ) -> None:
         command_status.return_value = {
@@ -107,11 +110,12 @@ class StatusTests(unittest.TestCase):
             "connection_count": 0,
             "server_port": 8927,
         }
+        sendspin_bus_name.return_value = None
         status = collect_status(Settings(music_assistant_enabled=True))
         self.assertFalse(status["ready"])
         self.assertFalse(status["music_assistant"]["transport"]["connected"])
 
-    @patch("pilot_room_agent.status._airplay_playback_status")
+    @patch("pilot_room_agent.status._mpris_playback_status")
     @patch("pilot_room_agent.status._tcp_port_status")
     @patch("pilot_room_agent.status._command_status")
     def test_airplay_requires_service_and_listener(

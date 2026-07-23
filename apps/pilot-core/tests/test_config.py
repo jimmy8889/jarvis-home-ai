@@ -17,6 +17,7 @@ id = "office"
 name = "Office"
 response_player_id = "office-assistant"
 default_music_player_id = "office-music"
+default_device_id = "pilot-office"
 
 [[players]]
 id = "office-assistant"
@@ -45,14 +46,58 @@ class ConfigTests(unittest.TestCase):
         settings = self._load(VALID_CONFIG)
         self.assertEqual(settings.server.listen_port, 8770)
         self.assertEqual(settings.rooms[0].id, "office")
+        self.assertEqual(settings.rooms[0].default_device_id, "pilot-office")
         self.assertEqual(settings.players[1].protocol, "sendspin")
+        self.assertTrue(settings.players[1].control_enabled)
+
+    def test_can_disable_player_control_without_hiding_state(self) -> None:
+        configured = VALID_CONFIG.replace(
+            'kind = "music"',
+            'kind = "music"\ncontrol_enabled = false',
+        )
+        settings = self._load(configured)
+        self.assertTrue(settings.players[1].enabled)
+        self.assertFalse(settings.players[1].control_enabled)
+
+    def test_loads_separate_player_control_endpoint(self) -> None:
+        configured = VALID_CONFIG.replace(
+            'kind = "music"',
+            'kind = "music"\ncontrol_endpoint = "http://10.0.1.150:8080"',
+        )
+        settings = self._load(configured)
+        self.assertEqual(
+            settings.players[1].control_endpoint,
+            "http://10.0.1.150:8080",
+        )
+
+    def test_can_disable_legacy_bootstrap(self) -> None:
+        configured = VALID_CONFIG.replace(
+            "listen_port = 8770",
+            "listen_port = 8770\nlegacy_bootstrap_enabled = false",
+        )
+        self.assertFalse(self._load(configured).server.legacy_bootstrap_enabled)
 
     def test_rejects_unknown_default_player(self) -> None:
         with self.assertRaisesRegex(ValueError, "unknown player"):
-            self._load(VALID_CONFIG.replace('default_music_player_id = "office-music"', 'default_music_player_id = "missing"'))
+            self._load(
+                VALID_CONFIG.replace(
+                    'default_music_player_id = "office-music"',
+                    'default_music_player_id = "missing"',
+                )
+            )
+
+    def test_rejects_disabled_default_player(self) -> None:
+        configured = VALID_CONFIG.replace(
+            'kind = "music"',
+            'kind = "music"\nenabled = false',
+        )
+        with self.assertRaisesRegex(ValueError, "disabled player"):
+            self._load(configured)
 
     def test_rejects_duplicate_player_id(self) -> None:
-        duplicate = VALID_CONFIG + """
+        duplicate = (
+            VALID_CONFIG
+            + """
 [[players]]
 id = "office-music"
 room_id = "office"
@@ -60,8 +105,160 @@ name = "Duplicate"
 protocol = "sendspin"
 kind = "music"
 """
+        )
         with self.assertRaisesRegex(ValueError, "duplicate player id"):
             self._load(duplicate)
+
+    def test_validates_local_tts_provider_configuration(self) -> None:
+        home_assistant = VALID_CONFIG.replace(
+            "[[rooms]]",
+            """[integrations]
+home_assistant_url = "http://homeassistant.local:8123"
+tts_provider = "home_assistant"
+tts_engine_id = "tts.piper"
+tts_format = "wav"
+
+[[rooms]]""",
+            1,
+        )
+        settings = self._load(home_assistant)
+        self.assertEqual(settings.integrations.tts_engine_id, "tts.piper")
+
+        invalid = VALID_CONFIG.replace(
+            "[[rooms]]",
+            """[integrations]
+tts_provider = "home_assistant"
+
+[[rooms]]""",
+            1,
+        )
+        with self.assertRaisesRegex(ValueError, "home_assistant_url"):
+            self._load(invalid)
+
+    def test_validates_local_llm_provider_configuration(self) -> None:
+        configured = VALID_CONFIG.replace(
+            "[[rooms]]",
+            """[integrations]
+llm_provider = "openai"
+llm_url = "http://rtx.local:11434/v1"
+llm_model = "qwen3:8b"
+meeting_analysis_model = "gemma4:12b"
+llm_max_tool_rounds = 3
+
+[[rooms]]""",
+            1,
+        )
+        settings = self._load(configured)
+        self.assertEqual(settings.integrations.llm_model, "qwen3:8b")
+        self.assertEqual(settings.integrations.meeting_analysis_model, "gemma4:12b")
+        self.assertEqual(settings.integrations.llm_max_tool_rounds, 3)
+
+        invalid = VALID_CONFIG.replace(
+            "[[rooms]]",
+            """[integrations]
+llm_provider = "openai"
+llm_model = "qwen3:8b"
+
+[[rooms]]""",
+            1,
+        )
+        with self.assertRaisesRegex(ValueError, "llm_url"):
+            self._load(invalid)
+
+    def test_validates_display_temperature_sensors(self) -> None:
+        configured = VALID_CONFIG.replace(
+            "[[rooms]]",
+            """[integrations]
+outdoor_temperature_entity_id = "sensor.outdoor_temperature"
+indoor_temperature_entity_id = "sensor.bedroom_temperature"
+temperature_history_hours = 24
+
+[[rooms]]""",
+            1,
+        )
+        settings = self._load(configured)
+        self.assertEqual(
+            settings.integrations.outdoor_temperature_entity_id,
+            "sensor.outdoor_temperature",
+        )
+        self.assertEqual(settings.integrations.temperature_history_hours, 24)
+
+        invalid = configured.replace(
+            'outdoor_temperature_entity_id = "sensor.outdoor_temperature"',
+            'outdoor_temperature_entity_id = "weather.home"',
+        )
+        with self.assertRaisesRegex(ValueError, "must be a sensor entity"):
+            self._load(invalid)
+
+    def test_validates_optional_sun_scene_entity(self) -> None:
+        configured = VALID_CONFIG.replace(
+            "[[rooms]]",
+            """[integrations]
+sun_entity_id = "sun.sun"
+
+[[rooms]]""",
+            1,
+        )
+        self.assertEqual(self._load(configured).integrations.sun_entity_id, "sun.sun")
+
+        with self.assertRaisesRegex(ValueError, "must be a sun entity"):
+            self._load(
+                configured.replace(
+                    'sun_entity_id = "sun.sun"',
+                    'sun_entity_id = "sensor.sun"',
+                )
+            )
+
+    def test_validates_display_energy_sensors(self) -> None:
+        configured = VALID_CONFIG.replace(
+            "[[rooms]]",
+            """[integrations]
+energy_solar_power_entity_id = "sensor.solar_power"
+energy_grid_power_entity_id = "sensor.grid_power"
+energy_battery_power_entity_id = "sensor.battery_power"
+energy_battery_soc_entity_id = "sensor.battery_soc"
+energy_home_load_entity_id = "sensor.home_load"
+
+[[rooms]]""",
+            1,
+        )
+        settings = self._load(configured)
+        self.assertEqual(
+            settings.integrations.energy_battery_soc_entity_id,
+            "sensor.battery_soc",
+        )
+
+        invalid = configured.replace(
+            'energy_home_load_entity_id = "sensor.home_load"',
+            'energy_home_load_entity_id = "weather.home"',
+        )
+        with self.assertRaisesRegex(ValueError, "must be a sensor entity"):
+            self._load(invalid)
+
+    def test_validates_home_catalogue_limits(self) -> None:
+        configured = VALID_CONFIG.replace(
+            "[[rooms]]",
+            """[integrations]
+home_catalog_sync_interval_seconds = 120
+home_catalog_stale_after_seconds = 600
+home_catalog_max_entities = 25000
+
+[[rooms]]""",
+            1,
+        )
+        settings = self._load(configured)
+        self.assertEqual(
+            settings.integrations.home_catalog_sync_interval_seconds,
+            120,
+        )
+        self.assertEqual(settings.integrations.home_catalog_max_entities, 25_000)
+
+        invalid = configured.replace(
+            "home_catalog_max_entities = 25000",
+            "home_catalog_max_entities = 50",
+        )
+        with self.assertRaisesRegex(ValueError, "home_catalog_max_entities"):
+            self._load(invalid)
 
 
 if __name__ == "__main__":

@@ -1,31 +1,27 @@
-# Room endpoint architecture
+# Deployed platform architecture
 
-The first Pilot endpoint is intentionally narrow:
+The first Pilot endpoint runs native Debian 13 to keep latency-sensitive USB
+audio outside a virtualization path:
 
 ```text
-Proxmox host
-  └── Debian 13 VM
-      ├── USB microphone (individual USB passthrough)
-      ├── USB DAC/speakers (individual USB passthrough)
-      ├── optional USB Bluetooth adapter (individual passthrough)
-      ├── PipeWire + WirePlumber user session
-      ├── Linux Voice Assistant → Home Assistant Assist
-      ├── Shairport Sync → PipeWire → room output
-      ├── Sendspin → Music Assistant → PipeWire → room output
-      └── Pilot room-agent and validation services
+Office N150
+├── Stadium USB microphone
+├── FiiO K3 USB DAC
+├── PipeWire + WirePlumber user session
+├── Linux Voice Assistant → Home Assistant Assist
+├── Shairport Sync → PipeWire → K3
+├── Sendspin → Music Assistant → PipeWire → K3
+└── Pilot room-agent
+    ├── loopback health and control API
+    ├── outbound health/source reporting
+    ├── outbound authenticated command WebSocket
+    ├── command result journal
+    └── safely gated audio-focus enforcement
 ```
 
-The `pilot` account has systemd lingering enabled. Its PipeWire, Pulse
-compatibility, and WirePlumber services therefore start at boot without an
-interactive login. The room-agent runs as the same user and receives that
-user's `XDG_RUNTIME_DIR`, allowing it to inspect the audio graph.
-
-The room-agent binds only to loopback. It reports liveness separately
-from readiness: `/healthz` confirms the process is alive, while `/readyz` and
-`/v1/status` inspect PipeWire, ALSA capture/playback, optional Bluetooth, the
-voice satellite's Home Assistant connection, and the AirPlay listener.
-
-All application audio enters the same PipeWire session owned by `pilot`:
+The `pilot` account has systemd lingering enabled. PipeWire, Pulse
+compatibility, and WirePlumber therefore start at boot without an interactive
+login. Room audio services share that user and one audio graph.
 
 ```text
 Home Assistant response ─┐
@@ -33,19 +29,47 @@ AirPlay stream ──────────┼─→ PipeWire default sink ─
 Sendspin music ──────────┘
 ```
 
-This preserves a single output-selection boundary and allows future focus,
-ducking, and announcement policy to operate on named PipeWire streams.
+The room-agent binds only to loopback. Pilot Core does not connect inbound to
+it; the endpoint opens authenticated outbound reporting and command channels.
+This keeps room firewall policy simple and makes offline command delivery
+durable.
 
-## Explicitly out of scope
+## Central orchestration
 
-- Intel GPU or HDMI passthrough
-- VFIO/IOMMU changes
-- passing an entire USB controller to the guest
-- modifying the Proxmox host
-- Bluetooth A2DP input without a dedicated passed-through adapter
-- production audio focus/ducking between simultaneous sources
+```text
+Client / future LLM
+        │ typed request with originating room
+        ▼
+Pilot Core
+├── room/player/device registry
+├── deterministic target resolver
+├── current room state and focus
+├── authenticated command queue and events
+├── Music Assistant adapter
+└── Home Assistant conversation adapter
+        │
+        ├── room media → configured MA player
+        └── room control → capable room device
+```
 
-AirPlay, Home Assistant voice, and native Music Assistant Sendspin playback are
-implemented. Pilot Core now provides the first validated room/player registry;
-its network authentication and event transport are the next control-plane
-boundary.
+Room IDs are the stable public routing boundary. Player external IDs, device
+IDs, connection preference, capability checks, and fallback choices stay inside
+Pilot Core. An LLM may produce a typed intent but does not select infrastructure
+identifiers.
+
+## Current safety boundaries
+
+- No Intel GPU, HDMI, VFIO, or IOMMU work in the office baseline.
+- Bluetooth A2DP input remains disabled.
+- Live PipeWire gain enforcement remains disabled pending audible acceptance.
+- Endpoint controls are loopback-only or delivered over authenticated outbound
+  command transport.
+- Music actions pass through Music Assistant; home actions pass through Home
+  Assistant.
+- Every room-agent release is versioned and reversible, while the command
+  journal persists to prevent replay after rollback.
+
+The canonical product-level architecture is
+[PILOT_OS_BLUEPRINT.md](PILOT_OS_BLUEPRINT.md). Detailed command and routing
+contracts are in [COMMAND_TRANSPORT.md](COMMAND_TRANSPORT.md) and
+[ROOM_ORCHESTRATION.md](ROOM_ORCHESTRATION.md).

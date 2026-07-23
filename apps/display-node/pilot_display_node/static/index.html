@@ -1,0 +1,230 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+    <title>Pilot</title>
+    <link rel="stylesheet" href="/styles.css">
+    <script src="/app.js" defer></script>
+  </head>
+  <body>
+    <main>
+      <header>
+        <div class="brand">
+          <span class="orb" aria-hidden="true"></span>
+          <span>PILOT</span>
+        </div>
+        <div id="core-state" class="state pending">Connecting</div>
+      </header>
+
+      <div id="pages" class="pages">
+        <section class="page active" data-page="home" aria-label="Live energy flow">
+          <div class="energy-heading">
+            <div><span class="eyebrow">James House</span><h1>Energy flow</h1></div>
+            <div class="header-clock"><time id="clock">--:--</time><span id="date">Starting…</span></div>
+            <span id="energy-state" class="data-state">Waiting</span>
+          </div>
+          <div class="daily-strip" aria-label="Today's energy">
+            <div><span>Generated</span><strong id="daily-generated">—</strong></div>
+            <div><span>Home used</span><strong id="daily-home">—</strong></div>
+            <div><span>Exported</span><strong id="daily-export">—</strong></div>
+          </div>
+          <div id="energy-flow" class="energy-flow house-flow" role="img" aria-label="Waiting for live energy flow">
+            <div class="energy-house-scenes" aria-hidden="true">
+              <img class="energy-house active" data-scene="house-day" src="/assets/house-day.png" alt="">
+              <img class="energy-house" data-scene="" src="/assets/house-day.png" alt="">
+            </div>
+            <svg class="flow-lines" viewBox="0 0 1000 430" aria-hidden="true">
+              <defs>
+                <linearGradient id="solar-gradient"><stop stop-color="#ffd35d"></stop><stop offset="1" stop-color="#ff9f43"></stop></linearGradient>
+                <linearGradient id="grid-gradient"><stop stop-color="#4bb8ff"></stop><stop offset="1" stop-color="#697dff"></stop></linearGradient>
+                <linearGradient id="battery-gradient"><stop stop-color="#00e6be"></stop><stop offset="1" stop-color="#3ba7ff"></stop></linearGradient>
+                <linearGradient id="home-gradient"><stop stop-color="#00e6be"></stop><stop offset="1" stop-color="#a991ff"></stop></linearGradient>
+                <linearGradient id="vehicle-gradient"><stop stop-color="#ff5468"></stop><stop offset="1" stop-color="#ff9b62"></stop></linearGradient>
+              </defs>
+              <path class="flow-base" d="M500 60 C500 105 500 125 500 156"></path>
+              <path class="flow-base" d="M875 120 C780 120 720 160 647 205"></path>
+              <path class="flow-base battery-flow-base" d="M780 353 C700 344 655 316 610 282"></path>
+              <path class="flow-base vehicle-flow-base" d="M190 340 C280 330 344 300 405 270"></path>
+              <path class="flow-base" d="M832 276 C745 275 690 266 618 252"></path>
+              <path class="flow-base home-flow-base" d="M610 282 C590 320 548 347 500 370"></path>
+              <path id="flow-solar" class="flow-active solar-flow" d="M500 60 C500 105 500 125 500 156"></path>
+              <path id="flow-grid" class="flow-active grid-flow" d="M875 120 C780 120 720 160 647 205"></path>
+              <path id="flow-battery" class="flow-active battery-flow" d="M780 353 C700 344 655 316 610 282"></path>
+              <path id="flow-vehicle" class="flow-active vehicle-flow" d="M610 282 C520 310 350 338 190 340"></path>
+              <path id="flow-server" class="flow-active server-flow" d="M618 252 C690 266 745 275 832 276"></path>
+              <path id="flow-home" class="flow-active home-flow" d="M610 282 C590 320 548 347 500 370"></path>
+              <g id="particles-solar" class="flow-particles solar-particles"><circle r="4"><animateMotion dur="1.5s" repeatCount="indefinite" path="M500 60 C500 105 500 125 500 156"></animateMotion></circle></g>
+              <g id="particles-grid" class="flow-particles grid-particles"><g class="particles-forward"><circle r="4"><animateMotion dur="1.6s" repeatCount="indefinite" path="M875 120 C780 120 720 160 647 205"></animateMotion></circle></g><g class="particles-reverse"><circle r="4"><animateMotion dur="1.6s" repeatCount="indefinite" path="M647 205 C720 160 780 120 875 120"></animateMotion></circle></g></g>
+              <g id="particles-battery" class="flow-particles battery-particles"><g class="particles-forward"><circle r="5"><animateMotion dur="1.35s" repeatCount="indefinite" path="M780 353 C700 344 655 316 610 282"></animateMotion></circle></g><g class="particles-reverse"><circle r="5"><animateMotion dur="1.35s" repeatCount="indefinite" path="M610 282 C655 316 700 344 780 353"></animateMotion></circle></g></g>
+              <g id="particles-vehicle" class="flow-particles vehicle-particles"><circle r="4"><animateMotion dur="1.3s" repeatCount="indefinite" path="M610 282 C520 310 350 338 190 340"></animateMotion></circle></g>
+              <g id="particles-server" class="flow-particles server-particles"><circle r="4"><animateMotion dur="1.4s" repeatCount="indefinite" path="M618 252 C690 266 745 275 832 276"></animateMotion></circle></g>
+              <g id="particles-home" class="flow-particles home-particles"><circle r="5"><animateMotion dur="1.35s" repeatCount="indefinite" path="M610 282 C590 320 548 347 500 370"></animateMotion></circle><circle r="3.5"><animateMotion begin="-.675s" dur="1.35s" repeatCount="indefinite" path="M610 282 C590 320 548 347 500 370"></animateMotion></circle></g>
+            </svg>
+            <article id="node-solar" class="flow-node solar-node"><span class="node-icon">☀</span><div><small>PV</small><strong id="energy-solar">—</strong></div></article>
+            <article id="node-grid" class="flow-node grid-node"><span class="node-icon">⇄</span><div><small>Grid</small><strong id="energy-grid">—</strong><em id="energy-grid-direction">Waiting</em></div></article>
+            <article id="node-home" class="flow-node home-node"><span class="node-icon">⌂</span><div><small>Home load</small><strong id="energy-home">—</strong></div></article>
+            <article id="node-battery" class="flow-node battery-node"><span class="node-icon">▰</span><div><small>Battery</small><strong id="energy-battery">—</strong><em id="energy-battery-direction">Waiting</em></div><div class="battery-soc"><span id="energy-soc">—</span><div class="soc-track"><i id="soc-fill"></i></div></div></article>
+            <article id="node-vehicle" class="flow-node vehicle-node"><span class="node-icon">◆</span><div><small>Jarvis</small><strong id="energy-vehicle">—</strong><em id="vehicle-state">Away</em></div></article>
+            <article id="node-server" class="flow-node server-node"><span class="server-rack-visual" aria-hidden="true"><img src="/assets/server-rack.png" alt=""><i></i><i></i><i></i></span><div><small>Server rack</small><strong id="energy-server">—</strong></div></article>
+          </div>
+        </section>
+
+        <section class="page" data-page="history" aria-label="Energy history">
+          <div class="page-title"><div><span class="eyebrow">Today · midnight to midnight</span><h1>Power history</h1></div><span class="data-state online">Live</span></div>
+          <article class="chart-card"><svg id="energy-chart" viewBox="0 0 960 380" role="img" aria-label="Solar and battery power with home and Tesla loads plotted below zero from midnight to midnight"></svg><div id="chart-legend" class="chart-legend"></div></article>
+        </section>
+
+        <section class="page" data-page="daily" aria-label="Daily energy and vehicle">
+          <div class="page-title"><div><span class="eyebrow">Today</span><h1>Energy &amp; Jarvis</h1></div></div>
+          <div class="daily-grid">
+            <article class="hero-stat generated"><span>Solar generated</span><strong id="daily-generated-large">—</strong><small>Across all three arrays</small></article>
+            <article class="hero-stat used"><span>Home used</span><strong id="daily-home-large">—</strong><small>Whole-house consumption</small></article>
+            <article class="hero-stat exported"><span>Grid exported</span><strong id="daily-export-large">—</strong><small>Sent to the network</small></article>
+            <article class="vehicle-card"><span class="eyebrow">Tesla · Jarvis</span><div class="vehicle-summary"><strong id="vehicle-soc">—</strong><span id="vehicle-connected">Checking connection</span></div><div class="segmented"><button type="button" data-charge-mode="Grid">Grid</button><button type="button" data-charge-mode="Solar">Solar</button></div></article>
+            <article class="tariff-card"><span class="eyebrow">Amber now</span><div><span>Buy</span><strong id="tariff-buy">—</strong></div><div><span>Feed-in</span><strong id="tariff-fit">—</strong></div><svg id="tariff-chart" viewBox="0 0 420 90" aria-label="Forecast feed-in price"></svg></article>
+          </div>
+        </section>
+
+        <section class="page" data-page="climate" aria-label="Weather and temperatures">
+          <div class="page-title"><div><span class="eyebrow">Weather station</span><h1>Climate</h1></div><span id="weather-condition" class="data-state">Waiting</span></div>
+          <div class="climate-layout"><article class="weather-now"><span id="weather-icon" class="weather-icon">☀</span><div><strong id="weather-temperature">—</strong><span id="weather-detail">Waiting for forecast</span></div></article><div id="temperature-grid" class="temperature-grid"></div><div id="forecast-row" class="forecast-row"></div></div>
+        </section>
+
+        <section class="page" data-page="music" aria-label="Music">
+          <div class="page-title">
+            <div>
+              <span class="eyebrow">Music Assistant</span>
+              <h1>Music control</h1>
+            </div>
+            <span id="music-state" class="data-state">Waiting</span>
+          </div>
+          <div class="music-toolbar">
+            <label class="music-search">
+              <span>Search TIDAL and library</span>
+              <input id="music-query" type="search" placeholder="Artist, album or track" autocomplete="off" inputmode="none" enterkeyhint="search" spellcheck="false">
+            </label>
+            <button id="music-search-button" type="button">Search</button>
+            <label class="music-room">
+              <span>Output</span>
+              <select id="music-output" aria-label="Music output"></select>
+            </label>
+          </div>
+          <div id="music-message" class="music-message" role="status"></div>
+          <div id="now-playing-list" class="now-playing-list">
+            <article class="empty">
+              <span class="music-note">♪</span>
+              <strong>Nothing playing</strong>
+              <small>Active music across the Pilot network will appear here.</small>
+            </article>
+          </div>
+          <div id="music-results" class="music-results" aria-label="Music search results"></div>
+        </section>
+
+        <section class="page console-only" data-page="media" aria-label="Media room console">
+          <div class="console-topline">
+            <div class="media-brand"><span class="eyebrow">Pilot · Media Room</span><strong>Home media</strong></div>
+            <div class="console-weather"><span id="console-weather-icon">☀</span><div><strong id="console-weather-temperature">—</strong><small id="console-weather-condition">Weather</small></div></div>
+            <div class="console-clock"><time id="console-clock">--:--</time><span id="console-date">Starting…</span></div>
+          </div>
+          <div class="media-console-stage">
+            <section class="console-welcome">
+              <span class="eyebrow">Your room, ready</span>
+              <h1>Everything,<br><em>beautifully connected.</em></h1>
+              <p>Music Assistant, local video, the Shield and your live home in one calm ten-foot interface.</p>
+              <div class="console-energy-row" aria-label="Live house energy">
+                <div><span>Solar</span><strong id="console-energy-solar">—</strong></div>
+                <div><span>Home</span><strong id="console-energy-home">—</strong></div>
+                <div><span>Battery</span><strong id="console-energy-battery">—</strong><small id="console-energy-soc">—</small></div>
+              </div>
+            </section>
+            <section id="console-now-playing" class="console-now-playing">
+              <div class="console-artwork-wrap"><span class="media-disc">♪</span><img id="console-artwork" alt="" hidden></div>
+              <div class="console-playing-copy"><small>NOW PLAYING</small><strong id="console-track">Ready for music</strong><span id="console-artist">Choose an album, video or the Shield</span><div class="console-progress"><i id="console-progress-fill"></i></div><div class="console-transport"><button type="button" data-console-media-action="previous" aria-label="Previous track">‹</button><button id="console-play-toggle" type="button" data-console-media-action="play" aria-label="Play">▶</button><button type="button" data-console-media-action="next" aria-label="Next track">›</button></div></div>
+            </section>
+          </div>
+          <div class="media-console-actions">
+            <button type="button" data-console-target="music"><span>♪</span><strong>Music</strong><small>TIDAL &amp; local library</small><b>Browse</b></button>
+            <button type="button" data-console-target="home"><span>ϟ</span><strong>House</strong><small>Energy and climate</small><b>View</b></button>
+            <button id="console-video-target" type="button" data-console-target="video" disabled><span>▶</span><strong>Local video</strong><small>Enable after native playback acceptance</small><b>Planned</b></button>
+            <button type="button" data-console-target="shield"><span>▣</span><strong>NVIDIA Shield</strong><small>Dolby Vision &amp; streaming</small><b>Switch</b></button>
+          </div>
+          <div id="console-video-panel" class="console-video-panel" hidden>
+            <label><span>Local/Jellyfin media identifier</span><input id="console-video-input" type="text" placeholder="Films/Movie.mkv" autocomplete="off" spellcheck="false"></label>
+            <button id="console-video-play" type="button">Play video</button>
+            <button id="console-video-pause" type="button">Pause</button>
+            <button id="console-video-stop" type="button">Stop</button>
+            <span id="console-video-message" role="status"></span>
+          </div>
+        </section>
+
+        <section class="page" data-page="system" aria-label="System">
+          <div class="page-title">
+            <div>
+              <span class="eyebrow">Appliance</span>
+              <h1>System status</h1>
+            </div>
+          </div>
+          <div class="system-grid">
+            <article>
+              <span class="label">Pilot Core</span>
+              <strong id="core-detail">Checking</strong>
+              <small id="registry">—</small>
+            </article>
+            <article>
+              <span class="label">Rooms</span>
+              <strong id="rooms">—</strong>
+              <small id="players">—</small>
+            </article>
+            <article>
+              <span class="label">This node</span>
+              <strong id="hostname">Raspberry Pi</strong>
+              <small id="node-detail">—</small>
+            </article>
+            <article>
+              <span class="label">Thermals</span>
+              <strong id="temperature">CPU —</strong>
+              <small id="storage">Storage —</small>
+            </article>
+          </div>
+        </section>
+      </div>
+
+      <nav aria-label="Dashboard pages">
+        <button type="button" class="console-only" data-target="media"><span>◆</span>Media</button>
+        <button type="button" class="active" data-target="home"><span>ϟ</span>Flow</button>
+        <button type="button" data-target="history"><span>⌁</span>History</button>
+        <button type="button" data-target="daily"><span>◉</span>Daily</button>
+        <button type="button" data-target="climate"><span>☀</span>Climate</button>
+        <button type="button" data-target="music"><span>♪</span>Music</button>
+        <button type="button" data-target="system"><span>●</span>System</button>
+      </nav>
+
+      <footer>
+        <span>Tap a page or swipe left and right</span>
+        <span id="updated">Waiting for status</span>
+      </footer>
+    </main>
+    <section id="onscreen-keyboard" class="onscreen-keyboard" aria-label="Music search keyboard" hidden>
+      <div class="keyboard-heading">
+        <span>Type a music search</span>
+        <button id="keyboard-close" type="button" aria-label="Close keyboard">Close</button>
+      </div>
+      <div id="keyboard-keys" class="keyboard-keys" role="group" aria-label="QWERTY keys"></div>
+      <div class="keyboard-actions">
+        <button id="keyboard-space" type="button">Space</button>
+        <button id="keyboard-delete" type="button">Delete</button>
+        <button id="keyboard-clear" type="button">Clear</button>
+        <button id="keyboard-search" class="keyboard-primary" type="button">Search</button>
+      </div>
+    </section>
+    <aside id="assistant-overlay" class="assistant-overlay" aria-live="polite" hidden>
+      <span class="assistant-orb" aria-hidden="true"></span>
+      <div>
+        <small id="assistant-room">Pilot</small>
+        <strong id="assistant-response"></strong>
+        <span id="assistant-provider"></span>
+      </div>
+    </aside>
+  </body>
+</html>

@@ -1,0 +1,43 @@
+{
+  "schema_version": "pilot.client.v1",
+  "core_version": "0.25.0",
+  "registry_revision": "0123456789ab",
+  "device": {
+    "id": "pilot-phone",
+    "name": "Pilot Phone",
+    "room_id": "office",
+    "capabilities": ["home-control", "home-read", "media-control", "portable-client", "voice"],
+    "credential_revision": 1,
+    "credential_status": "active"
+  },
+  "features": {
+    "home": true,
+    "home_control": true,
+    "energy": true,
+    "media": true,
+    "assistant": true,
+    "meetings": false,
+    "display": false,
+    "portable": true,
+    "realtime": true,
+    "credential_rotation": true
+  },
+  "endpoints": {
+    "manifest": "/v1/devices/pilot-phone/manifest",
+    "snapshot": "/v1/devices/pilot-phone/events/snapshot",
+    "events": "/v1/devices/pilot-phone/events",
+    "events_websocket": "/v1/devices/pilot-phone/events/ws",
+    "home": "/v1/devices/pilot-phone/home",
+    "energy": "/v1/devices/pilot-phone/energy",
+    "media": "/v1/devices/pilot-phone/media",
+    "assistant": "/v1/devices/pilot-phone/assistant",
+    "meetings": "/v1/devices/pilot-phone/meetings",
+    "rotate_credentials": "/v1/devices/pilot-phone/credentials/rotate-self"
+  },
+  "realtime": {
+    "transport": ["long-poll", "websocket"],
+    "cursor": "0",
+    "resume_supported": true,
+    "snapshot_recovery": true
+  }
+}

@@ -1,0 +1,10 @@
+dependencies:
+  espressif/esp_lcd_sh8601: "1.0.0"
+  espressif/esp_lvgl_adapter: "0.3.0"
+  espressif/esp_codec_dev: "~1.4.0"
+  lvgl/lvgl: "9.5.0"
+  waveshare/esp_lcd_touch_cst9217: "1.0.4"
+  waveshare/pcf85063a: "1.1.1"
+  waveshare/qmi8658: "1.0.1"
+  idf:
+    version: "5.5.3"

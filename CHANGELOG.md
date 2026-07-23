@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.29.2 — 2026-07-23
+
+- Fixed energy-history unit normalization when Home Assistant's minimal
+  history response omits sensor attributes. Tesla charging values reported in
+  kW are now converted to watts before being plotted, so charging sessions are
+  visible at the correct scale across every Pilot client.
+
 ## 0.29.1 — 2026-07-23
 
 - Corrected the production Tesla power source to

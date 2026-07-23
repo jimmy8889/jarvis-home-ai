@@ -93,7 +93,16 @@ class DashboardServiceTests(unittest.IsolatedAsyncioTestCase):
             "sensor.home": [state("sensor.home", 5000, "W")],
             "sensor.battery": [state("sensor.battery", -3000, "W")],
             "sensor.solar": [state("sensor.solar", 8100, "W")],
-            "sensor.car_power": [state("sensor.car_power", 4540, "W")],
+            # Home Assistant's minimal history response omits attributes after
+            # the first state. The current entity unit must therefore supply
+            # the kW-to-W conversion for this series.
+            "sensor.car_power": [
+                {
+                    "entity_id": "sensor.car_power",
+                    "state": "4.54",
+                    "last_updated": "2026-07-22T04:00:00+00:00",
+                }
+            ],
             "sensor.office": [state("sensor.office", 21.6, "°C")],
         }
         integrations.home_assistant_weather.return_value = {

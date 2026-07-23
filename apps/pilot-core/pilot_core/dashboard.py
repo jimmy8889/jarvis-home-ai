@@ -95,6 +95,7 @@ class DashboardService:
             "tariff": self._tariff(state_by_id),
             "temperatures": self._temperatures(state_by_id, temperature_history_by_id),
             "history": self._history_projection(
+                state_by_id,
                 power_history_by_id,
                 history_started_at,
                 history_ended_at,
@@ -371,6 +372,7 @@ class DashboardService:
 
     def _history_projection(
         self,
+        states: dict[str, dict[str, Any]],
         history: dict[str, list[dict[str, Any]]],
         started_at: datetime,
         ended_at: datetime,
@@ -419,6 +421,7 @@ class DashboardService:
                     "points": self._history_points(
                         history.get(entity_id, []),
                         negative=negative,
+                        default_unit=self._state_unit(states, entity_id),
                     ),
                 }
                 for identifier, label, color, entity_id, negative in configured
@@ -451,12 +454,15 @@ class DashboardService:
         values: list[dict[str, Any]],
         *,
         negative: bool = False,
+        default_unit: str = "W",
     ) -> list[dict[str, Any]]:
         points: list[dict[str, Any]] = []
         for item in values:
             value = self._number(item.get("state"))
             attrs = item.get("attributes") or {}
-            unit = str(attrs.get("unit_of_measurement") or "W").casefold()
+            unit = str(
+                attrs.get("unit_of_measurement") or default_unit or "W"
+            ).casefold()
             if value is None or unit not in {"w", "watt", "watts", "kw"}:
                 continue
             if unit == "kw":
@@ -472,6 +478,14 @@ class DashboardService:
             points[round(index * (len(points) - 1) / 287)]
             for index in range(288)
         ]
+
+    @staticmethod
+    def _state_unit(
+        states: dict[str, dict[str, Any]],
+        entity_id: str,
+    ) -> str:
+        attrs = states.get(entity_id, {}).get("attributes") or {}
+        return str(attrs.get("unit_of_measurement") or "W")
 
     def _temperature_history_points(
         self, values: list[dict[str, Any]]

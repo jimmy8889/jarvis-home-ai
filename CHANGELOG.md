@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.29.1 — 2026-07-23
+
+- Corrected the production Tesla power source to
+  `sensor.tesla_charging_power`. Current vehicle power, charging state, energy
+  flow, and the negative magenta calendar-day history now share that
+  authoritative Home Assistant entity.
+
 ## 0.29.0 — 2026-07-23
 
 - Reworked shared energy history as a local calendar-day contract. Pilot Core

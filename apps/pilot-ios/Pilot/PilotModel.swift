@@ -101,6 +101,9 @@ final class PilotModel {
         )
         eventCursor = UserDefaults.standard.string(forKey: StorageKey.eventCursor)
         restoreDurableState()
+        phonePlayback.setRemoteCommandHandler { [weak self] action, position in
+            await self?.commandPhonePlayback(action, positionSeconds: position)
+        }
     }
 
     var isConfigured: Bool {
@@ -565,6 +568,25 @@ final class PilotModel {
                 try await api().send(mediaCommand)
                 _ = await refresh(silent: true)
             }
+            mediaError = nil
+        } catch {
+            mediaError = Self.friendlyMessage(for: error)
+        }
+    }
+
+    private func commandPhonePlayback(
+        _ action: String,
+        positionSeconds: Double? = nil
+    ) async {
+        activeMediaAction = action
+        defer { activeMediaAction = nil }
+        do {
+            try await api().sendToLocalPlayer(
+                MediaCommand(
+                    action: action,
+                    positionSeconds: positionSeconds
+                )
+            )
             mediaError = nil
         } catch {
             mediaError = Self.friendlyMessage(for: error)

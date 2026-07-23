@@ -1,7 +1,9 @@
 import AVFoundation
 import Foundation
+import MediaPlayer
 import Observation
 import SendspinKit
+import UIKit
 
 @MainActor
 @Observable
@@ -28,6 +30,8 @@ final class PhonePlaybackController {
     private(set) var title: String?
     private(set) var artist: String?
     private(set) var album: String?
+    private(set) var albumArtist: String?
+    private(set) var trackNumber: Int?
     private(set) var artworkURL: URL?
     private(set) var isPlaying = false
     private(set) var volume = 100
@@ -38,8 +42,17 @@ final class PhonePlaybackController {
     @ObservationIgnored private var client: SendspinClient?
     @ObservationIgnored private var eventsTask: Task<Void, Never>?
     @ObservationIgnored private var progressTask: Task<Void, Never>?
+    @ObservationIgnored private var artworkTask: Task<Void, Never>?
     @ObservationIgnored private var activeIdentity: String?
     @ObservationIgnored private var activeServerURL: URL?
+    @ObservationIgnored private var nowPlayingArtwork: MPMediaItemArtwork?
+    @ObservationIgnored private var nowPlayingArtworkURL: URL?
+    @ObservationIgnored private var remoteCommandTokens: [Any] = []
+    @ObservationIgnored private var mediaIntegrationConfigured = false
+    @ObservationIgnored private var supportedControllerCommands:
+        Set<ControllerCommandType> = []
+    @ObservationIgnored private var remoteCommandHandler:
+        (@MainActor @Sendable (String, Double?) async -> Void)?
 
     var hasMedia: Bool { title != nil || isPlaying }
     var isReady: Bool {
@@ -47,6 +60,12 @@ final class PhonePlaybackController {
         case .connected, .streaming: true
         default: false
         }
+    }
+
+    func setRemoteCommandHandler(
+        _ handler: @escaping @MainActor @Sendable (String, Double?) async -> Void
+    ) {
+        remoteCommandHandler = handler
     }
 
     @discardableResult
@@ -69,6 +88,7 @@ final class PhonePlaybackController {
         status = .connecting
 
         do {
+            configureSystemMediaIntegration()
             try configureAudioSession()
             let formats = [
                 try AudioFormatSpec(codec: .opus, channels: 2, sampleRate: 48_000, bitDepth: 16),
@@ -118,21 +138,32 @@ final class PhonePlaybackController {
     private func tearDown(clearPlayback: Bool) async {
         eventsTask?.cancel()
         progressTask?.cancel()
+        artworkTask?.cancel()
         eventsTask = nil
         progressTask = nil
+        artworkTask = nil
         if let client { await client.disconnect() }
         client = nil
         activeIdentity = nil
         activeServerURL = nil
         isPlaying = false
+        supportedControllerCommands = []
         if clearPlayback {
             title = nil
             artist = nil
             album = nil
+            albumArtist = nil
+            trackNumber = nil
             artworkURL = nil
+            nowPlayingArtwork = nil
+            nowPlayingArtworkURL = nil
             positionSeconds = 0
             durationSeconds = 0
+            clearSystemNowPlaying()
+        } else {
+            publishSystemNowPlaying()
         }
+        updateRemoteCommandAvailability()
     }
 
     private func observe(_ player: SendspinClient) {
@@ -145,21 +176,38 @@ final class PhonePlaybackController {
                 case .streamStarted, .streamFormatChanged:
                     isPlaying = true
                     status = .streaming
+                    publishSystemNowPlaying()
+                    updateRemoteCommandAvailability()
                 case .streamEnded:
                     isPlaying = false
                     status = .connected
+                    publishSystemNowPlaying()
+                    updateRemoteCommandAvailability()
+                case .streamCleared:
+                    positionSeconds = 0
+                    publishSystemNowPlaying()
                 case let .metadataReceived(metadata):
                     title = metadata.title
                     artist = metadata.artist
                     album = metadata.album
-                    artworkURL = metadata.artworkURL.flatMap(URL.init(string:))
+                    albumArtist = metadata.albumArtist
+                    trackNumber = metadata.track
+                    let nextArtworkURL = metadata.artworkURL.flatMap(URL.init(string:))
+                    artworkURL = nextArtworkURL
                     updateProgress(metadata.progress)
+                    refreshSystemArtwork(from: nextArtworkURL)
+                    publishSystemNowPlaying()
+                    updateRemoteCommandAvailability()
                 case let .groupUpdated(group):
                     isPlaying = group.playbackState == .playing
                     status = isPlaying ? .streaming : .connected
+                    publishSystemNowPlaying()
+                    updateRemoteCommandAvailability()
                 case let .controllerStateUpdated(controller):
                     volume = controller.volume
                     muted = controller.muted
+                    supportedControllerCommands = controller.supportedCommands
+                    updateRemoteCommandAvailability()
                 case let .staticDelayChanged(milliseconds):
                     UserDefaults.standard.set(
                         milliseconds,
@@ -171,6 +219,9 @@ final class PhonePlaybackController {
                     client = nil
                     activeIdentity = nil
                     activeServerURL = nil
+                    supportedControllerCommands = []
+                    clearSystemNowPlaying()
+                    updateRemoteCommandAvailability()
                 default:
                     break
                 }
@@ -204,6 +255,191 @@ final class PhonePlaybackController {
         let session = AVAudioSession.sharedInstance()
         try session.setCategory(.playback, mode: .default, policy: .longFormAudio)
         try session.setActive(true)
+    }
+
+    private func configureSystemMediaIntegration() {
+        guard !mediaIntegrationConfigured else { return }
+        mediaIntegrationConfigured = true
+        UIApplication.shared.beginReceivingRemoteControlEvents()
+
+        let commands = MPRemoteCommandCenter.shared()
+        remoteCommandTokens = [
+            commands.playCommand.addTarget { [weak self] _ in
+                Self.dispatchRemoteCommand("play", controller: self)
+            },
+            commands.pauseCommand.addTarget { [weak self] _ in
+                Self.dispatchRemoteCommand("pause", controller: self)
+            },
+            commands.togglePlayPauseCommand.addTarget { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    await remoteCommandHandler?(
+                        isPlaying ? "pause" : "play",
+                        nil
+                    )
+                }
+                return .success
+            },
+            commands.stopCommand.addTarget { [weak self] _ in
+                Self.dispatchRemoteCommand("stop", controller: self)
+            },
+            commands.nextTrackCommand.addTarget { [weak self] _ in
+                Self.dispatchRemoteCommand("next", controller: self)
+            },
+            commands.previousTrackCommand.addTarget { [weak self] _ in
+                Self.dispatchRemoteCommand("previous", controller: self)
+            },
+            commands.changePlaybackPositionCommand.addTarget { [weak self] event in
+                guard let event = event as? MPChangePlaybackPositionCommandEvent else {
+                    return .commandFailed
+                }
+                Task { @MainActor [weak self] in
+                    await self?.remoteCommandHandler?("seek", event.positionTime)
+                }
+                return .success
+            },
+        ]
+        commands.skipForwardCommand.isEnabled = false
+        commands.skipBackwardCommand.isEnabled = false
+        commands.changePlaybackRateCommand.isEnabled = false
+        commands.ratingCommand.isEnabled = false
+        commands.likeCommand.isEnabled = false
+        commands.dislikeCommand.isEnabled = false
+        commands.bookmarkCommand.isEnabled = false
+        updateRemoteCommandAvailability()
+    }
+
+    nonisolated private static func dispatchRemoteCommand(
+        _ action: String,
+        controller: PhonePlaybackController?
+    ) -> MPRemoteCommandHandlerStatus {
+        guard controller != nil else { return .commandFailed }
+        Task { @MainActor [weak controller] in
+            await controller?.remoteCommandHandler?(action, nil)
+        }
+        return .success
+    }
+
+    private func updateRemoteCommandAvailability() {
+        guard mediaIntegrationConfigured else { return }
+        let commands = MPRemoteCommandCenter.shared()
+        let active = hasMedia && client != nil
+        let permits: (ControllerCommandType) -> Bool = { [supportedControllerCommands] action in
+            supportedControllerCommands.isEmpty
+                || supportedControllerCommands.contains(action)
+        }
+        commands.playCommand.isEnabled = active && !isPlaying && permits(.play)
+        commands.pauseCommand.isEnabled = active && isPlaying && permits(.pause)
+        commands.togglePlayPauseCommand.isEnabled = active
+            && permits(isPlaying ? .pause : .play)
+        commands.stopCommand.isEnabled = active && permits(.stop)
+        commands.nextTrackCommand.isEnabled = active && permits(.next)
+        commands.previousTrackCommand.isEnabled = active && permits(.previous)
+        commands.changePlaybackPositionCommand.isEnabled = active
+            && durationSeconds > 0
+            && remoteCommandHandler != nil
+    }
+
+    private func publishSystemNowPlaying() {
+        guard mediaIntegrationConfigured, hasMedia, client != nil else { return }
+        let center = MPNowPlayingInfoCenter.default()
+        center.nowPlayingInfo = Self.makeNowPlayingInfo(
+            title: title,
+            artist: artist,
+            album: album,
+            albumArtist: albumArtist,
+            trackNumber: trackNumber,
+            durationSeconds: durationSeconds,
+            positionSeconds: positionSeconds,
+            isPlaying: isPlaying,
+            artwork: nowPlayingArtwork
+        )
+        center.playbackState = isPlaying ? .playing : .paused
+    }
+
+    private func clearSystemNowPlaying() {
+        guard mediaIntegrationConfigured else { return }
+        let center = MPNowPlayingInfoCenter.default()
+        center.nowPlayingInfo = nil
+        center.playbackState = .stopped
+    }
+
+    private func refreshSystemArtwork(from url: URL?) {
+        guard nowPlayingArtworkURL != url else { return }
+        artworkTask?.cancel()
+        artworkTask = nil
+        nowPlayingArtworkURL = url
+        nowPlayingArtwork = nil
+        guard let url else { return }
+
+        artworkTask = Task { [weak self] in
+            var request = URLRequest(url: url)
+            request.timeoutInterval = 12
+            request.cachePolicy = .returnCacheDataElseLoad
+            do {
+                let (data, response) = try await URLSession.shared.data(for: request)
+                guard
+                    !Task.isCancelled,
+                    data.count <= 12 * 1_024 * 1_024,
+                    let response = response as? HTTPURLResponse,
+                    (200..<300).contains(response.statusCode),
+                    let image = UIImage(data: data)
+                else { return }
+                guard let self, artworkURL == url else { return }
+                nowPlayingArtwork = MPMediaItemArtwork(
+                    boundsSize: image.size
+                ) { _ in image }
+                publishSystemNowPlaying()
+            } catch {
+                // Metadata remains useful without artwork; a later track update
+                // retries with the next URL without disturbing audio playback.
+            }
+        }
+    }
+
+    static func makeNowPlayingInfo(
+        title: String?,
+        artist: String?,
+        album: String?,
+        albumArtist: String?,
+        trackNumber: Int?,
+        durationSeconds: Double,
+        positionSeconds: Double,
+        isPlaying: Bool,
+        artwork: MPMediaItemArtwork? = nil
+    ) -> [String: Any] {
+        let duration = max(0, durationSeconds)
+        let elapsed = duration > 0
+            ? min(max(0, positionSeconds), duration)
+            : max(0, positionSeconds)
+        var info: [String: Any] = [
+            MPMediaItemPropertyTitle: title?.nilIfBlank ?? "Pilot Audio",
+            MPMediaItemPropertyMediaType: MPMediaType.music.rawValue,
+            MPNowPlayingInfoPropertyElapsedPlaybackTime: elapsed,
+            MPNowPlayingInfoPropertyPlaybackRate: isPlaying ? 1.0 : 0.0,
+            MPNowPlayingInfoPropertyDefaultPlaybackRate: 1.0,
+            MPNowPlayingInfoPropertyServiceIdentifier: "Pilot",
+        ]
+        if let artist = artist?.nilIfBlank {
+            info[MPMediaItemPropertyArtist] = artist
+        }
+        if let album = album?.nilIfBlank {
+            info[MPMediaItemPropertyAlbumTitle] = album
+        }
+        if let albumArtist = albumArtist?.nilIfBlank {
+            info[MPMediaItemPropertyAlbumArtist] = albumArtist
+        }
+        if let trackNumber, trackNumber > 0 {
+            info[MPMediaItemPropertyAlbumTrackNumber] = trackNumber
+        }
+        if duration > 0 {
+            info[MPMediaItemPropertyPlaybackDuration] = duration
+            info[MPNowPlayingInfoPropertyIsLiveStream] = false
+        }
+        if let artwork {
+            info[MPMediaItemPropertyArtwork] = artwork
+        }
+        return info
     }
 
     private func waitForRegistration() async -> Bool {
@@ -253,5 +489,12 @@ final class PhonePlaybackController {
         var errorDescription: String? {
             "Music Assistant did not register this iPhone. Check the Sendspin endpoint."
         }
+    }
+}
+
+private extension String {
+    var nilIfBlank: String? {
+        let value = trimmingCharacters(in: .whitespacesAndNewlines)
+        return value.isEmpty ? nil : value
     }
 }

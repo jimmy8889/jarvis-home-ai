@@ -110,6 +110,14 @@ receives the Music Assistant token or chooses an arbitrary queue. The default en
 address are migrated automatically. Connection failures remain visible in the
 Music screen with an explicit retry action.
 
+When native phone audio has media, Pilot publishes title, artist, album,
+artwork, duration, elapsed time and playback rate to iOS Now Playing. The lock
+screen and Control Center expose play/pause, stop, previous, next and timeline
+seeking. Those controls do not hold a Music Assistant credential or directly
+control another room: they return through the paired device's authenticated
+`/media/local` boundary. Pilot clears the system Now Playing session when the
+Sendspin client disconnects.
+
 Pilot iOS now includes the first device-scoped meeting recorder and review
 surface. It records AAC only after an explicit tap, supports iOS background
 audio, uploads directly to Pilot Core, queues local processing, and shows

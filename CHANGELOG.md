@@ -10,6 +10,10 @@
   single custom navigation bar is now the only bottom navigation surface.
 - Integrated the generated Pilot mark into the navigation title and added a
   reproducible, opaque 1024-pixel branded application icon.
+- Added native iOS lock-screen and Control Center integration for `This
+  iPhone`: title, artist, album, artwork, duration and live progress now publish
+  through `MPNowPlayingInfoCenter`, while play, pause, stop, next, previous and
+  seek commands return through Pilot Core's authenticated local-player API.
 
 ## 0.28.0 — 2026-07-23
 

@@ -1,4 +1,5 @@
 import XCTest
+import MediaPlayer
 import UIKit
 @testable import Pilot
 
@@ -91,6 +92,56 @@ final class PilotTests: XCTestCase {
         ] {
             XCTAssertNotNil(UIImage(named: assetName), "Missing bundled asset: \(assetName)")
         }
+    }
+
+    @MainActor
+    func testPhoneNowPlayingInfoIncludesMetadataProgressAndTransportState() {
+        let info = PhonePlaybackController.makeNowPlayingInfo(
+            title: "Teardrop",
+            artist: "Massive Attack",
+            album: "Mezzanine",
+            albumArtist: "Massive Attack",
+            trackNumber: 1,
+            durationSeconds: 329,
+            positionSeconds: 42.5,
+            isPlaying: true
+        )
+
+        XCTAssertEqual(info[MPMediaItemPropertyTitle] as? String, "Teardrop")
+        XCTAssertEqual(info[MPMediaItemPropertyArtist] as? String, "Massive Attack")
+        XCTAssertEqual(info[MPMediaItemPropertyAlbumTitle] as? String, "Mezzanine")
+        XCTAssertEqual(info[MPMediaItemPropertyAlbumTrackNumber] as? Int, 1)
+        XCTAssertEqual(info[MPMediaItemPropertyPlaybackDuration] as? Double, 329)
+        XCTAssertEqual(
+            info[MPNowPlayingInfoPropertyElapsedPlaybackTime] as? Double,
+            42.5
+        )
+        XCTAssertEqual(info[MPNowPlayingInfoPropertyPlaybackRate] as? Double, 1)
+        XCTAssertEqual(
+            info[MPNowPlayingInfoPropertyServiceIdentifier] as? String,
+            "Pilot"
+        )
+    }
+
+    @MainActor
+    func testPhoneNowPlayingInfoBoundsProgressAndUsesFallbackTitle() {
+        let info = PhonePlaybackController.makeNowPlayingInfo(
+            title: "  ",
+            artist: nil,
+            album: nil,
+            albumArtist: nil,
+            trackNumber: nil,
+            durationSeconds: 120,
+            positionSeconds: 999,
+            isPlaying: false
+        )
+
+        XCTAssertEqual(info[MPMediaItemPropertyTitle] as? String, "Pilot Audio")
+        XCTAssertEqual(
+            info[MPNowPlayingInfoPropertyElapsedPlaybackTime] as? Double,
+            120
+        )
+        XCTAssertEqual(info[MPNowPlayingInfoPropertyPlaybackRate] as? Double, 0)
     }
 
     func testPortableEnergyContractMapsPartialSnapshot() throws {

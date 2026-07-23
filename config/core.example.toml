@@ -32,6 +32,7 @@ sun_entity_id = ""
 outdoor_temperature_entity_id = ""
 indoor_temperature_entity_id = ""
 temperature_history_hours = 24
+home_timezone = "Australia/Brisbane"
 # Optional bounded energy summary for authenticated display devices.
 energy_solar_power_entity_id = ""
 energy_grid_power_entity_id = ""

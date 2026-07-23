@@ -582,7 +582,9 @@ class Integrations:
         self,
         entity_ids: list[str] | tuple[str, ...],
         *,
-        hours: int,
+        hours: int | None = None,
+        started_at: datetime | None = None,
+        ended_at: datetime | None = None,
     ) -> dict[str, list[dict[str, Any]]]:
         """Read history for an explicit sensor set in one bounded request."""
 
@@ -591,8 +593,21 @@ class Integrations:
             raise IntegrationRequestFailed(
                 "Home Assistant history request must contain between 1 and 8 entities"
             )
-        if not 1 <= hours <= 168:
-            raise IntegrationRequestFailed("Home Assistant history period is invalid")
+        if started_at is None:
+            if hours is None or not 1 <= hours <= 168:
+                raise IntegrationRequestFailed("Home Assistant history period is invalid")
+            started_at = datetime.now(UTC) - timedelta(hours=hours)
+        elif hours is not None:
+            raise IntegrationRequestFailed(
+                "Home Assistant history period must use hours or explicit bounds"
+            )
+        if started_at.tzinfo is None:
+            raise IntegrationRequestFailed("Home Assistant history start must include a timezone")
+        if ended_at is not None:
+            if ended_at.tzinfo is None or ended_at <= started_at:
+                raise IntegrationRequestFailed("Home Assistant history end is invalid")
+            if ended_at - started_at > timedelta(hours=168):
+                raise IntegrationRequestFailed("Home Assistant history period is invalid")
         if any(
             not _ENTITY_ID.fullmatch(entity_id)
             or not entity_id.startswith("sensor.")
@@ -602,8 +617,16 @@ class Integrations:
         token = read_secret(self.settings.home_assistant_token_env)
         if not token:
             raise IntegrationUnavailable("Home Assistant token is not configured")
-        started_at = datetime.now(UTC) - timedelta(hours=hours)
-        period = started_at.isoformat().replace("+00:00", "Z")
+        period = started_at.astimezone(UTC).isoformat().replace("+00:00", "Z")
+        params = {
+            "filter_entity_id": ",".join(unique),
+            "minimal_response": "",
+            "no_attributes": "",
+        }
+        if ended_at is not None:
+            params["end_time"] = (
+                ended_at.astimezone(UTC).isoformat().replace("+00:00", "Z")
+            )
         try:
             async with httpx.AsyncClient(
                 timeout=30, transport=self.transport, follow_redirects=False
@@ -611,11 +634,7 @@ class Integrations:
                 response = await client.get(
                     f"{self.settings.home_assistant_url}/api/history/period/{period}",
                     headers={"Authorization": f"Bearer {token}"},
-                    params={
-                        "filter_entity_id": ",".join(unique),
-                        "minimal_response": "",
-                        "no_attributes": "",
-                    },
+                    params=params,
                 )
                 response.raise_for_status()
                 raw = response.json()

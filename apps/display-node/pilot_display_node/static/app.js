@@ -229,12 +229,20 @@ function energyKWh(value) {
 function renderLineChart(svg, series, options = {}) {
   if (!svg) return;
   svg.replaceChildren();
+  const svgNamespace = "http://www.w3.org/2000/svg";
   const width = options.width || 960;
   const height = options.height || 380;
+  const left = 48;
+  const right = width - 18;
+  const top = 24;
+  const bottom = height - (options.showTimeAxis ? 42 : 30);
+  const startedAt = Date.parse(options.startedAt || "");
+  const endedAt = Date.parse(options.endedAt || "");
+  const hasTimeDomain = Number.isFinite(startedAt) && Number.isFinite(endedAt) && endedAt > startedAt;
   const all = series.flatMap((item) => item.points || []).map((point) => point.value)
     .filter((value) => typeof value === "number");
   if (!all.length) {
-    const message = document.createElementNS("http://www.w3.org/2000/svg", "text");
+    const message = document.createElementNS(svgNamespace, "text");
     message.setAttribute("x", String(width / 2));
     message.setAttribute("y", String(height / 2));
     message.setAttribute("text-anchor", "middle");
@@ -246,26 +254,81 @@ function renderLineChart(svg, series, options = {}) {
   const min = options.zeroFloor ? Math.min(0, ...all) : Math.min(...all);
   const max = Math.max(...all);
   const span = Math.max(1, max - min);
+  const yFor = (value) => top + ((bottom - top) * (1 - ((value - min) / span)));
+  const xFor = (point, index, pointCount) => {
+    const at = Date.parse(point.at || "");
+    if (hasTimeDomain && Number.isFinite(at)) {
+      const fraction = Math.max(0, Math.min(1, (at - startedAt) / (endedAt - startedAt)));
+      return left + ((right - left) * fraction);
+    }
+    return left + ((right - left) * index / Math.max(1, pointCount - 1));
+  };
+  const definitions = document.createElementNS(svgNamespace, "defs");
+  svg.append(definitions);
   for (let line = 0; line <= 4; line += 1) {
-    const y = 24 + ((height - 54) * line / 4);
-    const grid = document.createElementNS("http://www.w3.org/2000/svg", "line");
-    grid.setAttribute("x1", "48"); grid.setAttribute("x2", String(width - 18));
+    const y = top + ((bottom - top) * line / 4);
+    const grid = document.createElementNS(svgNamespace, "line");
+    grid.setAttribute("x1", String(left)); grid.setAttribute("x2", String(right));
     grid.setAttribute("y1", String(y)); grid.setAttribute("y2", String(y));
     grid.setAttribute("stroke", "rgba(255,255,255,.09)"); svg.append(grid);
   }
-  for (const item of series) {
+  const zeroY = yFor(0);
+  const zeroLine = document.createElementNS(svgNamespace, "line");
+  zeroLine.setAttribute("x1", String(left)); zeroLine.setAttribute("x2", String(right));
+  zeroLine.setAttribute("y1", String(zeroY)); zeroLine.setAttribute("y2", String(zeroY));
+  zeroLine.setAttribute("stroke", "rgba(255,255,255,.22)");
+  zeroLine.setAttribute("stroke-width", "1.5");
+  svg.append(zeroLine);
+  series.forEach((item, seriesIndex) => {
     const points = item.points || [];
-    if (!points.length) continue;
-    const path = document.createElementNS("http://www.w3.org/2000/svg", "polyline");
+    if (!points.length) return;
+    const coordinates = points.map((point, index) => ({
+      x: xFor(point, index, points.length),
+      y: yFor(point.value),
+    }));
+    const gradientId = `pilot-chart-gradient-${seriesIndex}`;
+    const gradient = document.createElementNS(svgNamespace, "linearGradient");
+    gradient.setAttribute("id", gradientId);
+    gradient.setAttribute("x1", "0"); gradient.setAttribute("x2", "0");
+    gradient.setAttribute("y1", "0"); gradient.setAttribute("y2", "1");
+    for (const [offset, opacity] of [["0%", ".28"], ["58%", ".12"], ["100%", ".015"]]) {
+      const stop = document.createElementNS(svgNamespace, "stop");
+      stop.setAttribute("offset", offset);
+      stop.setAttribute("stop-color", item.color || "#55b6ff");
+      stop.setAttribute("stop-opacity", opacity);
+      gradient.append(stop);
+    }
+    definitions.append(gradient);
+    const area = document.createElementNS(svgNamespace, "path");
+    area.setAttribute(
+      "d",
+      `M ${coordinates[0].x.toFixed(1)} ${zeroY.toFixed(1)} ` +
+      coordinates.map((point) => `L ${point.x.toFixed(1)} ${point.y.toFixed(1)}`).join(" ") +
+      ` L ${coordinates.at(-1).x.toFixed(1)} ${zeroY.toFixed(1)} Z`,
+    );
+    area.setAttribute("fill", `url(#${gradientId})`);
+    svg.append(area);
+    const path = document.createElementNS(svgNamespace, "polyline");
     path.setAttribute("fill", "none"); path.setAttribute("stroke", item.color || "#55b6ff");
     path.setAttribute("stroke-width", options.strokeWidth || "4");
     path.setAttribute("stroke-linecap", "round"); path.setAttribute("stroke-linejoin", "round");
-    path.setAttribute("points", points.map((point, index) => {
-      const x = 48 + ((width - 66) * index / Math.max(1, points.length - 1));
-      const y = 24 + ((height - 54) * (1 - ((point.value - min) / span)));
-      return `${x.toFixed(1)},${y.toFixed(1)}`;
-    }).join(" "));
+    path.setAttribute("points", coordinates.map((point) => `${point.x.toFixed(1)},${point.y.toFixed(1)}`).join(" "));
     svg.append(path);
+  });
+  if (options.showTimeAxis && hasTimeDomain) {
+    const formatTime = new Intl.DateTimeFormat([], { hour: "numeric" });
+    for (let tick = 0; tick <= 4; tick += 1) {
+      const fraction = tick / 4;
+      const x = left + ((right - left) * fraction);
+      const label = document.createElementNS(svgNamespace, "text");
+      label.setAttribute("x", String(x));
+      label.setAttribute("y", String(height - 8));
+      label.setAttribute("text-anchor", tick === 0 ? "start" : tick === 4 ? "end" : "middle");
+      label.setAttribute("fill", "#8190a4");
+      label.setAttribute("font-size", "13");
+      label.textContent = formatTime.format(new Date(startedAt + ((endedAt - startedAt) * fraction)));
+      svg.append(label);
+    }
   }
 }
 
@@ -320,7 +383,12 @@ function renderDashboard(value = {}) {
   }
 
   const history = value.history?.series || [];
-  renderLineChart(elements.energy_chart, history, { zeroFloor: true });
+  renderLineChart(elements.energy_chart, history, {
+    zeroFloor: true,
+    startedAt: value.history?.started_at,
+    endedAt: value.history?.ended_at,
+    showTimeAxis: true,
+  });
   elements.chart_legend.replaceChildren(...history.map((item) => {
     const legend = textNode("span", "", item.label);
     legend.style.setProperty("--legend-color", item.color);
@@ -333,7 +401,10 @@ function renderDashboard(value = {}) {
     ? `${number.format(tariff.feed_in_cents_per_kwh)}¢/kWh` : "—";
   renderLineChart(elements.tariff_chart, [{
     color: "#61e6a8",
-    points: (tariff.feed_in_forecast || []).map((point) => ({ value: point.cents_per_kwh })),
+    points: (tariff.feed_in_forecast || []).map((point) => ({
+      at: point.at,
+      value: point.cents_per_kwh,
+    })),
   }], { width: 420, height: 90, strokeWidth: "3" });
 
   document.querySelectorAll("[data-charge-mode]").forEach((button) => {

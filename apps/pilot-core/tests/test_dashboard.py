@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from datetime import datetime
 from unittest.mock import AsyncMock
 
 from pilot_core.config import IntegrationSettings
@@ -92,6 +93,7 @@ class DashboardServiceTests(unittest.IsolatedAsyncioTestCase):
             "sensor.home": [state("sensor.home", 5000, "W")],
             "sensor.battery": [state("sensor.battery", -3000, "W")],
             "sensor.solar": [state("sensor.solar", 8100, "W")],
+            "sensor.car_power": [state("sensor.car_power", 4540, "W")],
             "sensor.office": [state("sensor.office", 21.6, "°C")],
         }
         integrations.home_assistant_weather.return_value = {
@@ -135,14 +137,33 @@ class DashboardServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(result["temperatures"]), 5)
         self.assertEqual(result["temperatures"][0]["history"][0]["value"], 21.6)
         self.assertEqual([item["id"] for item in result["history"]["series"]], [
-            "home_load", "battery", "solar"
+            "home_load", "battery", "solar", "tesla"
         ])
+        self.assertEqual(result["history"]["window"], "calendar_day")
+        self.assertEqual(
+            result["history"]["series"][0]["points"][0]["value"],
+            -5000,
+        )
+        self.assertEqual(
+            result["history"]["series"][3]["points"][0]["value"],
+            -4540,
+        )
+        started_at = datetime.fromisoformat(result["history"]["started_at"])
+        ended_at = datetime.fromisoformat(result["history"]["ended_at"])
+        self.assertEqual((started_at.hour, started_at.minute), (0, 0))
+        self.assertEqual((ended_at - started_at).total_seconds(), 86_400)
         self.assertEqual(result["controls"]["tesla_charging_mode"]["options"], ["Grid", "Solar"])
         self.assertNotIn("attributes", str(result))
 
-        history_ids = integrations.home_assistant_history.await_args.args[0]
-        self.assertEqual(len(history_ids), 8)
-        self.assertIn("sensor.office", history_ids)
+        energy_call, temperature_call = integrations.home_assistant_history.await_args_list[:2]
+        self.assertEqual(
+            energy_call.args[0],
+            ("sensor.home", "sensor.battery", "sensor.solar", "sensor.car_power"),
+        )
+        self.assertIn("started_at", energy_call.kwargs)
+        self.assertIn("ended_at", energy_call.kwargs)
+        self.assertEqual(len(temperature_call.args[0]), 5)
+        self.assertEqual(temperature_call.kwargs, {"hours": 24})
 
         cached = await service.snapshot()
         self.assertEqual(cached["generated_at"], result["generated_at"])
@@ -189,6 +210,23 @@ class DashboardServiceTests(unittest.IsolatedAsyncioTestCase):
                 "next_setting": None,
             },
         )
+
+    def test_energy_history_keeps_higher_resolution_and_negative_loads(self) -> None:
+        service = DashboardService(IntegrationSettings(), AsyncMock())
+        values = [
+            {
+                "state": str(index),
+                "last_updated": f"2026-07-22T00:{index % 60:02d}:00+00:00",
+                "attributes": {"unit_of_measurement": "W"},
+            }
+            for index in range(600)
+        ]
+
+        points = service._history_points(values, negative=True)
+
+        self.assertEqual(len(points), 288)
+        self.assertEqual(points[-1]["value"], -599)
+        self.assertTrue(all(point["value"] <= 0 for point in points))
 
 
 if __name__ == "__main__":

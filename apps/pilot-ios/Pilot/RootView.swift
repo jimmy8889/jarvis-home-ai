@@ -1155,6 +1155,17 @@ private struct EnergyHistoryPage: View {
     let snapshot: DashboardSnapshot
     @State private var selectedDate: Date?
 
+    private var chartDomain: ClosedRange<Date> {
+        let dates = snapshot.history.series.flatMap(\.points).map(\.date)
+        let start = snapshot.history.startedAt.flatMap(PilotDateParser.parse)
+            ?? dates.min()
+            ?? Date()
+        let end = snapshot.history.endedAt.flatMap(PilotDateParser.parse)
+            ?? dates.max()
+            ?? start.addingTimeInterval(86_400)
+        return start...max(end, start.addingTimeInterval(60))
+    }
+
     private var inspectionDate: Date? {
         selectedDate ?? snapshot.history.series.flatMap(\.points).map(\.date).max()
     }
@@ -1162,7 +1173,9 @@ private struct EnergyHistoryPage: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Text("Last \(snapshot.history.periodHours) hours")
+                Text(snapshot.history.window == "calendar_day"
+                     ? "Today · midnight to midnight"
+                     : "Last \(snapshot.history.periodHours) hours")
                     .font(.headline)
                 Spacer()
                 if let inspectionDate {
@@ -1177,15 +1190,32 @@ private struct EnergyHistoryPage: View {
             } else {
                 Chart {
                     ForEach(snapshot.history.series) { series in
-                    ForEach(series.points) { point in
-                        LineMark(
-                            x: .value("Time", point.date),
-                            y: .value("Power", point.value / 1_000),
-                            series: .value("Series", series.label)
-                        )
-                        .foregroundStyle(Self.color(series.color))
-                        .interpolationMethod(.catmullRom)
-                    }
+                        ForEach(series.points) { point in
+                            AreaMark(
+                                x: .value("Time", point.date),
+                                yStart: .value("Zero", 0),
+                                yEnd: .value("Power", point.value / 1_000),
+                                series: .value("Fill", series.label)
+                            )
+                            .foregroundStyle(
+                                LinearGradient(
+                                    colors: [
+                                        Self.color(series.color).opacity(0.28),
+                                        Self.color(series.color).opacity(0.015),
+                                    ],
+                                    startPoint: series.isLoad ? .bottom : .top,
+                                    endPoint: series.isLoad ? .top : .bottom
+                                )
+                            )
+                            .interpolationMethod(.monotone)
+                            LineMark(
+                                x: .value("Time", point.date),
+                                y: .value("Power", point.value / 1_000),
+                                series: .value("Series", series.label)
+                            )
+                            .foregroundStyle(Self.color(series.color))
+                            .interpolationMethod(.monotone)
+                        }
                     }
                     if let inspectionDate {
                         RuleMark(x: .value("Selected time", inspectionDate))
@@ -1203,6 +1233,7 @@ private struct EnergyHistoryPage: View {
                         }
                     }
                 }
+                .chartXScale(domain: chartDomain)
                 .chartYAxisLabel("kW")
                 .chartXAxis {
                     AxisMarks(values: .stride(by: .hour, count: 4)) { value in
@@ -1235,6 +1266,8 @@ private struct EnergyHistoryPage: View {
                 }
                 Text("Drag across the chart for an exact reading.")
                     .font(.caption2).foregroundStyle(.secondary)
+                Text("Home load and Tesla charging are plotted below zero.")
+                    .font(.caption2).foregroundStyle(.secondary)
             }
         }
     }
@@ -1254,6 +1287,10 @@ private struct EnergyHistoryPage: View {
                      green: Double((value >> 8) & 0xff) / 255,
                      blue: Double(value & 0xff) / 255)
     }
+}
+
+private extension DashboardHistorySeries {
+    var isLoad: Bool { id == "home_load" || id == "tesla" }
 }
 
 private struct DailyEnergyPage: View {

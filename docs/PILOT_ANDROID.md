@@ -21,8 +21,11 @@ Music Assistant client.
   including 16 kHz mono capture, structured cards/sources, response audio and
   listening/processing/speaking states.
 - Watt-scaled directional solar, grid, battery, Tesla, home and server-rack
-  energy flow; a 100 W grid deadband; 24-hour power history; daily totals;
-  Amber prices; weather; and five room temperatures.
+  energy flow; a 100 W grid deadband; high-resolution calendar-day power
+  history from midnight to midnight; daily totals; Amber prices; weather; and
+  five room temperatures. Solar and battery remain signed naturally, while
+  home load is red below zero and Tesla charging is magenta below zero. Every
+  power series has a restrained gradient fill around the zero line.
 - Night-friendly palette, optional keep-awake behavior and a persisted 5–100%
   awake-brightness control. After the configured 1–60 minute idle interval
   (five minutes by default), the window dims to 3%; the first touch restores

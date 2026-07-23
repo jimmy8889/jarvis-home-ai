@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 import tomllib
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 
 @dataclass(frozen=True)
@@ -40,6 +41,7 @@ class IntegrationSettings:
     outdoor_temperature_entity_id: str = ""
     indoor_temperature_entity_id: str = ""
     temperature_history_hours: int = 24
+    home_timezone: str = "Australia/Brisbane"
     energy_solar_power_entity_id: str = ""
     energy_grid_power_entity_id: str = ""
     energy_battery_power_entity_id: str = ""
@@ -367,6 +369,9 @@ def load_settings(path: str | Path) -> Settings:
         temperature_history_hours=int(
             integration_values.get("temperature_history_hours", 24)
         ),
+        home_timezone=str(
+            integration_values.get("home_timezone", "Australia/Brisbane")
+        ).strip(),
         energy_solar_power_entity_id=str(
             integration_values.get("energy_solar_power_entity_id", "")
         ).strip(),
@@ -577,6 +582,10 @@ def load_settings(path: str | Path) -> Settings:
         )
     if not 1 <= integrations.energy_history_hours <= 168:
         raise ValueError("integrations.energy_history_hours must be between 1 and 168")
+    try:
+        ZoneInfo(integrations.home_timezone)
+    except (ZoneInfoNotFoundError, ValueError) as error:
+        raise ValueError("integrations.home_timezone must be a valid IANA timezone") from error
     if (
         integrations.energy_vehicle_connected_entity_id
         and not integrations.energy_vehicle_connected_entity_id.startswith("binary_sensor.")

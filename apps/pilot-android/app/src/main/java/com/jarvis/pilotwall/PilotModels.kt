@@ -137,6 +137,9 @@ data class DashboardSnapshot(
     val history: List<DashboardSeries>, val weather: DashboardWeather,
     val tariff: DashboardTariff, val controls: DashboardControls,
     val sceneIsDay: Boolean? = null,
+    val historyStartedAt: Instant? = null,
+    val historyEndedAt: Instant? = null,
+    val historyWindow: String? = null,
 )
 
 data class SurfaceSnapshot(
@@ -466,6 +469,7 @@ internal object PilotJson {
         val weather = root.optJSONObject("weather") ?: JSONObject()
         val controls = root.optJSONObject("controls") ?: JSONObject()
         val scene = root.optJSONObject("scene") ?: JSONObject()
+        val history = root.optJSONObject("history") ?: JSONObject()
         val chargingMode = controls.optJSONObject("tesla_charging_mode") ?: JSONObject()
         return DashboardSnapshot(
             status = root.optString("status", "partial"),
@@ -497,7 +501,7 @@ internal object PilotJson {
                     temperatureC = it.optFiniteDouble("temperature_c"),
                 )
             },
-            history = root.optJSONObject("history")?.optJSONArray("series").objects().map { series ->
+            history = history.optJSONArray("series").objects().map { series ->
                 DashboardSeries(
                     id = series.optString("id"),
                     label = series.optString("label"),
@@ -506,7 +510,7 @@ internal object PilotJson {
                         point.optFiniteDouble("value")?.let { DashboardPoint(point.optInstant("at"), it) }
                     },
                 )
-            }.orEmpty(),
+            },
             weather = DashboardWeather(
                 condition = weather.optNullableString("condition"),
                 temperatureC = weather.optFiniteDouble("temperature_c"),
@@ -536,6 +540,9 @@ internal object PilotJson {
                     ?.optBoolean("available", false) == true,
             ),
             sceneIsDay = scene.optNullableBoolean("is_day"),
+            historyStartedAt = history.optInstant("started_at"),
+            historyEndedAt = history.optInstant("ended_at"),
+            historyWindow = history.optNullableString("window"),
         )
     }
 

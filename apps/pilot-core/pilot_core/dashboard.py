@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import asyncio
 from copy import deepcopy
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 import math
 from time import monotonic
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from .config import IntegrationSettings
 from .integrations import IntegrationRequestFailed, IntegrationUnavailable, Integrations
@@ -54,6 +55,7 @@ class DashboardService:
                 self.settings.energy_home_load_entity_id,
                 self.settings.energy_battery_power_entity_id,
                 self.settings.energy_solar_power_entity_id,
+                self.settings.energy_vehicle_power_entity_id,
             )
             if entity_id
         )
@@ -70,14 +72,16 @@ class DashboardService:
                 if entity_id
             )
         )
-        history_ids = tuple(dict.fromkeys((*power_history_ids, *temperature_history_ids)))
-        states_result, history_result, weather_result = await asyncio.gather(
+        history_started_at, history_ended_at = self._energy_calendar_window()
+        states_result, power_history_result, temperature_history_result, weather_result = await asyncio.gather(
             self._states(entity_ids),
-            self._history(history_ids),
+            self._energy_history(power_history_ids, history_started_at),
+            self._temperature_history(temperature_history_ids),
             self._weather(),
         )
         state_by_id, state_error = states_result
-        history_by_id, history_error = history_result
+        power_history_by_id, power_history_error = power_history_result
+        temperature_history_by_id, temperature_history_error = temperature_history_result
         weather, weather_error = weather_result
         missing = [entity_id for entity_id in entity_ids if entity_id not in state_by_id]
         return {
@@ -89,14 +93,19 @@ class DashboardService:
             "daily": self._daily(state_by_id),
             "vehicle": self._vehicle(state_by_id),
             "tariff": self._tariff(state_by_id),
-            "temperatures": self._temperatures(state_by_id, history_by_id),
-            "history": self._history_projection(history_by_id),
+            "temperatures": self._temperatures(state_by_id, temperature_history_by_id),
+            "history": self._history_projection(
+                power_history_by_id,
+                history_started_at,
+                history_ended_at,
+            ),
             "weather": weather,
             "controls": self._controls(state_by_id),
             "diagnostics": {
                 "missing_entities": missing,
                 "state_error": state_error,
-                "history_error": history_error,
+                "history_error": power_history_error,
+                "temperature_history_error": temperature_history_error,
                 "weather_error": weather_error,
             },
         }
@@ -138,18 +147,39 @@ class DashboardService:
         except (IntegrationUnavailable, IntegrationRequestFailed) as error:
             return {}, str(error)
 
-    async def _history(
-        self, entity_ids: tuple[str, ...]
+    async def _energy_history(
+        self,
+        entity_ids: tuple[str, ...],
+        started_at: datetime,
     ) -> tuple[dict[str, list[dict[str, Any]]], str | None]:
         if not entity_ids:
-            return {}, "dashboard history entities are not configured"
+            return {}, "dashboard energy history entities are not configured"
         try:
             return await self.integrations.home_assistant_history(
                 entity_ids,
-                hours=self.settings.energy_history_hours,
+                started_at=started_at,
+                ended_at=datetime.now(UTC),
             ), None
         except (IntegrationUnavailable, IntegrationRequestFailed) as error:
             return {}, str(error)
+
+    async def _temperature_history(
+        self, entity_ids: tuple[str, ...]
+    ) -> tuple[dict[str, list[dict[str, Any]]], str | None]:
+        if not entity_ids:
+            return {}, "dashboard temperature history entities are not configured"
+        try:
+            return await self.integrations.home_assistant_history(
+                entity_ids,
+                hours=self.settings.temperature_history_hours,
+            ), None
+        except (IntegrationUnavailable, IntegrationRequestFailed) as error:
+            return {}, str(error)
+
+    def _energy_calendar_window(self) -> tuple[datetime, datetime]:
+        local_now = datetime.now(ZoneInfo(self.settings.home_timezone))
+        started_at = local_now.replace(hour=0, minute=0, second=0, microsecond=0)
+        return started_at, started_at + timedelta(days=1)
 
     async def _weather(self) -> tuple[dict[str, Any], str | None]:
         try:
@@ -340,24 +370,58 @@ class DashboardService:
         ]
 
     def _history_projection(
-        self, history: dict[str, list[dict[str, Any]]]
+        self,
+        history: dict[str, list[dict[str, Any]]],
+        started_at: datetime,
+        ended_at: datetime,
     ) -> dict[str, Any]:
         configured = (
-            ("home_load", "Home consumption", "#61E6A8", self.settings.energy_home_load_entity_id),
-            ("battery", "Battery power", "#55B6FF", self.settings.energy_battery_power_entity_id),
-            ("solar", "Solar power", "#FFC247", self.settings.energy_solar_power_entity_id),
+            (
+                "home_load",
+                "Home load",
+                "#FF5D6C",
+                self.settings.energy_home_load_entity_id,
+                True,
+            ),
+            (
+                "battery",
+                "Battery power",
+                "#55B6FF",
+                self.settings.energy_battery_power_entity_id,
+                False,
+            ),
+            (
+                "solar",
+                "Solar power",
+                "#FFC247",
+                self.settings.energy_solar_power_entity_id,
+                False,
+            ),
+            (
+                "tesla",
+                "Tesla charging",
+                "#D970FF",
+                self.settings.energy_vehicle_power_entity_id,
+                True,
+            ),
         )
         return {
-            "period_hours": self.settings.energy_history_hours,
+            "period_hours": 24,
+            "window": "calendar_day",
+            "started_at": started_at.isoformat(),
+            "ended_at": ended_at.isoformat(),
             "series": [
                 {
                     "id": identifier,
                     "label": label,
                     "color": color,
                     "unit": "W",
-                    "points": self._history_points(history.get(entity_id, [])),
+                    "points": self._history_points(
+                        history.get(entity_id, []),
+                        negative=negative,
+                    ),
                 }
-                for identifier, label, color, entity_id in configured
+                for identifier, label, color, entity_id, negative in configured
                 if entity_id
             ],
         }
@@ -382,7 +446,12 @@ class DashboardService:
             },
         }
 
-    def _history_points(self, values: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    def _history_points(
+        self,
+        values: list[dict[str, Any]],
+        *,
+        negative: bool = False,
+    ) -> list[dict[str, Any]]:
         points: list[dict[str, Any]] = []
         for item in values:
             value = self._number(item.get("state"))
@@ -392,13 +461,17 @@ class DashboardService:
                 continue
             if unit == "kw":
                 value *= 1000
+            if negative:
+                value = -abs(value)
             at = self._text(item.get("last_updated") or item.get("last_changed"))
             if at:
                 points.append({"at": at, "value": round(value, 1)})
-        if len(points) <= 96:
+        if len(points) <= 288:
             return points
-        stride = math.ceil(len(points) / 96)
-        return [*points[::stride]][-96:]
+        return [
+            points[round(index * (len(points) - 1) / 287)]
+            for index in range(288)
+        ]
 
     def _temperature_history_points(
         self, values: list[dict[str, Any]]

@@ -4,6 +4,7 @@ import json
 import os
 import unittest
 from collections import deque
+from datetime import datetime
 
 import httpx
 
@@ -507,6 +508,35 @@ class IntegrationDiagnosticTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             [state["state"] for state in result["sensor.solar_power"]],
             ["4300", "4400"],
+        )
+
+    async def test_energy_history_supports_explicit_calendar_bounds(self) -> None:
+        observed_request: httpx.Request | None = None
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            nonlocal observed_request
+            observed_request = request
+            return httpx.Response(200, json=[])
+
+        integrations = Integrations(
+            IntegrationSettings(home_assistant_url="http://ha.local:8123"),
+            httpx.MockTransport(handler),
+        )
+        await integrations.home_assistant_history(
+            ("sensor.home_load",),
+            started_at=datetime.fromisoformat("2026-07-23T00:00:00+10:00"),
+            ended_at=datetime.fromisoformat("2026-07-23T06:30:00+10:00"),
+        )
+
+        self.assertIsNotNone(observed_request)
+        assert observed_request is not None
+        self.assertIn(
+            "/api/history/period/2026-07-22T14:00:00Z",
+            observed_request.url.path,
+        )
+        self.assertEqual(
+            observed_request.url.params["end_time"],
+            "2026-07-22T20:30:00Z",
         )
 
 

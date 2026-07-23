@@ -57,6 +57,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import java.time.Duration
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import kotlin.math.abs
@@ -560,9 +561,29 @@ private fun ServerRackVisual(powerW: Double?, animationsEnabled: Boolean, modifi
 private fun HistoryDashboard(value: DashboardSnapshot) {
     Card(Modifier.fillMaxSize(), shape = RoundedCornerShape(28.dp)) {
         Column(Modifier.fillMaxSize().padding(20.dp)) {
-            Text("Power · last 24 hours", style = MaterialTheme.typography.headlineMedium)
-            Text("House consumption, battery and solar on one scale", color = MaterialTheme.colorScheme.onSurfaceVariant)
-            DashboardLineChart(value.history, Modifier.weight(1f).fillMaxWidth().padding(top = 16.dp))
+            Text(
+                if (value.historyWindow == "calendar_day") "Power · today" else "Power history",
+                style = MaterialTheme.typography.headlineMedium,
+            )
+            Text(
+                "Midnight to midnight · loads are shown below zero",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            DashboardLineChart(
+                value.history,
+                Modifier.weight(1f).fillMaxWidth().padding(top = 16.dp),
+                value.historyStartedAt,
+                value.historyEndedAt,
+            )
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                listOf("12 AM", "6 AM", "12 PM", "6 PM", "12 AM").forEach {
+                    Text(
+                        it,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
             FlowRow(horizontalArrangement = Arrangement.spacedBy(22.dp)) {
                 value.history.forEach { Text("● ${it.label}", color = color(it.color), fontWeight = FontWeight.SemiBold) }
             }
@@ -571,7 +592,12 @@ private fun HistoryDashboard(value: DashboardSnapshot) {
 }
 
 @Composable
-private fun DashboardLineChart(series: List<DashboardSeries>, modifier: Modifier) {
+private fun DashboardLineChart(
+    series: List<DashboardSeries>,
+    modifier: Modifier,
+    startedAt: java.time.Instant? = null,
+    endedAt: java.time.Instant? = null,
+) {
     val values = series.flatMap { it.points }.map { it.value }
     val low = min(0.0, values.minOrNull() ?: 0.0)
     val high = max(1.0, values.maxOrNull() ?: 1.0)
@@ -580,15 +606,57 @@ private fun DashboardLineChart(series: List<DashboardSeries>, modifier: Modifier
             val y = size.height * index / 4f
             drawLine(Color.White.copy(alpha = .08f), Offset(0f, y), Offset(size.width, y), 1f)
         }
+        val zeroY = size.height * (1 - ((0.0 - low) / (high - low))).toFloat()
+        drawLine(
+            Color.White.copy(alpha = .2f),
+            Offset(0f, zeroY),
+            Offset(size.width, zeroY),
+            1.5f,
+        )
         series.forEach { item ->
             if (item.points.size < 2) return@forEach
-            val path = Path()
-            item.points.forEachIndexed { index, point ->
-                val x = size.width * index / (item.points.size - 1).toFloat()
-                val y = size.height * (1 - ((point.value - low) / (high - low))).toFloat()
-                if (index == 0) path.moveTo(x, y) else path.lineTo(x, y)
+            val durationMillis = if (startedAt != null && endedAt != null) {
+                Duration.between(startedAt, endedAt).toMillis().coerceAtLeast(1)
+            } else null
+            val coordinates = item.points.mapIndexed { index, point ->
+                val fraction = if (durationMillis != null && point.at != null) {
+                    Duration.between(startedAt, point.at).toMillis()
+                        .toDouble().div(durationMillis).coerceIn(0.0, 1.0)
+                } else {
+                    index.toDouble() / (item.points.size - 1).coerceAtLeast(1)
+                }
+                Offset(
+                    size.width * fraction.toFloat(),
+                    size.height * (1 - ((point.value - low) / (high - low))).toFloat(),
+                )
             }
-            drawPath(path, color(item.color), style = Stroke(width = 5f, cap = StrokeCap.Round))
+            val path = Path()
+            coordinates.forEachIndexed { index, point ->
+                if (index == 0) path.moveTo(point.x, point.y)
+                else path.lineTo(point.x, point.y)
+            }
+            val area = Path().apply {
+                moveTo(coordinates.first().x, zeroY)
+                coordinates.forEach { lineTo(it.x, it.y) }
+                lineTo(coordinates.last().x, zeroY)
+                close()
+            }
+            val seriesColor = color(item.color)
+            val seriesTop = min(zeroY, coordinates.minOf { it.y })
+            val seriesBottom = max(zeroY, coordinates.maxOf { it.y })
+            drawPath(
+                area,
+                brush = Brush.verticalGradient(
+                    colors = listOf(
+                        seriesColor.copy(alpha = .04f),
+                        seriesColor.copy(alpha = .28f),
+                        seriesColor.copy(alpha = .04f),
+                    ),
+                    startY = seriesTop,
+                    endY = max(seriesTop + 1f, seriesBottom),
+                ),
+            )
+            drawPath(path, seriesColor, style = Stroke(width = 5f, cap = StrokeCap.Round))
         }
     }
 }

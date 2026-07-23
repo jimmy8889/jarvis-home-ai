@@ -228,9 +228,17 @@ final class PilotTests: XCTestCase {
               "tariff":{"import_cents_per_kwh":28.5,"feed_in_cents_per_kwh":8.2,
                 "feed_in_forecast":[{"at":"2026-07-22T04:00:00Z","cents_per_kwh":11.3}]},
               "temperatures":[{"id":"bedroom","label":"Bedroom","temperature_c":23.4}],
-              "history":{"period_hours":24,"series":[{"id":"solar","label":"Solar",
-                "color":"#FFC247","unit":"W","points":[
-                  {"at":"2026-07-22T03:00:00Z","value":8820}]}]},
+              "history":{"period_hours":24,"window":"calendar_day",
+                "started_at":"2026-07-22T00:00:00+10:00",
+                "ended_at":"2026-07-23T00:00:00+10:00",
+                "series":[
+                  {"id":"solar","label":"Solar","color":"#FFC247","unit":"W",
+                    "points":[{"at":"2026-07-22T03:00:00Z","value":8820}]},
+                  {"id":"home_load","label":"Home load","color":"#FF5D6C","unit":"W",
+                    "points":[{"at":"2026-07-22T03:00:00Z","value":-5610}]},
+                  {"id":"tesla","label":"Tesla charging","color":"#D970FF","unit":"W",
+                    "points":[{"at":"2026-07-22T03:00:00Z","value":-4540}]}
+                ]},
               "weather":{"status":"ok","condition":"sunny","temperature_c":24,
                 "forecast":[{"at":"2026-07-23T00:00:00Z","condition":"partlycloudy",
                   "high_temperature_c":26,"low_temperature_c":15,
@@ -249,6 +257,10 @@ final class PilotTests: XCTestCase {
         XCTAssertEqual(value.scene?.solarElevationDegrees, 31.4)
         XCTAssertTrue(value.vehicle.charging)
         XCTAssertEqual(value.history.series.first?.points.first?.value, 8820)
+        XCTAssertEqual(value.history.window, "calendar_day")
+        XCTAssertEqual(value.history.startedAt, "2026-07-22T00:00:00+10:00")
+        XCTAssertEqual(value.history.series[1].points.first?.value, -5610)
+        XCTAssertEqual(value.history.series[2].color, "#D970FF")
         XCTAssertEqual(value.weather.forecast.first?.highTemperatureCelsius, 26)
         XCTAssertEqual(value.controls.chargingMode.value, "Solar")
         XCTAssertTrue(value.controls.mediaRoomMode.available)

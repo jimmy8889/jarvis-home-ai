@@ -94,6 +94,15 @@ battery power means discharging and negative means charging for the deployed
 SAJ sensors. Raw Home Assistant attributes, Music Assistant media URIs, image
 proxy URLs, and central credentials are not returned.
 
+The shared dashboard energy contract uses `home_timezone` to expose a fixed
+local calendar-day window through `history.started_at`, `history.ended_at`, and
+`history.window = "calendar_day"`. It retains up to 288 display-safe points for
+solar, battery, home load, and Tesla charging. Consumption series are
+normalized below zero (`home_load` in red and `tesla` in magenta), so iOS,
+Android, Raspberry Pi, and N150 displays all render the same sign convention.
+Temperature histories remain separate rolling windows and retain their lower
+point cap.
+
 The command transport and its queued, delivered, terminal, expiry, reconnect,
 and idempotency behavior are documented in
 [COMMAND_TRANSPORT.md](COMMAND_TRANSPORT.md).

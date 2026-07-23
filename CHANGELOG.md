@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.29.0 — 2026-07-23
+
+- Reworked shared energy history as a local calendar-day contract. Pilot Core
+  now queries from Brisbane midnight, publishes a fixed midnight-to-midnight
+  domain, and retains up to 288 display-safe points without changing the
+  independent rolling temperature-history window.
+- Added Tesla charging to the shared graph. Home load is normalized as
+  negative red power and Tesla charging as negative magenta power across iOS,
+  Android, Raspberry Pi, and N150 displays.
+- Added zero-anchored gradient area fills and timestamp-scaled x positions on
+  every Pilot energy-history surface, including the native iOS and Android
+  clients and the shared Linux display appliance.
+
 ## 0.28.1 — 2026-07-23
 
 - Fixed native iPhone playback against Music Assistant's Universal Player

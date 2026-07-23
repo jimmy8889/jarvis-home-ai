@@ -617,14 +617,25 @@ struct DashboardHistorySeries: Codable, Identifiable, Equatable, Sendable {
 
 struct DashboardHistory: Codable, Equatable, Sendable {
     let periodHours: Int
+    let window: String?
+    let startedAt: String?
+    let endedAt: String?
     let series: [DashboardHistorySeries]
 
     enum CodingKeys: String, CodingKey {
-        case series
+        case series, window
         case periodHours = "period_hours"
+        case startedAt = "started_at"
+        case endedAt = "ended_at"
     }
 
-    static let empty = DashboardHistory(periodHours: 24, series: [])
+    static let empty = DashboardHistory(
+        periodHours: 24,
+        window: nil,
+        startedAt: nil,
+        endedAt: nil,
+        series: []
+    )
 }
 
 enum PilotDateParser {

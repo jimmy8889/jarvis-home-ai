@@ -33,10 +33,25 @@ class PilotJsonTest {
                   "temperatures": [
                     {"id": "bedroom", "label": "Bedroom", "temperature_c": 23.4}
                   ],
-                  "history": {"series": [{
-                    "id": "solar", "label": "Solar", "color": "#F8C84A",
-                    "points": [{"at": "2026-07-22T03:00:00Z", "value": 8820}]
-                  }]},
+                  "history": {
+                    "window": "calendar_day",
+                    "started_at": "2026-07-22T00:00:00+10:00",
+                    "ended_at": "2026-07-23T00:00:00+10:00",
+                    "series": [
+                      {
+                        "id": "solar", "label": "Solar", "color": "#F8C84A",
+                        "points": [{"at": "2026-07-22T03:00:00Z", "value": 8820}]
+                      },
+                      {
+                        "id": "home_load", "label": "Home load", "color": "#FF5D6C",
+                        "points": [{"at": "2026-07-22T03:00:00Z", "value": -5610}]
+                      },
+                      {
+                        "id": "tesla", "label": "Tesla charging", "color": "#D970FF",
+                        "points": [{"at": "2026-07-22T03:00:00Z", "value": -4540}]
+                      }
+                    ]
+                  },
                   "weather": {
                     "condition": "sunny", "temperature_c": 24,
                     "forecast": [{
@@ -65,7 +80,14 @@ class PilotJsonTest {
         assertTrue(dashboard.vehicle.connected == true)
         assertTrue(dashboard.vehicle.charging)
         assertEquals("Bedroom", dashboard.temperatures.single().label)
-        assertEquals(8820.0, dashboard.history.single().points.single().value, 0.01)
+        assertEquals(8820.0, dashboard.history.first().points.single().value, 0.01)
+        assertEquals(-5610.0, dashboard.history[1].points.single().value, 0.01)
+        assertEquals(-4540.0, dashboard.history[2].points.single().value, 0.01)
+        assertEquals("calendar_day", dashboard.historyWindow)
+        assertEquals(
+            "2026-07-21T14:00:00Z",
+            dashboard.historyStartedAt.toString(),
+        )
         assertEquals(26.0, dashboard.weather.forecast.single().highC!!, 0.01)
         assertEquals("Solar", dashboard.controls.chargingMode)
         assertTrue(dashboard.controls.mediaRoomAvailable)

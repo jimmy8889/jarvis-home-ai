@@ -29,6 +29,7 @@ sun_entity_id = "sun.sun"
 outdoor_temperature_entity_id = "sensor.gw1100c_outdoor_temperature"
 indoor_temperature_entity_id = "sensor.temp3_temperature"
 temperature_history_hours = 24
+home_timezone = "Australia/Brisbane"
 energy_solar_power_entity_id = "sensor.pv_power_mqtt_abs"
 energy_grid_power_entity_id = "sensor.saj_ct_grid_power_total"
 energy_battery_power_entity_id = "sensor.saj_battery_power_2"

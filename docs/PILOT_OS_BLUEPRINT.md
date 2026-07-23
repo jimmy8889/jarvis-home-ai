@@ -331,10 +331,12 @@ credential and cannot bypass Pilot Core.
 
 Display 0.5 replaces the generic energy page with the shared James House
 monitoring experience: animated watt-scaled solar, grid, battery, Tesla and
-server-rack paths; 24-hour solar/battery/home history; daily generation,
-consumption and export; Amber pricing; weather; and Office, TV room, Outdoor,
-Bedroom and Media Room temperatures. Grid values below 100 W remain visible but
-do not animate. It also adds artwork-led artist/album/playlist drill-down and a
+server-rack paths; midnight-to-midnight solar/battery/home/Tesla history with
+up to 288 points and gradient fills; daily generation, consumption and export;
+Amber pricing; weather; and Office, TV room, Outdoor, Bedroom and Media Room
+temperatures. Home load is projected as red negative power and Tesla charging
+as magenta negative power on every Pilot client. Grid values below 100 W remain
+visible but do not animate. It also adds artwork-led artist/album/playlist drill-down and a
 reproducible Sendspin player for the future Pi USB DAC. The runtime is installed
 but disabled until that DAC and its stable PipeWire sink are physically
 accepted. The 0.5 deployment and touch/rollback receipt remain pending.
@@ -1131,6 +1133,12 @@ deployed integration, hardware boundary, or milestone status changes.
   drag-inspectable power, Amber and 24-hour room-temperature charts. Simulator,
   bundle-resource and full Core tests pass; real iPhone audio/interruption and
   production data-shape acceptance remain explicit physical checks.
+- **4.7** — Unified energy history across Pilot Core, iOS, Android, Raspberry
+  Pi and N150 displays. Energy history now uses the configured home timezone
+  and a fixed midnight-to-midnight x-axis, preserves up to 288 points, includes
+  Tesla charging, and renders gradient-filled areas around zero. Home load is
+  normalized to negative red and Tesla charging to negative magenta. The
+  temperature history remains an independent rolling 24-hour view.
 - **4.5** — Promoted commit `a1b9fc5c` as immutable Pilot Core 0.28.0 image
   `core-0.28.0-20260723.1` on `10.0.1.64:8770`. The guarded deployment created
   a cold rollback archive, preserved persistent state and secrets, and passed

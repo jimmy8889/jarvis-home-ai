@@ -1,8 +1,8 @@
 # Pilot OS Blueprint
 
-Version 4.1
+Version 4.12
 
-Last updated: 2026-07-22
+Last updated: 2026-08-03
 
 Status: Canonical architecture reference
 
@@ -81,7 +81,7 @@ Supporting services:
 - Jellyfin
 - PostgreSQL
 - Redis where operationally justified
-- Ollama or vLLM
+- Authenticated OpenAI-compatible vLLM endpoints
 - Whisper-family speech recognition
 - Local text-to-speech
 
@@ -109,18 +109,19 @@ Music Assistant: Home Assistant add-on on 10.0.2.72
 Music Assistant UI/API: TCP 8095
 Music streams: TCP 8097
 Sendspin server: TCP 8927
-Pilot Core: 10.0.1.64:8770
-Pilot Core host: debian-docker / Debian 12
-Pilot Core target image: jarvis-home-ai/pilot-core:core-0.29.3-20260723.1
-Pilot Core deployed commit: b1eb94ddc6ac174986d5c461647b1d08bd6f4c3f
+Pilot Core: apps01 / 10.0.1.204:8770
+Pilot Core public API: https://pilot.jameshomeautomation.work
+Pilot Core target image: jarvis-home-ai/pilot-core:core-0.31.1-ios-voice-20260803.1
+Pilot Core deployed commit: 6ac8416298117d270954544d2a81c7c71f67b4d7
 ```
 
-That image is the deployed production baseline. Pilot Core 0.29 retains the
-device manifest, resumable event, presentation/trust and credential contracts,
-and adds a timezone-aware calendar-day energy contract with higher-resolution
-solar, battery, home-load and Tesla series. Promotion created a cold pre-deploy
-backup, preserved the existing data volume and secrets, and passed readiness,
-Home Assistant, Music Assistant and TTS diagnostics.
+Pilot Core 0.31.1 is the deployed production baseline. It retains the device
+manifest, resumable event, presentation/trust, vehicle, meeting, media and
+credential contracts. It adds the complete iOS push-to-talk voice loop,
+exact-device-private reply audio, portable-client room selection, governed
+typed light control and the assistant evaluation harness. Promotion created a
+cold pre-deploy backup, preserved the existing data volume and secrets, and
+passed readiness, Home Assistant, Music Assistant and TTS diagnostics.
 
 The Home Assistant add-on is the preferred initial Music Assistant deployment.
 It provides simple lifecycle management and close HA integration. A standalone
@@ -149,14 +150,16 @@ the pinned `stt.faster_whisper` pipeline, and requires at least 80% word
 coverage. The deployed acceptance returned all five expected words with 100%
 coverage. Home Assistant reports Piper 2.3.1 and Whisper 3.5.0 running.
 
-Pilot Core 0.17 retains its bounded contextual reasoning path against Ollama
-0.32.1 at `10.0.1.20:11434/v1`, using `qwen3.5:9b`. Home Assistant's built-in
-agent remains the deterministic first pass. Unmatched requests receive bounded
-room/media context and may invoke only Pilot's typed tools. Reasoning effort is
-disabled for the voice path after live tests showed an approximately one-second
-warm factual response while preserving native tool selection.
-Clear temperature, weather, forecast, and now-playing questions additionally
-force their read-only tool so current home state cannot be improvised.
+Pilot Core now uses vLLM exclusively for contextual reasoning. The primary RTX
+3090 endpoint is `10.0.1.20:8000/v1` and serves the `primary` model for
+assistant, reasoning and meeting-analysis roles. The RTX 3080 endpoint at
+`10.0.1.43:8000/v1` is configured for verifier or vision roles when its active
+GPU mode provides them; it is not treated as available merely because it is
+configured. Home Assistant's built-in agent remains the deterministic first
+pass. Unmatched requests receive bounded room, media and curated entity context
+and may invoke only Pilot's typed tools. Clear state, temperature, weather,
+forecast, now-playing and light-capability questions force their read-only
+grounding path so current home state cannot be improvised.
 
 Home Assistant now has a separate `Pilot Contextual` Assist pipeline with
 Faster Whisper, Piper Amy, preferred local intents, and the device-authenticated
@@ -478,9 +481,14 @@ home, shared dashboard, media, assistant and meeting contracts. It supports
 one-time pairing, Keychain device credentials, typed home confirmations, rich
 media control, a retained meeting-upload queue, matching energy/history/daily/
 climate pages, Tesla charging mode, Movie Mode, Amber tariffs and a safe-area
-correct mini-player. An embedded Music Assistant web player provides a
-phone-origin output option. Physical iPhone/iPad and long recording acceptance
-remain separate.
+correct mini-player. Native Sendspin playback provides the phone-origin output
+without a Music Assistant browser handoff. Pilot's full push-to-talk surface
+captures 16 kHz signed mono PCM, submits after speech-aware silence, renders a
+microphone-responsive Siri-like aura, plays authenticated device-private TTS,
+supports cancellation and restores native playback ownership afterward. A
+signed build is installed and launch-verified; physical microphone, audible
+reply, interruption, Bluetooth route and real light-action acceptance remain
+separate.
 
 The Android wall source consumes the same bounded Core contracts, keeps its
 device token encrypted by Android Keystore, adds curated room controls,
@@ -549,13 +557,22 @@ promotion and repeat physical touch/rollback acceptance on the deployed Pi.
 ## 7. Voice and AI pipeline
 
 ```text
-Local wake word
-      ↓
-Home Assistant Assist pipeline
-      ↓
-Local STT → deterministic intents/tools → local LLM when needed
-      ↓
-Local TTS → originating room output
+Room wake satellite ── local wake word ─┐
+                                       ├── Pilot Core device voice API
+iPhone/iPad ── push to talk ───────────┘             │
+                                                     ↓
+                              Home Assistant local STT only
+                                                     ↓
+                           deterministic intents and typed tools
+                                      │              │
+                                      │ unresolved   │ governed action
+                                      ↓              ↓
+                              local vLLM model pool  HA/Music boundary
+                                      └──────┬───────┘
+                                             ↓
+                              local TTS and private audio asset
+                                             ↓
+                              exact originating device or room
 ```
 
 Current office wake model: `okay_nabu`.
@@ -568,6 +585,12 @@ Candidate future components:
 - Speech recognition: faster-whisper, Distil-Whisper, or streaming ASR
 - Reasoning: fast tool-capable local model, with larger-model fallback
 - Speech: Kokoro-class voice with Piper fallback
+
+The current production speech engines are Home Assistant Faster Whisper for
+voice-command STT and Piper for TTS. Dedicated meeting Whisper remains deferred
+until the RTX 3080 speech deployment is ready. Assistant reply assets are bound
+to the exact requesting device; room announcements use a separate same-room,
+audio-capable authorization path.
 
 ## 8. Audio architecture
 
@@ -641,6 +664,8 @@ GET  /v1/devices/{id}/energy
 GET  /v1/devices/{id}/media
 POST /v1/devices/{id}/media
 POST /v1/devices/{id}/assistant
+POST /v1/devices/{id}/voice
+GET  /v1/audio-assets/{asset_id}
 POST /v1/devices/{id}/credentials/rotate-self
 ```
 
@@ -751,7 +776,7 @@ deployed integration, hardware boundary, or milestone status changes.
 - [x] Home Assistant connection
 - [x] Local Faster Whisper STT and Piper TTS engine round-trip
 - [x] Home Assistant-to-K3 TTS delivery at a bounded test volume
-- [x] Office contextual Ollama pipeline with deterministic-intent preference
+- [x] Office contextual vLLM pipeline with deterministic-intent preference
 - [x] Reboot persistence and rollback
 
 ### Phase 2 — Network audio: in progress
@@ -827,6 +852,9 @@ deployed integration, hardware boundary, or milestone status changes.
 - [ ] iOS/iPadOS interactive 3D house surface
 - [ ] Live lighting representation and room/device interaction
 - [x] Polished adaptive iOS/iPadOS home, media, and assistant client
+- [x] Full iOS push-to-talk voice capture, speech-aware submit, private TTS and
+      microphone-responsive listening surface
+- [x] Governed room-aware light status, brightness and colour commands
 - [x] Native Android wall-tablet application foundation
 - [x] Android immersive display, night mode, cached offline state, and reconnect behavior
 - [x] Android one-time pairing, resumable events, curated controls and push-to-talk in source
@@ -846,7 +874,7 @@ deployed integration, hardware boundary, or milestone status changes.
 - [ ] macOS dictation client
 - [x] iOS meeting capture and status client foundation
 - [x] iOS timestamped transcript, decision, action, and evidence review surface
-- [x] Dedicated stronger Ollama model selection for meeting analysis
+- [x] Dedicated stronger vLLM model selection for meeting analysis
 - [ ] Dedicated production Whisper deployment on the RTX 3080
 - [ ] End-to-end long meeting acceptance against the production Whisper endpoint
 
@@ -878,7 +906,7 @@ deployed integration, hardware boundary, or milestone status changes.
 - [x] One-time device enrollment grants
 - [x] Silent integration diagnostics and central backup/restore tooling
 - [x] Supervised room playback activation gate
-- [x] Deploy Pilot Core on the central Docker host at `10.0.1.64:8770`
+- [x] Deploy Pilot Core on apps01 at `10.0.1.204:8770`
 - [x] Enable and verify the registered office room-agent reporter
 - [x] Verify authenticated command delivery and restart reconnection
 - [x] Deploy the authenticated Pilot Core operations dashboard
@@ -886,43 +914,48 @@ deployed integration, hardware boundary, or milestone status changes.
 - [x] Add normalized live player state to Pilot Core and its dashboard
 - [x] Add Pilot-owned conversation continuity and administrator session APIs
 - [x] Add deterministic Home Assistant routing with local-model fallback
-- [x] Deploy the RTX Ollama model and low-latency reasoning configuration
+- [x] Deploy the RTX vLLM model pool and bounded reasoning configuration
 - [x] Add bounded typed tools for home state/control, weather, and music
 - [x] Add a governed full Home Assistant catalogue and read-only semantic tools
 - [x] Add synchronized floor, area, device, entity, alias, and energy projections
 - [x] Add polished native iOS/iPadOS and Android wall-tablet application surfaces
 - [x] Add native, background-capable `This iPhone` Sendspin playback without a
       Music Assistant browser handoff or client-held provider credential
+- [x] Add exact-device-private assistant reply audio and portable-client room
+      selection
+- [x] Add a safe assistant regression harness with mutation cases disabled by
+      default
 - [x] Add bundled iOS scene/logo/rack artwork and interactive power, Amber and
       room-temperature history inspection
 - [x] Deploy the first Raspberry Pi large-format Pilot display appliance
 
 ## 14. Immediate next steps
 
-1. Physically accept the deployed Pilot Linux Display 0.5 touch dashboard and
-   its rollback on the 10-inch display; service health, Core connectivity and
-   the rollback pair are already verified remotely.
-2. Review the production Home Assistant catalogue in the presentation editor:
-   explicitly include useful omissions, hide duplicates and promote only
-   trustworthy room mappings before enabling their controls.
-3. Pair and physically accept iPhone/iPad, the mounted Android wall tablet and
-   the Shield using separate scoped identities; test rotation, revocation,
-   offline recovery, accessibility/touch/focus and real media/home actions. On
-   iPhone, explicitly test native `This iPhone` TIDAL/local playback, background
-   audio, interruptions and transfer between the phone, Office and Media Room.
-4. Attach the Pi USB DAC, accept its stable PipeWire sink, enable the staged
-   Sendspin player and validate TIDAL plus local lossless playback. Until then,
-   the installed player remains disabled.
-5. Deploy the N150 Media Console role on a native-HDMI target and accept its
-   shell, mpv, HDMI audio, Denon source recovery and HDR10 boundary while
-   retaining Shield for Dolby Vision/DRM.
-6. Install and validate the dedicated production Whisper service when the RTX
-   3080 is installed, then run one long meeting from recording through
-   evidence-linked review. Do not enable a speculative transcription fallback.
-7. Validate a local lossless Music Assistant track, complete Bluetooth A2DP
-   arbitration and source-switch recovery, and train/accept **Hey Pilot**.
-8. Only then calibrate the real house geometry and publish the accessible,
-   versioned 3D model/mapping contract shared by iOS and Android.
+1. Physically accept the installed iPhone voice loop: end-of-speech detection,
+   audible private TTS, cancellation, Bluetooth route, native Sendspin
+   restoration and background/interruption behavior.
+2. In person, run the supervised assistant action corpus against the three
+   curated aggregate lights. Verify on/off, brightness, named colour,
+   cross-room rejection, pronoun follow-up and actual Home Assistant state.
+3. Reduce assistant latency from the observed 4.48-second p50 and 15.53-second
+   p95 by prewarming vLLM, assigning the 3080 a small fast router/verifier,
+   caching fresh room context and streaming STT/TTS without weakening typed
+   tool or presentation-policy boundaries.
+4. Expand the curated Home Assistant semantic model only with useful,
+   authoritative entities. Add typed climate, scene, cover, media, presence and
+   energy tools in that order; do not expose the complete raw entity registry
+   to the model.
+5. Physically accept the deployed Pilot Linux Display touch dashboard and its
+   rollback, then attach and accept the Pi USB DAC and staged Sendspin player.
+6. Deploy and accept the N150 Media Console shell, mpv, HDMI audio, Denon source
+   recovery and HDR10 boundary while retaining Shield for Dolby Vision/DRM.
+7. Install and validate the dedicated production meeting Whisper service when
+   the RTX 3080 speech mode is ready, then run one long meeting from recording
+   through evidence-linked review. Do not enable a speculative transcription
+   fallback.
+8. Complete Bluetooth A2DP arbitration, source-switch recovery and custom
+   **Hey Pilot** wake-word acceptance. Calibrate the real 3D house only after
+   these physical audio and control milestones are stable.
 
 ## 15. Decision log
 
@@ -946,6 +979,13 @@ deployed integration, hardware boundary, or milestone status changes.
 - Curate Home Assistant centrally. Automatic relevance may make an entity
   readable, but only registry-backed or explicit room mappings may authorize a
   typed mutation.
+- Bind personal assistant reply audio to the exact requesting credential.
+  Same-room access is reserved for explicit announcement assets.
+- Keep Home Assistant mutations in typed, audited tools. LLM failure before an
+  action fails closed; failure after a successful audited action may only
+  produce a deterministic response and must never repeat the action.
+- Use vLLM for all local language-model serving. Configured GPU routes are not
+  considered live until their health and served model are verified.
 - Treat ESP32 displays as thin room surfaces; keep audio, orchestration, and
   durable state on the N150 endpoints and Pilot Core.
 - Inject display-node Wi-Fi credentials only during local builds and keep the
@@ -1192,3 +1232,21 @@ deployed integration, hardware boundary, or milestone status changes.
   Core, Home Assistant, Music Assistant and TTS diagnostics passed; both Pi
   services are active and the live contract exposes thresholded `step` series
   for battery and Tesla with no history error.
+- **4.11** — Moved the public Pilot Core and Pilot Drive boundary to apps01 at
+  `10.0.1.204`, added vLLM-only 3090 primary and configured 3080 verifier/vision
+  routes, and promoted the vehicle, TeslaMate history and independently
+  revocable Pilot Drive credential contract through Pilot Core 0.30.2. Pilot
+  and Pilot Drive authenticate only to the trusted public Pilot API; provider,
+  Home Assistant, TeslaMate and model credentials remain server-side.
+- **4.12** — Promoted commits `065487f` and `6ac8416` as Pilot Core 0.31.1 image
+  `core-0.31.1-ios-voice-20260803.1`. Pilot iOS now has a complete
+  speech-aware push-to-talk loop, microphone-reactive listening surface and
+  exact-device-private TTS. Core adds portable room selection, governed typed
+  light state/brightness/colour control and a safe evaluation harness. The
+  signed app was installed and launch-verified. The production read-only suite
+  passed 10 of 10 cases; 13 mutation cases were intentionally skipped pending
+  supervised physical acceptance. The guarded promotion created rollback
+  archive
+  `pilot-core-20260803T133955Z-pre-deploy-core-0.31.1-ios-voice-20260803.1.tar.gz`
+  with SHA-256
+  `bb670eb7aa06b69574af23ec79e2bad9ecda5cd7fc40fa78118870172e44f7df`.

@@ -224,6 +224,8 @@ VEHICLE_CONTROL_ACTIONS = frozenset(
         "set_seat_heat_rear_left",
         "set_seat_heat_rear_center",
         "set_seat_heat_rear_right",
+        "set_seat_climate",
+        "set_seat_climate_front_right",
         "set_steering_heat",
         "start_charging",
         "stop_charging",

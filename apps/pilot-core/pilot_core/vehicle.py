@@ -45,6 +45,7 @@ DIRECT_ACTIONS = frozenset(
         "climate_off",
         "set_temperature",
         "set_seat_heat",
+        "set_seat_climate",
         "set_steering_heat",
         "start_charging",
         "stop_charging",
@@ -243,6 +244,7 @@ class VehicleService:
                 "id": vehicle.id,
                 "name": vehicle.name,
                 "default_climate_target_c": vehicle.default_climate_target_c,
+                "usable_battery_capacity_kwh": vehicle.manual_battery_baseline_kwh,
                 "available_controls": self._available_controls(vehicle),
             }
             for vehicle in self.vehicles.values()
@@ -257,6 +259,13 @@ class VehicleService:
                 action
                 for action in controls
                 if not action.startswith("set_seat_heat_")
+            }
+        if any(action.startswith("set_seat_climate_") for action in controls):
+            controls.add("set_seat_climate")
+            controls = {
+                action
+                for action in controls
+                if not action.startswith("set_seat_climate_")
             }
         return sorted(controls)
 
@@ -283,6 +292,18 @@ class VehicleService:
                 else:
                     errors += 1
         values = {key: self._state_value(key, state) for key, state in states.items()}
+        capacity = vehicle.manual_battery_baseline_kwh
+        soc = _finite(values.get("battery_percent"))
+        charge_limit = _finite(values.get("charge_limit_percent"))
+        if capacity is not None:
+            values["usable_battery_capacity_kwh"] = capacity
+            if soc is not None:
+                values["stored_energy_kwh"] = round(capacity * soc / 100, 2)
+            if soc is not None and charge_limit is not None:
+                values["energy_to_charge_limit_kwh"] = round(
+                    capacity * max(charge_limit - soc, 0) / 100,
+                    2,
+                )
         tyre_values = {
             corner.removeprefix("tyre_").removesuffix("_bar"): self._tyre_value(
                 values.pop(corner, None), states.get(corner)
@@ -573,6 +594,9 @@ class VehicleService:
             seat = str(parameters.get("seat", ""))
             if f"set_seat_heat_{seat}" not in vehicle.controls_map():
                 raise VehicleError("seat heating position is unsupported")
+        elif action in {"set_seat_climate", "set_seat_climate_front_right"}:
+            if "set_seat_climate_front_right" not in vehicle.controls_map():
+                raise VehicleError("front passenger seat climate is unsupported")
         elif action not in vehicle.controls_map():
             raise VehicleError("vehicle action is unsupported")
         self._validate_action_parameters(action, parameters)
@@ -593,6 +617,7 @@ class VehicleService:
         allowed_keys = {
             "set_temperature": {"temperature_c"},
             "set_seat_heat": {"seat", "level"},
+            "set_seat_climate": {"mode"},
             "set_steering_heat": {"level"},
             "set_charge_limit": {"percent"},
             "destination_workflow": {"destination_id"},
@@ -611,6 +636,16 @@ class VehicleService:
             "rear_right",
         }:
             raise VehicleError("seat position is invalid")
+        if action == "set_seat_climate" and parameters["mode"] not in {
+            "off",
+            "heat_low",
+            "heat_medium",
+            "heat_high",
+            "cool_low",
+            "cool_medium",
+            "cool_high",
+        }:
+            raise VehicleError("seat climate mode is invalid")
         if action == "set_charge_limit" and not 50 <= int(parameters["percent"]) <= 100:
             raise VehicleError("charge limit must be 50..100")
 
@@ -642,6 +677,8 @@ class VehicleService:
         control_key = request["action"]
         if control_key == "set_seat_heat":
             control_key = f"set_seat_heat_{request['parameters']['seat']}"
+        elif control_key == "set_seat_climate":
+            control_key = "set_seat_climate_front_right"
         control = vehicle.controls_map()[control_key]
         try:
             provider_result = await self._call_control(
@@ -715,6 +752,13 @@ class VehicleService:
                 controls.get("set_temperature"),
                 {"temperature_c": temperature},
             )
+            seat_mode = destination.get("seat_climate_mode")
+            if seat_mode:
+                await run_step(
+                    "front_passenger_seat",
+                    controls.get("set_seat_climate_front_right"),
+                    {"mode": seat_mode},
+                )
         else:
             steps.append({"step": "climate", "status": "disabled"})
             self.store.update_vehicle_action_steps(request["id"], steps)
@@ -766,6 +810,17 @@ class VehicleService:
                 service_data["option"] = options[level]
             else:
                 service_data["level"] = level
+        elif action in {"set_seat_climate", "set_seat_climate_front_right"}:
+            seat_options = {
+                "off": "Off",
+                "heat_low": "Heat Low",
+                "heat_medium": "Heat Medium",
+                "heat_high": "Heat High",
+                "cool_low": "Cool Low",
+                "cool_medium": "Cool Medium",
+                "cool_high": "Cool High",
+            }
+            service_data["option"] = seat_options[str(parameters["mode"])]
         elif action == "set_charge_limit":
             service_data["value"] = int(parameters["percent"])
         elif action == "send_route":
@@ -815,6 +870,9 @@ class VehicleService:
             level = int(parameters.get("level", -1))
             options = ["off", "heat low", "heat medium", "heat high"]
             return level in range(4) and value == options[level]
+        if action in {"set_seat_climate", "set_seat_climate_front_right"}:
+            expected = str(parameters.get("mode", "")).replace("_", " ")
+            return value == expected
         if action == "set_steering_heat":
             level = int(parameters.get("level", -1))
             options = ["off", "low", "high", "auto"]

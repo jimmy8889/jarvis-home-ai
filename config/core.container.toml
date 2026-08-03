@@ -124,6 +124,7 @@ id = "jarvis"
 name = "Jarvis"
 teslamate_car_id = 1
 default_climate_target_c = 22.0
+manual_battery_baseline_kwh = 75.0
 
 [vehicles.telemetry]
 state = "sensor.tesla_state"
@@ -219,35 +220,11 @@ domain = "climate"
 service = "set_temperature"
 entity_id = "climate.jarvis_hvac_climate_system"
 
-[vehicles.controls.set_seat_heat_front_left]
-domain = "select"
-service = "select_option"
-entity_id = "select.jarvis_heated_seat_left"
-observable_entity_id = "select.jarvis_heated_seat_left"
-
-[vehicles.controls.set_seat_heat_front_right]
+[vehicles.controls.set_seat_climate_front_right]
 domain = "select"
 service = "select_option"
 entity_id = "select.jarvis_heated_seat_right"
 observable_entity_id = "select.jarvis_heated_seat_right"
-
-[vehicles.controls.set_seat_heat_rear_left]
-domain = "select"
-service = "select_option"
-entity_id = "select.jarvis_heated_seat_rear_left"
-observable_entity_id = "select.jarvis_heated_seat_rear_left"
-
-[vehicles.controls.set_seat_heat_rear_center]
-domain = "select"
-service = "select_option"
-entity_id = "select.jarvis_heated_seat_rear_center"
-observable_entity_id = "select.jarvis_heated_seat_rear_center"
-
-[vehicles.controls.set_seat_heat_rear_right]
-domain = "select"
-service = "select_option"
-entity_id = "select.jarvis_heated_seat_rear_right"
-observable_entity_id = "select.jarvis_heated_seat_rear_right"
 
 [vehicles.controls.set_steering_heat]
 domain = "select"

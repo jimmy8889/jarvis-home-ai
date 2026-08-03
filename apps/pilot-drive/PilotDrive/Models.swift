@@ -225,12 +225,14 @@ struct SavedDestination: Codable, Identifiable, Sendable {
     let icon: String
     let climateEnabled: Bool
     let temperatureC: Double?
+    let seatClimateMode: SeatClimateMode?
 
     enum CodingKeys: String, CodingKey {
         case id, name, address, latitude, longitude, icon
         case vehicleID = "vehicle_id"
         case climateEnabled = "climate_enabled"
         case temperatureC = "temperature_c"
+        case seatClimateMode = "seat_climate_mode"
     }
 }
 
@@ -244,11 +246,13 @@ struct DestinationDraft: Codable, Sendable {
     var icon: String = "pin"
     var climateEnabled: Bool = true
     var temperatureC: Double?
+    var seatClimateMode: SeatClimateMode?
 
     enum CodingKeys: String, CodingKey {
         case name, address, latitude, longitude, icon
         case climateEnabled = "climate_enabled"
         case temperatureC = "temperature_c"
+        case seatClimateMode = "seat_climate_mode"
     }
 
     init(destination: SavedDestination? = nil) {
@@ -259,6 +263,31 @@ struct DestinationDraft: Codable, Sendable {
         icon = destination?.icon ?? "pin"
         climateEnabled = destination?.climateEnabled ?? true
         temperatureC = destination?.temperatureC
+        seatClimateMode = destination?.seatClimateMode
+    }
+}
+
+enum SeatClimateMode: String, Codable, CaseIterable, Identifiable, Sendable {
+    case off
+    case heatLow = "heat_low"
+    case heatMedium = "heat_medium"
+    case heatHigh = "heat_high"
+    case coolLow = "cool_low"
+    case coolMedium = "cool_medium"
+    case coolHigh = "cool_high"
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .off: "Off"
+        case .heatLow: "Heat · Low"
+        case .heatMedium: "Heat · Medium"
+        case .heatHigh: "Heat · High"
+        case .coolLow: "Cool · Low"
+        case .coolMedium: "Cool · Medium"
+        case .coolHigh: "Cool · High"
+        }
     }
 }
 

@@ -86,13 +86,18 @@ psql -v pilot_role=pilot_teslamate_reader \
   -f apps/teslamate-adapter/deploy/create-readonly-role.sql
 ```
 
-Create two root-readable Docker secret files under
+Create two files inside a root-traversable-only `secrets/` directory under
 `infra/teslamate-adapter/secrets/`:
 
 - `teslamate_database_url`: PostgreSQL DSN for the SELECT-only role.
 - `teslamate_adapter_token`: an independent random bearer token of at least 32
   characters. The same value is installed in Pilot Core's
   `teslamate_adapter_token` secret.
+
+The adapter container runs as UID 10002. With non-Swarm Docker Compose, secret
+files are bind-mounted and retain host mode bits; use mode `0404` inside the
+root-only directory so the unprivileged process can read the mount without
+making the enclosing directory traversable to host users.
 
 Deploy and verify without changing the TeslaMate schema:
 
@@ -107,10 +112,13 @@ fixture also attempts a write as the adapter role and must be denied.
 
 ## Product behaviour
 
-The Car surface shows battery, range, vehicle and charging state, freshness,
-location name, odometer, cabin/outside temperature, locks and closures,
-software, provider health, and four tyre corners. Tyre readings outside
-1.5–4.0 bar after unit normalization are labelled `abnormal_unverified`.
+The Car surface shows battery SOC, estimated stored usable energy, estimated
+energy required to reach the charge limit, range, vehicle and charging state,
+freshness, location name, odometer, cabin/outside temperature, locks and
+closures, provider health, and four tyre corners. Energy estimates use the
+configured usable-capacity baseline and are labelled as estimates. Tyre
+readings outside 1.5–4.0 bar after unit normalization are labelled
+`abnormal_unverified`.
 
 The Drives surface searches downloaded history and loads a bounded MapKit
 polyline on demand. It shows distance, duration, SOC change, estimated energy,
@@ -128,9 +136,11 @@ next due date/odometer, warning leads, and bounded JPEG/HEIC/PDF receipts in
 Pilot Core. Defaults are 30 days and 1,000 km. Reminders are in-app only.
 
 Saved destinations include a name, address, coordinates, icon, climate flag,
-and optional temperature override. A one-tap request is idempotent on the
-server and reports wake, climate, temperature, and route independently. A
-climate failure does not block the route and Pilot Core never issues an
+optional temperature override, and optional front-passenger seat climate mode.
+The supported seat modes are off; heat low, medium, and high; and cool low,
+medium, and high. A one-tap request is idempotent on the server and reports
+wake, climate, temperature, front-passenger seat, and route independently. A
+climate or seat failure does not block the route and Pilot Core never issues an
 automatic compensating command. The result sheet offers explicit retry and
 Stop Climate actions.
 
@@ -147,7 +157,7 @@ build or test vehicle commands through an HTTP LAN exception.
 
 1. Build and deploy adapter `0.1.0`; compare car, drive, charge, and battery
    results against TeslaMate. Do not alter the TeslaMate schema.
-2. Build and deploy Pilot Core `0.30.0`; pair a read-only Vehicle phone and
+2. Build and deploy Pilot Core `0.30.2`; pair a read-only Vehicle phone and
    confirm repeated app opens never wake the car.
 3. With the car parked and physically observed, enable and test low-risk
    controls one at a time.

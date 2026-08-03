@@ -37,12 +37,14 @@ final class PilotDriveTests: XCTestCase {
         draft.longitude = 153.0
         draft.climateEnabled = true
         draft.temperatureC = 22
+        draft.seatClimateMode = .coolMedium
 
         let object = try XCTUnwrap(
             JSONSerialization.jsonObject(with: JSONEncoder().encode(draft)) as? [String: Any]
         )
         XCTAssertEqual(object["climate_enabled"] as? Bool, true)
         XCTAssertEqual(object["temperature_c"] as? Double, 22)
+        XCTAssertEqual(object["seat_climate_mode"] as? String, "cool_medium")
         XCTAssertNil(object["vehicle_id"])
     }
 

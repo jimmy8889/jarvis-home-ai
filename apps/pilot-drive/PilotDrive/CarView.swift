@@ -156,11 +156,16 @@ struct CarView: View {
                                         Text("Climate \(destination.temperatureC.map { "\(Int($0))°" } ?? "22°")")
                                             .font(.caption2)
                                     }
+                                    if let seat = destination.seatClimateMode {
+                                        Text("Seat · \(seat.label)")
+                                            .font(.caption2)
+                                            .foregroundStyle(.secondary)
+                                    }
                                 }
-                                .frame(width: 112, height: 94)
+                                .frame(width: 132, height: 112)
                             }
                             .buttonStyle(.bordered)
-                            .accessibilityHint("Wakes the car if required, starts climate, and sends this route")
+                            .accessibilityHint("Wakes the car if required, applies climate and passenger seat settings, and sends this route")
                             .contextMenu {
                                 Button {
                                     editingDestination = destination
@@ -180,6 +185,23 @@ struct CarView: View {
     private func conditionGrid(_ car: VehicleOverview) -> some View {
         LazyVGrid(columns: columns, spacing: 12) {
             MetricTile(
+                title: "Battery SOC",
+                value: car.number("battery_percent").map { "\(Int($0))%" } ?? "—",
+                symbol: "battery.75percent"
+            )
+            MetricTile(
+                title: "Stored energy",
+                value: car.number("stored_energy_kwh").map { "\($0.formatted(.number.precision(.fractionLength(1)))) kWh" } ?? "—",
+                symbol: "battery.100percent",
+                detail: "Estimated usable energy"
+            )
+            MetricTile(
+                title: "To charge limit",
+                value: car.number("energy_to_charge_limit_kwh").map { "\($0.formatted(.number.precision(.fractionLength(1)))) kWh" } ?? "—",
+                symbol: "bolt.badge.clock",
+                detail: car.number("charge_limit_percent").map { "To \(Int($0))%" }
+            )
+            MetricTile(
                 title: "Odometer",
                 value: car.number("odometer_km").map { "\($0.formatted(.number.precision(.fractionLength(0)))) km" } ?? "—",
                 symbol: "gauge.with.dots.needle.33percent"
@@ -195,12 +217,6 @@ struct CarView: View {
                 value: car.flag("locked") == true ? "Locked" : "Unlocked",
                 symbol: car.flag("locked") == true ? "lock.fill" : "lock.open.fill",
                 detail: closureSummary(car)
-            )
-            MetricTile(
-                title: "Software",
-                value: car.text("software_version") ?? "—",
-                symbol: "gearshape.2",
-                detail: car.flag("software_update") == true ? "Update available" : "No update reported"
             )
         }
     }
@@ -307,19 +323,15 @@ struct CarView: View {
                     .accessibilityHint(control.highRisk ? "Requires Face ID or device passcode and server confirmation" : "")
                 }
             }
-            if car.availableControls.contains("set_seat_heat") {
-                Menu("Seat heating") {
-                    ForEach(["front_left", "front_right", "rear_left", "rear_center", "rear_right"], id: \.self) { seat in
-                        Menu(seat.replacingOccurrences(of: "_", with: " ").capitalized) {
-                            ForEach(0..<4) { level in
-                                Button(level == 0 ? "Off" : "Level \(level)") {
-                                    Task {
-                                        _ = await model.perform(
-                                            "set_seat_heat",
-                                            parameters: ["seat": .string(seat), "level": .number(Double(level))]
-                                        )
-                                    }
-                                }
+            if car.availableControls.contains("set_seat_climate") {
+                Menu("Front passenger seat") {
+                    ForEach(SeatClimateMode.allCases) { mode in
+                        Button(mode.label) {
+                            Task {
+                                _ = await model.perform(
+                                    "set_seat_climate",
+                                    parameters: ["mode": .string(mode.rawValue)]
+                                )
                             }
                         }
                     }

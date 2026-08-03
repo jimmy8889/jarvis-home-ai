@@ -227,6 +227,21 @@ class VehicleDestinationInput(BaseModel):
     icon: str = Field(default="pin", min_length=1, max_length=50)
     climate_enabled: bool = True
     temperature_c: float | None = Field(default=None, ge=15, le=30)
+    seat_climate_mode: Literal[
+        "off",
+        "heat_low",
+        "heat_medium",
+        "heat_high",
+        "cool_low",
+        "cool_medium",
+        "cool_high",
+    ] | None = None
+
+    @model_validator(mode="after")
+    def seat_climate_requires_climate(self) -> "VehicleDestinationInput":
+        if not self.climate_enabled and self.seat_climate_mode not in (None, "off"):
+            raise ValueError("seat climate requires destination climate")
+        return self
 
 
 class VehicleMaintenanceInput(BaseModel):

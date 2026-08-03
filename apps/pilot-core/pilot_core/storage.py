@@ -365,6 +365,7 @@ class Store:
                     icon TEXT NOT NULL,
                     climate_enabled INTEGER NOT NULL DEFAULT 1,
                     temperature_c REAL,
+                    seat_climate_mode TEXT,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 );
@@ -496,6 +497,16 @@ class Store:
                 self._connection.execute(
                     """ALTER TABLE home_entities ADD COLUMN area_source
                        TEXT NOT NULL DEFAULT 'unassigned'"""
+                )
+            destination_columns = {
+                row["name"]
+                for row in self._connection.execute(
+                    "PRAGMA table_info(vehicle_destinations)"
+                )
+            }
+            if "seat_climate_mode" not in destination_columns:
+                self._connection.execute(
+                    "ALTER TABLE vehicle_destinations ADD COLUMN seat_climate_mode TEXT"
                 )
 
     def resolve_conversation_session(
@@ -2866,14 +2877,16 @@ class Store:
             self._connection.execute(
                 """INSERT INTO vehicle_destinations
                    (id, vehicle_id, name, address, latitude, longitude, icon,
-                    climate_enabled, temperature_c, created_at, updated_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    climate_enabled, temperature_c, seat_climate_mode,
+                    created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                    ON CONFLICT(id) DO UPDATE SET
                      name = excluded.name, address = excluded.address,
                      latitude = excluded.latitude, longitude = excluded.longitude,
                      icon = excluded.icon,
                      climate_enabled = excluded.climate_enabled,
                      temperature_c = excluded.temperature_c,
+                     seat_climate_mode = excluded.seat_climate_mode,
                      updated_at = excluded.updated_at
                    WHERE vehicle_destinations.vehicle_id = excluded.vehicle_id""",
                 (
@@ -2886,6 +2899,7 @@ class Store:
                     payload["icon"],
                     int(payload["climate_enabled"]),
                     payload.get("temperature_c"),
+                    payload.get("seat_climate_mode"),
                     now,
                     now,
                 ),
@@ -2935,6 +2949,7 @@ class Store:
             "icon": row["icon"],
             "climate_enabled": bool(row["climate_enabled"]),
             "temperature_c": row["temperature_c"],
+            "seat_climate_mode": row["seat_climate_mode"],
             "created_at": row["created_at"],
             "updated_at": row["updated_at"],
         }

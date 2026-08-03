@@ -28,8 +28,10 @@ class FakeIntegrations:
         self.states = {
             "binary_sensor.jarvis_online": "on",
             "sensor.jarvis_battery": "72",
+            "number.jarvis_charge_limit": "80",
             "sensor.jarvis_tpms_fl": "9.2",
             "lock.jarvis": "locked",
+            "select.jarvis_seat_right": "Off",
         }
         self.calls: list[tuple[str, str, dict[str, object]]] = []
         self.fail_climate = False
@@ -57,6 +59,8 @@ class FakeIntegrations:
             raise IntegrationRequestFailed("climate provider failed")
         if domain == "lock" and service == "unlock":
             self.states[entity_id] = "unlocked"
+        if domain == "select" and service == "select_option":
+            self.states[entity_id] = str(data["option"])
         return {"accepted": True, "targeted": bool(entity_id or device_id)}
 
 
@@ -140,12 +144,21 @@ class VehicleApiTests(unittest.TestCase):
                     id="jarvis",
                     name="Jarvis",
                     teslamate_car_id=1,
+                    manual_battery_baseline_kwh=75,
                     telemetry=(
                         ("online", "binary_sensor.jarvis_online"),
                         ("battery_percent", "sensor.jarvis_battery"),
+                        ("charge_limit_percent", "number.jarvis_charge_limit"),
                         ("tyre_front_left_bar", "sensor.jarvis_tpms_fl"),
                     ),
                     controls=(
+                        VehicleControl(
+                            "set_seat_climate_front_right",
+                            "select",
+                            "select_option",
+                            "select.jarvis_seat_right",
+                            observable_entity_id="select.jarvis_seat_right",
+                        ),
                         VehicleControl(
                             "unlock",
                             "lock",
@@ -225,6 +238,7 @@ class VehicleApiTests(unittest.TestCase):
                 "longitude": 153.0,
                 "icon": "briefcase",
                 "climate_enabled": True,
+                "seat_climate_mode": "cool_medium",
             },
         )
         self.assertEqual(response.status_code, 201)
@@ -238,6 +252,10 @@ class VehicleApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["state"]["battery_percent"], 72)
+        self.assertEqual(response.json()["state"]["stored_energy_kwh"], 54)
+        self.assertEqual(
+            response.json()["state"]["energy_to_charge_limit_kwh"], 6
+        )
         self.assertEqual(
             response.json()["tyres"]["front_left"]["status"],
             "abnormal_unverified",
@@ -245,6 +263,26 @@ class VehicleApiTests(unittest.TestCase):
         self.assertNotIn("sensor.jarvis", encoded)
         self.assertNotIn("teslamate_car_id", encoded)
         self.assertNotIn("vin", encoded.casefold())
+
+        destination = self.create_destination()
+        self.assertEqual(destination["seat_climate_mode"], "cool_medium")
+
+        seat = self.client.post(
+            "/v1/devices/pilot-drive/vehicles/jarvis/actions",
+            headers=self.headers(),
+            json={
+                "action": "set_seat_climate",
+                "parameters": {"mode": "cool_high"},
+                "idempotency_key": "seat-cool-high-001",
+            },
+        )
+        self.assertEqual(seat.status_code, 202)
+        completed_seat = self.wait_action(seat.json()["id"])
+        self.assertEqual(completed_seat["status"], "reconciled")
+        self.assertIn(
+            ("select", "select_option", {"option": "Cool High"}),
+            self.integrations.calls,
+        )
 
         denied = self.client.get(
             "/v1/devices/read-only/vehicles",
@@ -327,6 +365,7 @@ class VehicleApiTests(unittest.TestCase):
 
     def test_destination_workflow_delivers_route_after_climate_failure(self) -> None:
         destination = self.create_destination()
+        self.assertEqual(destination["seat_climate_mode"], "cool_medium")
         self.integrations.fail_climate = True
         response = self.client.post(
             "/v1/devices/pilot-drive/vehicles/jarvis/actions",
@@ -342,6 +381,7 @@ class VehicleApiTests(unittest.TestCase):
         steps = {item["step"]: item["status"] for item in completed["steps"]}
         self.assertEqual(steps["climate"], "failed")
         self.assertEqual(steps["temperature"], "failed")
+        self.assertEqual(steps["front_passenger_seat"], "accepted")
         self.assertEqual(steps["route"], "accepted")
         self.assertEqual(completed["status"], "unverified")
         self.assertTrue(

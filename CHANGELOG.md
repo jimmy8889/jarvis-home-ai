@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.30.2 — 2026-08-03
+
+- Replaced the Pilot Drive software-version tile with battery SOC, estimated
+  stored usable energy, and estimated energy required to reach the configured
+  charge limit.
+- Reduced seat climate to the front passenger seat with exact off, three heat,
+  and three ventilation levels exposed by Home Assistant.
+- Added the optional front-passenger seat setting to saved destination
+  workflows while preserving independent climate, seat, and route results.
+- Deployed the TeslaMate history adapter beside TeslaMate with an authenticated
+  API and a dedicated PostgreSQL role restricted to read-only queries.
+
 ## 0.30.1 — 2026-08-03
 
 - Added administrator-managed, capability-scoped device API keys with one-time

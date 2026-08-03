@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.32.0 — 2026-08-04
+
+- Added the authenticated `pilot.homelab.v1` monitoring contract with bounded,
+  read-only Proxmox cluster/resource collection and TrueNAS system, pool, disk,
+  SMART-temperature and active-alert collection. Provider failures degrade
+  independently and the last complete snapshot remains available as stale data.
+- Added capability-scoped host telemetry ingestion for CPU, memory, root disk,
+  hardware temperatures and NVIDIA GPU utilization, VRAM, temperature and power.
+- Added a polished Home Lab tab to Pilot iOS with cluster summary, responsive
+  Proxmox node cards, AI accelerator telemetry, TrueNAS pool/drive health,
+  alerts and virtual workload state. The client caches the last snapshot for
+  useful offline presentation.
+- Added a dependency-light, outbound-only `pilot-homelab-agent` and hardened
+  systemd unit for hosts whose detailed thermal or GPU state is not available
+  through the management APIs.
+
 ## 0.31.1 — 2026-08-03
 
 - Recognized room-qualified light capability questions such as “which office

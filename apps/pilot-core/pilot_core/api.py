@@ -46,6 +46,7 @@ from .home_actions import (
     HomeActions,
 )
 from .home_intelligence import HomeIntelligence, HomeResolutionError
+from .homelab import HomeLabService
 from .integrations import IntegrationRequestFailed, IntegrationUnavailable, Integrations
 from .media_state import MediaStateReader
 from .meetings import (
@@ -88,6 +89,37 @@ class BootstrapGrantRequest(DeviceRegistration):
 
 class DeviceCapabilitiesUpdate(BaseModel):
     capabilities: list[str] = Field(max_length=100)
+
+
+class HomeLabTemperatureInput(BaseModel):
+    label: str = Field(min_length=1, max_length=120)
+    temperature_c: float = Field(ge=-50, le=200)
+
+
+class HomeLabGPUInput(BaseModel):
+    index: int = Field(ge=0, le=32)
+    name: str = Field(min_length=1, max_length=200)
+    utilization_ratio: float | None = Field(default=None, ge=0, le=1)
+    memory_used_bytes: int | None = Field(default=None, ge=0)
+    memory_total_bytes: int | None = Field(default=None, ge=1)
+    temperature_c: float | None = Field(default=None, ge=-50, le=200)
+    power_watts: float | None = Field(default=None, ge=0, le=5000)
+
+
+class HomeLabTelemetryInput(BaseModel):
+    hostname: str = Field(min_length=1, max_length=255)
+    role: str = Field(default="host", min_length=1, max_length=64)
+    cpu_ratio: float | None = Field(default=None, ge=0, le=1)
+    memory_used_bytes: int | None = Field(default=None, ge=0)
+    memory_total_bytes: int | None = Field(default=None, ge=1)
+    root_used_bytes: int | None = Field(default=None, ge=0)
+    root_total_bytes: int | None = Field(default=None, ge=1)
+    uptime_seconds: int | None = Field(default=None, ge=0)
+    load_average: list[float] = Field(default_factory=list, max_length=3)
+    temperatures: list[HomeLabTemperatureInput] = Field(
+        default_factory=list, max_length=128
+    )
+    gpus: list[HomeLabGPUInput] = Field(default_factory=list, max_length=16)
 
 
 class HomeEntityPresentationUpdate(BaseModel):
@@ -600,6 +632,7 @@ def create_app(
     *,
     integrations_override: Integrations | None = None,
     teslamate_override: TeslaMateClient | None = None,
+    homelab_override: HomeLabService | None = None,
 ) -> FastAPI:
     started_at = datetime.now(UTC)
     started_monotonic = time.monotonic()
@@ -668,6 +701,7 @@ def create_app(
         settings.server.vehicle_asset_path,
         settings.server.vehicle_asset_max_bytes,
     )
+    homelab = homelab_override or HomeLabService(settings.integrations)
     hub = EventHub()
     device_hub = DeviceHub()
     vehicle_action_tasks: set[asyncio.Task[Any]] = set()
@@ -823,6 +857,10 @@ def create_app(
             "vehicle_read": "vehicle-read" in capabilities,
             "vehicle_control": "vehicle-control" in capabilities,
             "vehicle_maintenance": "vehicle-maintenance" in capabilities,
+            "homelab": bool(
+                {"home-read", "display", "portable-client", "homelab-read"}
+                & capabilities
+            ),
         }
 
     def device_manifest_payload(device: dict[str, Any]) -> dict[str, Any]:
@@ -852,6 +890,7 @@ def create_app(
                 "media": f"{base}/media",
                 "assistant": f"{base}/assistant",
                 "meetings": f"{base}/meetings",
+                "homelab": f"{base}/homelab",
                 "meeting_recording_upload": (
                     f"{settings.server.public_upload_base_url}{base}"
                     "/meetings/{meeting_id}/recording"
@@ -2113,6 +2152,13 @@ def create_app(
         response.headers["Cache-Control"] = "no-store"
         return (await build_operations_snapshot())["observability"]
 
+    @app.get("/v1/homelab", dependencies=[Depends(require_admin)])
+    async def homelab_snapshot(
+        response: Response, force: bool = Query(default=False)
+    ) -> dict[str, Any]:
+        response.headers["Cache-Control"] = "no-store"
+        return await homelab.snapshot(force=force)
+
     @app.get(
         "/v1/metrics",
         dependencies=[Depends(require_admin)],
@@ -2470,6 +2516,38 @@ def create_app(
             "schema_version": "pilot.vehicle.v1",
             "items": vehicle_service.list_vehicles(),
         }
+
+    @app.get("/v1/devices/{device_id}/homelab")
+    async def device_homelab(
+        device_id: str,
+        response: Response,
+        force: bool = False,
+        x_pilot_device_id: str = Header(),
+        authorization: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        device = authenticated_device(device_id, x_pilot_device_id, authorization)
+        if not device_features(device)["homelab"]:
+            raise HTTPException(status_code=403, detail="homelab-read capability required")
+        response.headers["Cache-Control"] = "private, no-store"
+        return await homelab.snapshot(force=force)
+
+    @app.post("/v1/devices/{device_id}/homelab/telemetry", status_code=202)
+    async def device_homelab_telemetry(
+        device_id: str,
+        request: HomeLabTelemetryInput,
+        x_pilot_device_id: str = Header(),
+        authorization: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        device = authenticated_device(device_id, x_pilot_device_id, authorization)
+        require_device_capability(device, "homelab-agent")
+        homelab.update_agent(device_id, request.model_dump())
+        database.record_client_event(
+            "pilot.homelab.telemetry.v1",
+            {"hostname": request.hostname, "role": request.role},
+            room_id=str(device.get("room_id") or "infrastructure"),
+            device_id=device_id,
+        )
+        return {"status": "accepted"}
 
     @app.get("/v1/devices/{device_id}/vehicles/{vehicle_id}")
     async def device_vehicle(

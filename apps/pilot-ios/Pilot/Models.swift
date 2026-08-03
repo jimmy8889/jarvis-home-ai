@@ -1,5 +1,328 @@
 import Foundation
 
+struct HomeLabSnapshot: Codable, Sendable {
+    let schemaVersion: String
+    let generatedAt: String
+    let status: String
+    let stale: Bool
+    let summary: HomeLabSummary
+    let providers: HomeLabProviders
+    let agents: [HomeLabAgent]
+
+    enum CodingKeys: String, CodingKey {
+        case status, stale, summary, providers, agents
+        case schemaVersion = "schema_version"
+        case generatedAt = "generated_at"
+    }
+
+    static let unavailable = HomeLabSnapshot(
+        schemaVersion: "pilot.homelab.v1",
+        generatedAt: "",
+        status: "unavailable",
+        stale: false,
+        summary: HomeLabSummary(),
+        providers: HomeLabProviders(),
+        agents: []
+    )
+}
+
+struct HomeLabSummary: Codable, Sendable {
+    let nodeCount: Int
+    let onlineNodeCount: Int
+    let workloadCount: Int
+    let runningWorkloadCount: Int
+    let poolCount: Int
+    let diskCount: Int
+    let activeAlertCount: Int
+    let hottestTemperatureC: Double?
+
+    enum CodingKeys: String, CodingKey {
+        case nodeCount = "node_count"
+        case onlineNodeCount = "online_node_count"
+        case workloadCount = "workload_count"
+        case runningWorkloadCount = "running_workload_count"
+        case poolCount = "pool_count"
+        case diskCount = "disk_count"
+        case activeAlertCount = "active_alert_count"
+        case hottestTemperatureC = "hottest_temperature_c"
+    }
+
+    init(
+        nodeCount: Int = 0,
+        onlineNodeCount: Int = 0,
+        workloadCount: Int = 0,
+        runningWorkloadCount: Int = 0,
+        poolCount: Int = 0,
+        diskCount: Int = 0,
+        activeAlertCount: Int = 0,
+        hottestTemperatureC: Double? = nil
+    ) {
+        self.nodeCount = nodeCount
+        self.onlineNodeCount = onlineNodeCount
+        self.workloadCount = workloadCount
+        self.runningWorkloadCount = runningWorkloadCount
+        self.poolCount = poolCount
+        self.diskCount = diskCount
+        self.activeAlertCount = activeAlertCount
+        self.hottestTemperatureC = hottestTemperatureC
+    }
+}
+
+struct HomeLabProviders: Codable, Sendable {
+    let proxmox: ProxmoxSnapshot
+    let truenas: TrueNASSnapshot
+
+    init(
+        proxmox: ProxmoxSnapshot = .unavailable,
+        truenas: TrueNASSnapshot = .unavailable
+    ) {
+        self.proxmox = proxmox
+        self.truenas = truenas
+    }
+}
+
+struct ProxmoxSnapshot: Codable, Sendable {
+    let configured: Bool
+    let status: String
+    let cluster: ProxmoxCluster?
+    let nodes: [ProxmoxNode]
+    let workloads: [ProxmoxWorkload]
+    let storages: [ProxmoxStorage]
+    let error: String?
+
+    static let unavailable = ProxmoxSnapshot(
+        configured: false, status: "not_configured", cluster: nil,
+        nodes: [], workloads: [], storages: [], error: nil
+    )
+}
+
+struct ProxmoxCluster: Codable, Sendable {
+    let name: String
+    let quorate: Bool
+    let expectedNodes: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case name, quorate
+        case expectedNodes = "expected_nodes"
+    }
+}
+
+struct ProxmoxNode: Codable, Identifiable, Sendable {
+    let id: String
+    let name: String
+    let status: String
+    let cpuRatio: Double?
+    let cpuThreads: Int?
+    let memoryUsedBytes: Int64?
+    let memoryTotalBytes: Int64?
+    let memoryRatio: Double?
+    let diskUsedBytes: Int64?
+    let diskTotalBytes: Int64?
+    let diskRatio: Double?
+    let uptimeSeconds: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case id, name, status
+        case cpuRatio = "cpu_ratio"
+        case cpuThreads = "cpu_threads"
+        case memoryUsedBytes = "memory_used_bytes"
+        case memoryTotalBytes = "memory_total_bytes"
+        case memoryRatio = "memory_ratio"
+        case diskUsedBytes = "disk_used_bytes"
+        case diskTotalBytes = "disk_total_bytes"
+        case diskRatio = "disk_ratio"
+        case uptimeSeconds = "uptime_seconds"
+    }
+}
+
+struct ProxmoxWorkload: Codable, Identifiable, Sendable {
+    let id: String
+    let vmid: Int?
+    let name: String
+    let kind: String
+    let node: String
+    let status: String
+    let cpuRatio: Double?
+    let memoryRatio: Double?
+    let memoryUsedBytes: Int64?
+    let memoryTotalBytes: Int64?
+    let uptimeSeconds: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case id, vmid, name, kind, node, status
+        case cpuRatio = "cpu_ratio"
+        case memoryRatio = "memory_ratio"
+        case memoryUsedBytes = "memory_used_bytes"
+        case memoryTotalBytes = "memory_total_bytes"
+        case uptimeSeconds = "uptime_seconds"
+    }
+}
+
+struct ProxmoxStorage: Codable, Identifiable, Sendable {
+    let id: String
+    let name: String
+    let node: String
+    let status: String
+    let usedBytes: Int64?
+    let totalBytes: Int64?
+    let usageRatio: Double?
+
+    enum CodingKeys: String, CodingKey {
+        case id, name, node, status
+        case usedBytes = "used_bytes"
+        case totalBytes = "total_bytes"
+        case usageRatio = "usage_ratio"
+    }
+}
+
+struct TrueNASSnapshot: Codable, Sendable {
+    let configured: Bool
+    let status: String
+    let system: TrueNASSystem?
+    let pools: [TrueNASPool]
+    let disks: [TrueNASDisk]
+    let alerts: [HomeLabAlert]
+    let error: String?
+
+    static let unavailable = TrueNASSnapshot(
+        configured: false, status: "not_configured", system: nil,
+        pools: [], disks: [], alerts: [], error: nil
+    )
+}
+
+struct TrueNASSystem: Codable, Sendable {
+    let hostname: String
+    let version: String
+    let uptimeSeconds: Int?
+    let model: String
+    let memoryTotalBytes: Int64?
+    let cpuModel: String
+    let cpuCores: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case hostname, version, model
+        case uptimeSeconds = "uptime_seconds"
+        case memoryTotalBytes = "memory_total_bytes"
+        case cpuModel = "cpu_model"
+        case cpuCores = "cpu_cores"
+    }
+}
+
+struct TrueNASPool: Codable, Identifiable, Sendable {
+    let id: String
+    let name: String
+    let status: String
+    let healthy: Bool?
+    let warning: Bool?
+    let sizeBytes: Int64?
+    let allocatedBytes: Int64?
+    let freeBytes: Int64?
+    let usageRatio: Double?
+
+    enum CodingKeys: String, CodingKey {
+        case id, name, status, healthy, warning
+        case sizeBytes = "size_bytes"
+        case allocatedBytes = "allocated_bytes"
+        case freeBytes = "free_bytes"
+        case usageRatio = "usage_ratio"
+    }
+}
+
+struct TrueNASDisk: Codable, Identifiable, Sendable {
+    let id: String
+    let name: String
+    let model: String
+    let serial: String
+    let sizeBytes: Int64?
+    let pool: String?
+    let type: String?
+    let rotationRate: Int?
+    let smartEnabled: Bool?
+    let temperatureC: Double?
+    let criticalTemperatureC: Double?
+
+    enum CodingKeys: String, CodingKey {
+        case id, name, model, serial, pool, type
+        case sizeBytes = "size_bytes"
+        case rotationRate = "rotation_rate"
+        case smartEnabled = "smart_enabled"
+        case temperatureC = "temperature_c"
+        case criticalTemperatureC = "critical_temperature_c"
+    }
+}
+
+struct HomeLabAlert: Codable, Identifiable, Sendable {
+    let id: String
+    let level: String
+    let title: String
+    let datetime: String?
+}
+
+struct HomeLabAgent: Codable, Identifiable, Sendable {
+    var id: String { deviceID }
+    let deviceID: String
+    let hostname: String
+    let role: String
+    let cpuRatio: Double?
+    let memoryUsedBytes: Int64?
+    let memoryTotalBytes: Int64?
+    let rootUsedBytes: Int64?
+    let rootTotalBytes: Int64?
+    let uptimeSeconds: Int?
+    let loadAverage: [Double]
+    let temperatures: [HomeLabTemperature]
+    let gpus: [HomeLabGPU]
+    let receivedAt: String
+    let stale: Bool
+    let ageSeconds: Double
+
+    enum CodingKeys: String, CodingKey {
+        case hostname, role, stale
+        case deviceID = "device_id"
+        case cpuRatio = "cpu_ratio"
+        case memoryUsedBytes = "memory_used_bytes"
+        case memoryTotalBytes = "memory_total_bytes"
+        case rootUsedBytes = "root_used_bytes"
+        case rootTotalBytes = "root_total_bytes"
+        case uptimeSeconds = "uptime_seconds"
+        case loadAverage = "load_average"
+        case temperatures, gpus
+        case receivedAt = "received_at"
+        case ageSeconds = "age_seconds"
+    }
+}
+
+struct HomeLabTemperature: Codable, Identifiable, Sendable {
+    var id: String { label }
+    let label: String
+    let temperatureC: Double
+
+    enum CodingKeys: String, CodingKey {
+        case label
+        case temperatureC = "temperature_c"
+    }
+}
+
+struct HomeLabGPU: Codable, Identifiable, Sendable {
+    var id: Int { index }
+    let index: Int
+    let name: String
+    let utilizationRatio: Double?
+    let memoryUsedBytes: Int64?
+    let memoryTotalBytes: Int64?
+    let temperatureC: Double?
+    let powerWatts: Double?
+
+    enum CodingKeys: String, CodingKey {
+        case index, name
+        case utilizationRatio = "utilization_ratio"
+        case memoryUsedBytes = "memory_used_bytes"
+        case memoryTotalBytes = "memory_total_bytes"
+        case temperatureC = "temperature_c"
+        case powerWatts = "power_watts"
+    }
+}
+
 struct PilotRoom: Codable, Identifiable, Hashable, Sendable {
     let id: String
     let name: String

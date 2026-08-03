@@ -11,6 +11,7 @@
 		260C6B29B047979CE7181505 /* PilotAPI.swift in Sources */ = {isa = PBXBuildFile; fileRef = F5C5898A0D20AD0532CB74F5 /* PilotAPI.swift */; };
 		261B33A90351935B3E847324 /* SendspinKit in Frameworks */ = {isa = PBXBuildFile; productRef = 1415F6AAF3FCC263AA335360 /* SendspinKit */; };
 		73C38B51C88460671408B296 /* VoiceAudioController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 66F7D952FA44369FC4B0D574 /* VoiceAudioController.swift */; };
+		79F03F8FEF4C54983AB1698B /* HomeLabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F32B41CB078609AA107FD80 /* HomeLabView.swift */; };
 		93570751D7B731E10026294F /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0403CF9AD9A373A5C4ECA2C /* Models.swift */; };
 		9778D75A4D000C2405F0F53E /* PilotTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5169EE5BCE182D7B1AFBC22B /* PilotTests.swift */; };
 		A2F6BD8D8D4A937B4D8CD6E3 /* PhonePlaybackController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B45F19FEC453C7C45B90BB83 /* PhonePlaybackController.swift */; };
@@ -32,6 +33,7 @@
 
 /* Begin PBXFileReference section */
 		033B7B0DFB321D06AF6959AE /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		2F32B41CB078609AA107FD80 /* HomeLabView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeLabView.swift; sourceTree = "<group>"; };
 		5169EE5BCE182D7B1AFBC22B /* PilotTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PilotTests.swift; sourceTree = "<group>"; };
 		51E6679F15E94024CDFE97BC /* PilotClientKit */ = {isa = PBXFileReference; lastKnownFileType = folder; name = PilotClientKit; path = ../../packages/PilotClientKit; sourceTree = SOURCE_ROOT; };
 		66F7D952FA44369FC4B0D574 /* VoiceAudioController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceAudioController.swift; sourceTree = "<group>"; };
@@ -98,6 +100,7 @@
 			isa = PBXGroup;
 			children = (
 				83A4E73A78886F255F2ED460 /* Assets.xcassets */,
+				2F32B41CB078609AA107FD80 /* HomeLabView.swift */,
 				033B7B0DFB321D06AF6959AE /* Info.plist */,
 				B0403CF9AD9A373A5C4ECA2C /* Models.swift */,
 				B45F19FEC453C7C45B90BB83 /* PhonePlaybackController.swift */,
@@ -206,6 +209,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				79F03F8FEF4C54983AB1698B /* HomeLabView.swift in Sources */,
 				93570751D7B731E10026294F /* Models.swift in Sources */,
 				A2F6BD8D8D4A937B4D8CD6E3 /* PhonePlaybackController.swift in Sources */,
 				260C6B29B047979CE7181505 /* PilotAPI.swift in Sources */,

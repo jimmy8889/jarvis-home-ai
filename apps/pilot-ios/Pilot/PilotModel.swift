@@ -33,6 +33,9 @@ final class PilotModel {
     var dashboard = DashboardSnapshot.unavailable
     var dashboardError: String?
     var dashboardActionInFlight = false
+    var homelab = HomeLabSnapshot.unavailable
+    var homelabError: String?
+    var isLoadingHomeLab = false
     var musicBrowsePage: MusicBrowsePage?
     var isBrowsingMusic = false
     var home: HomeProjection?
@@ -73,6 +76,7 @@ final class PilotModel {
         static let homeCache = "pilot.cache.home.v1"
         static let energyCache = "pilot.cache.energy.v1"
         static let dashboardCache = "pilot.cache.dashboard.v1"
+        static let homelabCache = "pilot.cache.homelab.v1"
         static let meetingsCache = "pilot.cache.meetings.v1"
         static let cacheDate = "pilot.cache.date.v1"
         static let pendingMeetings = "pilot.pendingMeetings.v1"
@@ -284,6 +288,7 @@ final class PilotModel {
             await refreshHome(silent: true)
             await refreshEnergy(silent: true)
             await refreshDashboard(silent: true)
+            await refreshHomeLab(silent: true)
             await refreshMeetings(silent: true)
             return true
         } catch {
@@ -318,6 +323,7 @@ final class PilotModel {
             await refreshHome(silent: true)
             await refreshEnergy(silent: true)
             await refreshDashboard(silent: true)
+            await refreshHomeLab(silent: true)
             await refreshMeetings(silent: true)
             return true
         } catch {
@@ -356,6 +362,19 @@ final class PilotModel {
                     detail: energyError
                 )
             }
+        }
+    }
+
+    func refreshHomeLab(silent: Bool = false, force: Bool = false) async {
+        guard hasActiveConfiguration else { return }
+        if !silent { isLoadingHomeLab = true }
+        defer { isLoadingHomeLab = false }
+        do {
+            homelab = try await api().homelab(force: force)
+            homelabError = nil
+            cache(homelab: homelab)
+        } catch {
+            homelabError = Self.friendlyMessage(for: error)
         }
     }
 
@@ -469,6 +488,8 @@ final class PilotModel {
         } else if normalized.contains("energy") {
             await refreshEnergy(silent: true)
             await refreshDashboard(silent: true)
+        } else if normalized.contains("homelab") || normalized.contains("telemetry") {
+            await refreshHomeLab(silent: true)
         }
     }
 
@@ -1110,6 +1131,12 @@ final class PilotModel {
             dashboard = cached
         }
         if
+            let data = defaults.data(forKey: StorageKey.homelabCache),
+            let cached = try? decoder.decode(HomeLabSnapshot.self, from: data)
+        {
+            homelab = cached
+        }
+        if
             let data = defaults.data(forKey: StorageKey.meetingsCache),
             let cached = try? decoder.decode([PilotMeeting].self, from: data)
         {
@@ -1158,6 +1185,13 @@ final class PilotModel {
     private func cache(dashboard: DashboardSnapshot) {
         if let data = try? JSONEncoder().encode(dashboard) {
             UserDefaults.standard.set(data, forKey: StorageKey.dashboardCache)
+        }
+        markCacheUpdated()
+    }
+
+    private func cache(homelab: HomeLabSnapshot) {
+        if let data = try? JSONEncoder().encode(homelab) {
+            UserDefaults.standard.set(data, forKey: StorageKey.homelabCache)
         }
         markCacheUpdated()
     }

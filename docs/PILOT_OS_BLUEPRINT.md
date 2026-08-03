@@ -1,6 +1,6 @@
 # Pilot OS Blueprint
 
-Version 4.13
+Version 4.14
 
 Last updated: 2026-08-04
 
@@ -1280,3 +1280,10 @@ deployed integration, hardware boundary, or milestone status changes.
   remain explicit in-person gates. The test also identified third-party FLAC
   files carrying placeholder `PMEDIA` ISRCs that Music Assistant merges; those
   tags require library cleanup and rescan rather than endpoint work.
+- **4.14** — Added the Home Lab product surface and normalized
+  `pilot.homelab.v1` contract. Pilot Core now owns read-only Proxmox cluster,
+  workload and storage collection; TrueNAS system, pool, disk, SMART
+  temperature and alert collection; and capability-scoped host/GPU telemetry.
+  Pilot iOS adds a cached Home Lab tab for node, accelerator, storage, thermal,
+  alert and virtual-estate state. Upstream credentials remain server-side and
+  provider failures degrade independently instead of hiding the rest of the lab.

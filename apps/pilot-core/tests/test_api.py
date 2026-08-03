@@ -105,6 +105,15 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("office", {room["id"] for room in response.json()["rooms"]})
 
+    def test_admin_homelab_snapshot_is_authenticated_and_versioned(self) -> None:
+        self.assertEqual(self.client.get("/v1/homelab").status_code, 401)
+        response = self.client.get(
+            "/v1/homelab", headers={"Authorization": "Bearer admin-test"}
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["schema_version"], "pilot.homelab.v1")
+        self.assertEqual(response.headers["Cache-Control"], "no-store")
+
     def test_meeting_ingestion_transcript_and_analysis_are_local_and_reviewable(
         self,
     ) -> None:
@@ -362,7 +371,7 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.headers["cache-control"], "no-store")
         payload = response.json()
-        self.assertEqual(payload["deployment"]["version"], "0.31.1")
+        self.assertEqual(payload["deployment"]["version"], "0.32.0")
         self.assertEqual(payload["summary"]["room_count"], 2)
         self.assertEqual(payload["summary"]["device_count"], 0)
         self.assertEqual(payload["summary"]["armed_room_count"], 0)

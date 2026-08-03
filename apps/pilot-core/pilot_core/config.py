@@ -88,6 +88,14 @@ class IntegrationSettings:
     temperature_tv_room_entity_id: str = ""
     temperature_bedroom_entity_id: str = ""
     temperature_media_room_entity_id: str = ""
+    proxmox_url: str = ""
+    proxmox_token_id: str = ""
+    proxmox_token_secret_env: str = "PROXMOX_TOKEN_SECRET"
+    proxmox_verify_tls: bool = True
+    truenas_url: str = ""
+    truenas_token_env: str = "TRUENAS_API_KEY"
+    truenas_verify_tls: bool = True
+    homelab_cache_seconds: int = 15
     home_catalog_sync_interval_seconds: int = 300
     home_catalog_stale_after_seconds: int = 900
     home_catalog_max_entities: int = 20_000
@@ -717,6 +725,26 @@ def load_settings(path: str | Path) -> Settings:
         temperature_media_room_entity_id=str(
             integration_values.get("temperature_media_room_entity_id", "")
         ).strip(),
+        proxmox_url=str(integration_values.get("proxmox_url", "")).rstrip("/"),
+        proxmox_token_id=str(integration_values.get("proxmox_token_id", "")).strip(),
+        proxmox_token_secret_env=str(
+            integration_values.get(
+                "proxmox_token_secret_env", "PROXMOX_TOKEN_SECRET"
+            )
+        ).strip(),
+        proxmox_verify_tls=bool(
+            integration_values.get("proxmox_verify_tls", True)
+        ),
+        truenas_url=str(integration_values.get("truenas_url", "")).rstrip("/"),
+        truenas_token_env=str(
+            integration_values.get("truenas_token_env", "TRUENAS_API_KEY")
+        ).strip(),
+        truenas_verify_tls=bool(
+            integration_values.get("truenas_verify_tls", True)
+        ),
+        homelab_cache_seconds=int(
+            integration_values.get("homelab_cache_seconds", 15)
+        ),
         home_catalog_sync_interval_seconds=int(
             integration_values.get("home_catalog_sync_interval_seconds", 300)
         ),
@@ -777,6 +805,19 @@ def load_settings(path: str | Path) -> Settings:
             "integrations.home_catalog_sync_interval_seconds must be between "
             "30 and 86400"
         )
+    if not 5 <= integrations.homelab_cache_seconds <= 300:
+        raise ValueError(
+            "integrations.homelab_cache_seconds must be between 5 and 300"
+        )
+    for field, value in (
+        ("proxmox_url", integrations.proxmox_url),
+        ("truenas_url", integrations.truenas_url),
+    ):
+        if not value:
+            continue
+        parsed = urlparse(value)
+        if parsed.scheme not in {"http", "https", "ws", "wss"} or not parsed.hostname:
+            raise ValueError(f"integrations.{field} must be a valid service URL")
     if not 60 <= integrations.home_catalog_stale_after_seconds <= 604_800:
         raise ValueError(
             "integrations.home_catalog_stale_after_seconds must be between "

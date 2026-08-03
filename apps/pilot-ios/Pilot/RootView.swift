@@ -7,6 +7,7 @@ enum PilotSection: String, CaseIterable, Identifiable {
     case home
     case music
     case meetings
+    case homelab
     case assistant
     case settings
 
@@ -17,6 +18,7 @@ enum PilotSection: String, CaseIterable, Identifiable {
         case .home: "Home"
         case .music: "Music"
         case .meetings: "Meetings"
+        case .homelab: "Lab"
         case .assistant: "Pilot"
         case .settings: "Settings"
         }
@@ -27,6 +29,7 @@ enum PilotSection: String, CaseIterable, Identifiable {
         case .home: "house.fill"
         case .music: "music.note"
         case .meetings: "waveform.badge.mic"
+        case .homelab: "server.rack"
         case .assistant: "waveform.circle.fill"
         case .settings: "gearshape.fill"
         }
@@ -203,6 +206,7 @@ struct RootView: View {
         case .home: HomeView()
         case .music: MusicView()
         case .meetings: MeetingsView()
+        case .homelab: HomeLabView()
         case .assistant: AssistantView()
         case .settings: SettingsView()
         }

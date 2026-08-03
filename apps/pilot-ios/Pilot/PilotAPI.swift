@@ -51,6 +51,18 @@ struct PilotAPI: Sendable {
         return try JSONDecoder().decode(DashboardSnapshot.self, from: data)
     }
 
+    func homelab(force: Bool = false) async throws -> HomeLabSnapshot {
+        let transport = try PilotClientKit.PilotTransport(
+            credentials: .init(coreURL: coreURL, deviceID: deviceID, deviceToken: token),
+            allowsInsecureHTTP: true
+        )
+        let data = try await transport.data(
+            path: "v1/devices/\(deviceID)/homelab",
+            queryItems: force ? [URLQueryItem(name: "force", value: "true")] : []
+        )
+        return try JSONDecoder().decode(HomeLabSnapshot.self, from: data)
+    }
+
     func dashboardAction(_ action: String, value: String) async throws {
         let body = try JSONSerialization.data(withJSONObject: [
             "action": action,

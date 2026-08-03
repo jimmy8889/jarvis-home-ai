@@ -64,6 +64,16 @@ temperature_office_entity_id = ""
 temperature_tv_room_entity_id = ""
 temperature_bedroom_entity_id = ""
 temperature_media_room_entity_id = ""
+# Read-only infrastructure monitoring. Use a PVEAuditor token and a TrueNAS
+# API key assigned only the reporting/pool/disk read roles.
+proxmox_url = ""
+proxmox_token_id = ""
+proxmox_token_secret_env = "PROXMOX_TOKEN_SECRET"
+proxmox_verify_tls = true
+truenas_url = ""
+truenas_token_env = "TRUENAS_API_KEY"
+truenas_verify_tls = true
+homelab_cache_seconds = 15
 # Local TTS stays disabled until the provider and engine are confirmed.
 tts_provider = ""
 # To reuse the Home Assistant Piper integration:

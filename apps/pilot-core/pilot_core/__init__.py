@@ -1,3 +1,3 @@
 """Pilot Core room and player registry."""
 
-__version__ = "0.29.3"
+__version__ = "0.30.1"

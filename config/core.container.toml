@@ -7,8 +7,12 @@ audio_asset_max_bytes = 20000000
 audio_asset_retention_seconds = 3600
 meeting_asset_path = "/data/meetings"
 meeting_asset_max_bytes = 2000000000
+public_upload_base_url = "https://pilot-upload.jameshomeautomation.work"
+public_client_base_url = "https://pilot.jameshomeautomation.work"
 firmware_asset_path = "/data/firmware"
 firmware_asset_max_bytes = 8000000
+vehicle_asset_path = "/data/vehicle-assets"
+vehicle_asset_max_bytes = 10000000
 voice_audio_max_bytes = 1000000
 conversation_session_ttl_seconds = 900
 conversation_max_turns = 20
@@ -47,6 +51,8 @@ amber_import_price_entity_id = "sensor.amber_01k9pncwz9prbf508wt588p9mn_amber_pr
 amber_feed_in_price_entity_id = "sensor.amber_01k9pncwz9prbf508wt588p9mn_amber_fit_now"
 amber_feed_in_forecast_entity_id = "sensor.amber_express_home_feed_in_price"
 tesla_charging_mode_entity_id = "input_select.tesla_charging_mode"
+teslamate_adapter_url = "http://10.0.1.192:8781"
+teslamate_adapter_token_env = "PILOT_TESLAMATE_ADAPTER_TOKEN"
 media_room_mode_on_script_id = "script.movie_mode_on"
 media_room_mode_off_script_id = "script.movie_mode_off"
 temperature_office_entity_id = "sensor.office_broadlink_temperature"
@@ -65,20 +71,257 @@ tts_sample_rate = 16000
 tts_sample_channels = 1
 tts_sample_bytes = 2
 tts_timeout_seconds = 60
-llm_provider = "openai"
-llm_url = "http://10.0.1.20:11434/v1"
+llm_provider = "vllm"
+llm_url = "http://10.0.1.20:8000/v1"
 llm_token_env = "PILOT_LLM_TOKEN"
-llm_model = "qwen3.5:9b"
-llm_reasoning_effort = "none"
+llm_model = "auto"
+llm_reasoning_effort = ""
 llm_timeout_seconds = 60
+llm_max_output_tokens = 1024
 llm_max_tool_rounds = 4
 llm_context_turns = 12
 meeting_stt_url = ""
 meeting_stt_token_env = "PILOT_MEETING_STT_TOKEN"
 meeting_stt_model = "whisper-1"
 meeting_stt_timeout_seconds = 600
-meeting_analysis_model = "gemma4:12b"
+meeting_analysis_model = "auto"
 meeting_transcript_max_characters = 500000
+
+[[integrations.llm_backends]]
+id = "ai3090-primary"
+url = "http://10.0.1.20:8000/v1"
+token_env = "PILOT_LLM_3090_TOKEN"
+model = "primary"
+roles = ["assistant", "reasoning", "meeting"]
+priority = 10
+max_output_tokens = 1536
+timeout_seconds = 90
+
+# The RTX 3080 exposes one GPU mode at a time. When verifier mode is active it
+# is a bounded assistant fallback; in speech mode this route is simply offline.
+[[integrations.llm_backends]]
+id = "ai3080-verifier"
+url = "http://10.0.1.43:8000/v1"
+token_env = "PILOT_LLM_3080_TOKEN"
+model = "verifier"
+roles = ["assistant", "verification"]
+priority = 100
+max_output_tokens = 1024
+timeout_seconds = 60
+
+[[integrations.llm_backends]]
+id = "ai3080-vision"
+url = "http://10.0.1.43:8000/v1"
+token_env = "PILOT_LLM_3080_TOKEN"
+model = "vision"
+roles = ["vision"]
+priority = 10
+max_output_tokens = 1024
+timeout_seconds = 60
+
+[[vehicles]]
+id = "jarvis"
+name = "Jarvis"
+teslamate_car_id = 1
+default_climate_target_c = 22.0
+
+[vehicles.telemetry]
+state = "sensor.tesla_state"
+online = "binary_sensor.jarvis_online"
+battery_percent = "sensor.jarvis_battery"
+rated_range_km = "sensor.tesla_rated_battery_range_km"
+ideal_range_km = "sensor.tesla_ideal_battery_range_km"
+odometer_km = "sensor.jarvis_odometer"
+latitude = "device_tracker.jarvis_location_tracker"
+longitude = "device_tracker.jarvis_location_tracker"
+location_name = "device_tracker.jarvis_location_tracker"
+inside_temperature_c = "sensor.jarvis_temperature_inside"
+outside_temperature_c = "sensor.jarvis_temperature_outside"
+locked = "lock.jarvis_doors"
+doors = "binary_sensor.jarvis_doors"
+windows = "binary_sensor.jarvis_windows"
+frunk = "cover.jarvis_frunk"
+trunk = "cover.jarvis_trunk"
+software_version = "sensor.tesla_version"
+software_update = "update.jarvis_software_update"
+charging_state = "sensor.tesla_charging_state"
+charge_port = "cover.jarvis_charger_door"
+charge_limit_percent = "sensor.tesla_charge_limit_soc"
+charge_rate_kw = "sensor.jarvis_charger_power"
+time_to_full_hours = "sensor.tesla_time_to_full_charge"
+energy_added_kwh = "sensor.jarvis_energy_added"
+tyre_front_left_bar = "sensor.tesla_tpms_pressure_fl"
+tyre_front_right_bar = "sensor.tesla_tpms_pressure_fr"
+tyre_rear_left_bar = "sensor.tesla_tpms_pressure_rl"
+tyre_rear_right_bar = "sensor.tesla_tpms_pressure_rr"
+
+[vehicles.controls.wake]
+domain = "button"
+service = "press"
+entity_id = "button.jarvis_wake_up"
+
+[vehicles.controls.lock]
+domain = "lock"
+service = "lock"
+entity_id = "lock.jarvis_doors"
+observable_entity_id = "lock.jarvis_doors"
+
+[vehicles.controls.unlock]
+domain = "lock"
+service = "unlock"
+entity_id = "lock.jarvis_doors"
+observable_entity_id = "lock.jarvis_doors"
+
+[vehicles.controls.open_frunk]
+domain = "cover"
+service = "open_cover"
+entity_id = "cover.jarvis_frunk"
+observable_entity_id = "cover.jarvis_frunk"
+
+[vehicles.controls.open_trunk]
+domain = "cover"
+service = "open_cover"
+entity_id = "cover.jarvis_trunk"
+observable_entity_id = "cover.jarvis_trunk"
+
+[vehicles.controls.close_trunk]
+domain = "cover"
+service = "close_cover"
+entity_id = "cover.jarvis_trunk"
+observable_entity_id = "cover.jarvis_trunk"
+
+[vehicles.controls.vent_windows]
+domain = "cover"
+service = "open_cover"
+entity_id = "cover.jarvis_windows"
+observable_entity_id = "cover.jarvis_windows"
+
+[vehicles.controls.close_windows]
+domain = "cover"
+service = "close_cover"
+entity_id = "cover.jarvis_windows"
+observable_entity_id = "cover.jarvis_windows"
+
+[vehicles.controls.climate_on]
+domain = "climate"
+service = "turn_on"
+entity_id = "climate.jarvis_hvac_climate_system"
+observable_entity_id = "climate.jarvis_hvac_climate_system"
+
+[vehicles.controls.climate_off]
+domain = "climate"
+service = "turn_off"
+entity_id = "climate.jarvis_hvac_climate_system"
+observable_entity_id = "climate.jarvis_hvac_climate_system"
+
+[vehicles.controls.set_temperature]
+domain = "climate"
+service = "set_temperature"
+entity_id = "climate.jarvis_hvac_climate_system"
+
+[vehicles.controls.set_seat_heat_front_left]
+domain = "select"
+service = "select_option"
+entity_id = "select.jarvis_heated_seat_left"
+observable_entity_id = "select.jarvis_heated_seat_left"
+
+[vehicles.controls.set_seat_heat_front_right]
+domain = "select"
+service = "select_option"
+entity_id = "select.jarvis_heated_seat_right"
+observable_entity_id = "select.jarvis_heated_seat_right"
+
+[vehicles.controls.set_seat_heat_rear_left]
+domain = "select"
+service = "select_option"
+entity_id = "select.jarvis_heated_seat_rear_left"
+observable_entity_id = "select.jarvis_heated_seat_rear_left"
+
+[vehicles.controls.set_seat_heat_rear_center]
+domain = "select"
+service = "select_option"
+entity_id = "select.jarvis_heated_seat_rear_center"
+observable_entity_id = "select.jarvis_heated_seat_rear_center"
+
+[vehicles.controls.set_seat_heat_rear_right]
+domain = "select"
+service = "select_option"
+entity_id = "select.jarvis_heated_seat_rear_right"
+observable_entity_id = "select.jarvis_heated_seat_rear_right"
+
+[vehicles.controls.set_steering_heat]
+domain = "select"
+service = "select_option"
+entity_id = "select.jarvis_heated_steering_wheel"
+observable_entity_id = "select.jarvis_heated_steering_wheel"
+
+[vehicles.controls.start_charging]
+domain = "switch"
+service = "turn_on"
+entity_id = "switch.jarvis_charger"
+observable_entity_id = "switch.jarvis_charger"
+
+[vehicles.controls.stop_charging]
+domain = "switch"
+service = "turn_off"
+entity_id = "switch.jarvis_charger"
+observable_entity_id = "switch.jarvis_charger"
+
+[vehicles.controls.set_charge_limit]
+domain = "number"
+service = "set_value"
+entity_id = "number.jarvis_charge_limit"
+observable_entity_id = "number.jarvis_charge_limit"
+
+[vehicles.controls.sentry_on]
+domain = "switch"
+service = "turn_on"
+entity_id = "switch.jarvis_sentry_mode"
+observable_entity_id = "switch.jarvis_sentry_mode"
+
+[vehicles.controls.sentry_off]
+domain = "switch"
+service = "turn_off"
+entity_id = "switch.jarvis_sentry_mode"
+observable_entity_id = "switch.jarvis_sentry_mode"
+
+[vehicles.controls.valet_on]
+domain = "switch"
+service = "turn_on"
+entity_id = "switch.jarvis_valet_mode"
+observable_entity_id = "switch.jarvis_valet_mode"
+
+[vehicles.controls.valet_off]
+domain = "switch"
+service = "turn_off"
+entity_id = "switch.jarvis_valet_mode"
+observable_entity_id = "switch.jarvis_valet_mode"
+
+[vehicles.controls.flash_lights]
+domain = "button"
+service = "press"
+entity_id = "button.jarvis_flash_lights"
+
+[vehicles.controls.honk_horn]
+domain = "button"
+service = "press"
+entity_id = "button.jarvis_horn"
+
+[vehicles.controls.remote_start]
+domain = "button"
+service = "press"
+entity_id = "button.jarvis_remote_start"
+
+[vehicles.controls.install_software]
+domain = "update"
+service = "install"
+entity_id = "update.jarvis_software_update"
+observable_entity_id = "update.jarvis_software_update"
+
+[vehicles.controls.send_route]
+domain = "tesla_custom"
+service = "api"
+provider_vehicle_id_env = "PILOT_TESLA_VEHICLE_ID"
 
 [[rooms]]
 id = "bedroom"

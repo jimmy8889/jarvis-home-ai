@@ -69,34 +69,50 @@ Music Assistant and their existing control gates.
 
 ## Configuration
 
-Pilot supports a local OpenAI-compatible endpoint, including an Ollama `/v1`
-endpoint:
+Pilot supports authenticated vLLM/OpenAI-compatible endpoints. A single-model
+server can use `llm_model = "auto"`; production uses an explicit multi-GPU
+pool so routing and fallback remain deterministic:
 
 ```toml
 [integrations]
-llm_provider = "openai"
-llm_url = "http://RTX_HOST:11434/v1"
+llm_provider = "vllm"
+llm_url = "http://VLLM_HOST:8000/v1"
 llm_token_env = "PILOT_LLM_TOKEN"
-llm_model = "LOCAL_TOOL_CAPABLE_MODEL"
-llm_reasoning_effort = "none"
+llm_model = "auto"
 llm_timeout_seconds = 60
+llm_max_output_tokens = 1024
 llm_max_tool_rounds = 4
 llm_context_turns = 12
+
+[[integrations.llm_backends]]
+id = "ai3090-primary"
+url = "http://ai3090:8000/v1"
+token_env = "PILOT_LLM_3090_TOKEN"
+model = "primary"
+roles = ["assistant", "reasoning", "meeting"]
+priority = 10
+
+[[integrations.llm_backends]]
+id = "ai3080-verifier"
+url = "http://ai3080:8000/v1"
+token_env = "PILOT_LLM_3080_TOKEN"
+model = "verifier"
+roles = ["assistant", "verification"]
+priority = 100
 ```
 
-The token is optional for a private unauthenticated Ollama listener. Never
-expose that listener outside trusted infrastructure. The deployed production
-configuration uses `qwen3.5:9b` at `10.0.1.20:11434/v1`. Its native tool call
-selected the inside-temperature tool with schema-correct arguments.
-`reasoning_effort = "none"` is deliberate for voice latency: the same warm
-model answered a short factual question in about one second rather than
-spending many seconds generating hidden reasoning tokens.
+Tokens are supplied through Docker secrets and are never returned by the
+dashboard or client APIs. Pilot tries matching routes in priority order and
+records the active backend. The RTX 3080 is mode-switched: its verifier and
+vision routes are available only when that GPU mode is active; while it runs
+STT/TTS those LLM routes correctly report unavailable. The always-on RTX 3090
+route remains the normal assistant and meeting-analysis path.
 
 The `Pilot Core Conversation` custom integration makes Pilot Core a selectable
 Home Assistant conversation agent. The Office pipeline retains Faster Whisper
 for STT and Piper for TTS, while recognized text passes through a dedicated,
 room-bound Pilot device credential. Pilot then tries Home Assistant's
-deterministic agent first and uses the local RTX/Ollama tool loop only where
+deterministic agent first and uses the local vLLM tool loop only where
 needed.
 
 This converges the Office satellite, embedded displays, Raspberry Pi surfaces,
@@ -110,6 +126,7 @@ Installation and pipeline selection are documented in
 ## Administration
 
 - `GET /v1/assistant/status`
+- `GET /v1/assistant/models` (live per-backend availability and served models)
 - `GET /v1/conversations`
 - `GET /v1/conversations/{conversation_id}`
 - `DELETE /v1/conversations/{conversation_id}`

@@ -16,7 +16,7 @@ jobs:
   python:
     name: Python services
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v6
@@ -26,15 +26,17 @@ jobs:
           cache-dependency-path: |
             apps/pilot-core/pyproject.toml
             apps/room-agent/pyproject.toml
+            apps/teslamate-adapter/pyproject.toml
       - name: Install services and checks
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -e apps/pilot-core -e apps/room-agent ruff
+          python -m pip install -e apps/pilot-core -e apps/room-agent -e apps/teslamate-adapter ruff
       - name: Lint
         run: >-
           ruff check
           apps/pilot-core
           apps/room-agent
+          apps/teslamate-adapter
           deploy/scripts/pilot-register-device
           deploy/scripts/pilot-command
           deploy/scripts/pilot-media
@@ -52,6 +54,12 @@ jobs:
         run: python -m unittest discover -s apps/room-agent/tests -v
       - name: Test Pilot Core
         run: python -m unittest discover -s apps/pilot-core/tests -v
+      - name: Test TeslaMate adapter
+        run: python -m unittest discover -s apps/teslamate-adapter/tests -p 'test_*.py' -v
+      - name: Test TeslaMate 4.0.1 schema and read-only role
+        env:
+          PILOT_TESLAMATE_TEST_PYTHON: python
+        run: apps/teslamate-adapter/tests/integration/run.sh
       - name: Test Pilot Core backup archive
         run: python -m unittest discover -s infra/pilot-core/tests -v
       - name: Test Raspberry Pi display node
@@ -67,6 +75,7 @@ jobs:
           python -m compileall -q
           apps/pilot-core/pilot_core
           apps/room-agent/pilot_room_agent
+          apps/teslamate-adapter/teslamate_adapter
           apps/display-node/pilot_display_node
       - name: Validate product schema JSON
         run: |
@@ -97,6 +106,7 @@ jobs:
           bash -n firmware/pilot-display-node/scripts/build.sh
           bash -n firmware/pilot-display-node/scripts/flash.sh
           bash -n firmware/pilot-display-node/scripts/package-release.sh
+          bash -n apps/teslamate-adapter/tests/integration/run.sh
       - name: Check Python deployment scripts
         run: >-
           python -m py_compile
@@ -148,6 +158,10 @@ jobs:
             http://127.0.0.1:8770/v1/integrations/diagnostics \
             >/dev/null
           unset admin_token
+      - name: Check TeslaMate sidecar image and Compose definition
+        run: |
+          docker build -t pilot-teslamate-adapter-ci apps/teslamate-adapter
+          docker compose -f infra/teslamate-adapter/docker-compose.pilot.yml config --quiet
       - name: Check playbook syntax
         run: >-
           ansible-playbook
@@ -201,12 +215,12 @@ jobs:
     name: Pilot iOS
     runs-on: macos-15
     timeout-minutes: 15
-    defaults:
-      run:
-        working-directory: apps/pilot-ios
     steps:
       - uses: actions/checkout@v7
+      - name: Test shared Pilot client package
+        run: xcrun swift test --package-path packages/PilotClientKit
       - name: Build and test Pilot for iPhone and iPad
+        working-directory: apps/pilot-ios
         shell: bash
         run: |
           destination_id="$(
@@ -224,4 +238,36 @@ jobs:
             GENERATE_INFOPLIST_FILE=YES \
             CODE_SIGNING_ALLOWED=NO \
             SWIFT_VERSION=5.0 \
+            test
+      - name: Build and test Pilot Drive for iPhone and iPad
+        working-directory: apps/pilot-drive
+        shell: bash
+        run: |
+          destination_id="$(
+            xcrun simctl list devices available -j |
+              python3 -c 'import json,sys; data=json.load(sys.stdin); print(next(item["udid"] for rows in data["devices"].values() for item in rows if item["name"].startswith("iPhone")))'
+          )"
+          ipad_destination_id="$(
+            xcrun simctl list devices available -j |
+              python3 -c 'import json,sys; data=json.load(sys.stdin); print(next(item["udid"] for rows in data["devices"].values() for item in rows if item["name"].startswith("iPad")))'
+          )"
+          if /usr/libexec/PlistBuddy -c 'Print :NSAppTransportSecurity' PilotDrive/Info.plist >/dev/null 2>&1; then
+            echo 'Pilot Drive must not contain an ATS exception' >&2
+            exit 1
+          fi
+          xcodebuild \
+            -project PilotDrive.xcodeproj \
+            -scheme PilotDrive \
+            -sdk iphonesimulator \
+            -destination "platform=iOS Simulator,id=${destination_id}" \
+            -derivedDataPath "$RUNNER_TEMP/PilotDriveDerivedData" \
+            CODE_SIGNING_ALLOWED=NO \
+            test
+          xcodebuild \
+            -project PilotDrive.xcodeproj \
+            -scheme PilotDrive \
+            -sdk iphonesimulator \
+            -destination "platform=iOS Simulator,id=${ipad_destination_id}" \
+            -derivedDataPath "$RUNNER_TEMP/PilotDriveIPadDerivedData" \
+            CODE_SIGNING_ALLOWED=NO \
             test

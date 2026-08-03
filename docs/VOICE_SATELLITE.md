@@ -53,7 +53,7 @@ Engine acceptance is separate from physical room acceptance:
 
 ```bash
 deploy/scripts/pilot-voice-acceptance \
-  --core-url http://10.0.1.64:8770
+  --core-url https://pilot.jameshomeautomation.work
 ```
 
 This test proves Piper-to-Faster-Whisper locally without producing room audio.

@@ -82,6 +82,7 @@ class AudioFetcher:
                 "Authorization": f"Bearer {token}",
                 "X-Pilot-Device-ID": self.settings.core_device_id,
                 "Accept": normalized_type,
+                "User-Agent": "Pilot-Room-Agent/1",
             },
         )
 

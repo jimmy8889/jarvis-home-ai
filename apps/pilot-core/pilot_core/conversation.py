@@ -8,7 +8,7 @@ from urllib.parse import urlsplit
 
 import httpx
 
-from .config import IntegrationSettings
+from .config import IntegrationSettings, LLMBackend
 from .home_intelligence import (
     HOME_READ_TOOL_NAMES,
     HomeIntelligence,
@@ -268,31 +268,199 @@ def _required_read_tool(text: str) -> str | None:
 
 
 class OpenAICompatibleLLM:
-    """Small, bounded client for a local OpenAI-compatible chat endpoint."""
+    """Small, bounded client for a local OpenAI-compatible inference endpoint.
+
+    vLLM exposes the OpenAI models and chat-completions resources.  ``auto`` is
+    useful for a single-model vLLM server because it binds Pilot to the served
+    model ID instead of duplicating that deployment detail in Core's config.
+    """
 
     def __init__(
         self,
         settings: IntegrationSettings,
         transport: httpx.AsyncBaseTransport | None = None,
         model: str | None = None,
+        role: str = "assistant",
     ) -> None:
         self.settings = settings
         self.transport = transport
+        self.role = role
         self.model = model or settings.llm_model
+        self._resolved_models: dict[str, str] = {}
+        self._active_backend_id: str | None = None
+
+    def _backends(self, *, all_roles: bool = False) -> tuple[LLMBackend, ...]:
+        if self.settings.llm_backends:
+            candidates = tuple(
+                backend
+                for backend in self.settings.llm_backends
+                if all_roles or self.role in backend.roles
+            )
+            return tuple(sorted(candidates, key=lambda item: item.priority))
+        if not (
+            self.settings.llm_provider in {"openai", "vllm"}
+            and self.settings.llm_url
+            and self.model
+        ):
+            return ()
+        return (
+            LLMBackend(
+                id="default",
+                url=self.settings.llm_url,
+                model=self.model,
+                token_env=self.settings.llm_token_env,
+                roles=(self.role,),
+                reasoning_effort=self.settings.llm_reasoning_effort,
+                max_output_tokens=self.settings.llm_max_output_tokens,
+                timeout_seconds=self.settings.llm_timeout_seconds,
+            ),
+        )
+
+    def _configured(self) -> bool:
+        return bool(self._backends())
+
+    @staticmethod
+    def _endpoint(backend: LLMBackend, resource: str) -> str:
+        parsed = urlsplit(backend.url)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            raise LLMRequestFailed("local inference URL is invalid")
+        base = backend.url.rstrip("/")
+        suffix = f"/{resource.lstrip('/')}"
+        if base.endswith(suffix):
+            return base
+        if base.endswith("/chat/completions") or base.endswith("/models"):
+            base = base.rsplit("/", 2)[0]
+        return f"{base}{suffix}"
+
+    @staticmethod
+    def _headers(backend: LLMBackend) -> dict[str, str]:
+        headers = {"Content-Type": "application/json"}
+        token = read_secret(backend.token_env)
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        return headers
 
     def status(self) -> dict[str, Any]:
+        backends = self._backends()
+        first = backends[0] if backends else None
         return {
-            "configured": bool(
-                self.settings.llm_provider == "openai"
-                and self.settings.llm_url
-                and self.model
-            ),
+            "configured": self._configured(),
             "provider": self.settings.llm_provider or None,
-            "model": self.model or None,
-            "reasoning_effort": self.settings.llm_reasoning_effort or None,
+            "role": self.role,
+            "active_backend": self._active_backend_id,
+            "model": (
+                self._resolved_models.get(self._active_backend_id or "")
+                or (first.model if first else None)
+            ),
+            "configured_model": first.model if first else None,
+            "model_discovery": bool(first and first.model == "auto"),
+            "backend_count": len(backends),
+            "backends": [
+                {
+                    "id": backend.id,
+                    "model": self._resolved_models.get(backend.id, backend.model),
+                    "roles": list(backend.roles),
+                    "priority": backend.priority,
+                }
+                for backend in backends
+            ],
+            "reasoning_effort": first.reasoning_effort or None if first else None,
+            "max_output_tokens": first.max_output_tokens if first else None,
             "max_tool_rounds": self.settings.llm_max_tool_rounds,
             "context_turns": self.settings.llm_context_turns,
         }
+
+    async def _models_for_backend(self, backend: LLMBackend) -> list[dict[str, Any]]:
+        try:
+            async with httpx.AsyncClient(
+                timeout=min(backend.timeout_seconds, 15),
+                transport=self.transport,
+                follow_redirects=False,
+            ) as client:
+                response = await client.get(
+                    self._endpoint(backend, "models"), headers=self._headers(backend)
+                )
+                response.raise_for_status()
+                if len(response.content) > 1_000_000:
+                    raise LLMRequestFailed("local model response is too large")
+                body = response.json()
+        except LLMRequestFailed:
+            raise
+        except (httpx.HTTPError, ValueError) as error:
+            raise LLMRequestFailed(
+                f"local model discovery failed: {error}"
+            ) from error
+        items = body.get("data") if isinstance(body, dict) else None
+        if not isinstance(items, list):
+            raise LLMRequestFailed("local model discovery returned invalid data")
+        models: list[dict[str, Any]] = []
+        for item in items[:100]:
+            if not isinstance(item, dict) or not isinstance(item.get("id"), str):
+                continue
+            models.append(
+                {
+                    "id": item["id"][:512],
+                    "owned_by": str(item.get("owned_by") or "local")[:128],
+                    "created": item.get("created")
+                    if isinstance(item.get("created"), int)
+                    else None,
+                }
+            )
+        if not models:
+            raise LLMRequestFailed("local inference server exposes no models")
+        return models
+
+    async def inventory(self) -> list[dict[str, Any]]:
+        if not self._backends(all_roles=True):
+            raise AssistantUnavailable("local inference is not configured")
+        result: list[dict[str, Any]] = []
+        for backend in self._backends(all_roles=True):
+            try:
+                models = await self._models_for_backend(backend)
+                result.append(
+                    {
+                        "id": backend.id,
+                        "available": True,
+                        "configured_model": backend.model,
+                        "roles": list(backend.roles),
+                        "priority": backend.priority,
+                        "models": models,
+                    }
+                )
+            except LLMRequestFailed as error:
+                result.append(
+                    {
+                        "id": backend.id,
+                        "available": False,
+                        "configured_model": backend.model,
+                        "roles": list(backend.roles),
+                        "priority": backend.priority,
+                        "models": [],
+                        "error": str(error)[:500],
+                    }
+                )
+        return result
+
+    async def models(self) -> list[dict[str, Any]]:
+        inventory = await self.inventory()
+        models = [
+            {**model, "backend_id": backend["id"]}
+            for backend in inventory
+            if backend["available"]
+            for model in backend["models"]
+        ]
+        if not models:
+            raise LLMRequestFailed("no local inference backend is currently available")
+        return models
+
+    async def _active_model(self, backend: LLMBackend) -> str:
+        if backend.model != "auto":
+            return backend.model
+        if backend.id in self._resolved_models:
+            return self._resolved_models[backend.id]
+        models = await self._models_for_backend(backend)
+        self._resolved_models[backend.id] = models[0]["id"]
+        return self._resolved_models[backend.id]
 
     async def chat(
         self,
@@ -303,47 +471,43 @@ class OpenAICompatibleLLM:
     ) -> dict[str, Any]:
         if not self.status()["configured"]:
             raise AssistantUnavailable("local LLM is not configured")
-        parsed = urlsplit(self.settings.llm_url)
-        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
-            raise LLMRequestFailed("local LLM URL is invalid")
-        endpoint = self.settings.llm_url
-        if not endpoint.endswith("/chat/completions"):
-            endpoint = f"{endpoint}/chat/completions"
-        headers = {"Content-Type": "application/json"}
-        token = read_secret(self.settings.llm_token_env)
-        if token:
-            headers["Authorization"] = f"Bearer {token}"
-        payload = {
-            "model": self.model,
-            "messages": messages,
-            "tools": tools,
-            "tool_choice": tool_choice,
-            "temperature": 0.2,
-        }
-        if self.settings.llm_reasoning_effort:
-            payload["reasoning_effort"] = self.settings.llm_reasoning_effort
-        try:
-            async with httpx.AsyncClient(
-                timeout=self.settings.llm_timeout_seconds,
-                transport=self.transport,
-                follow_redirects=False,
-            ) as client:
-                response = await client.post(endpoint, headers=headers, json=payload)
-                response.raise_for_status()
-                if len(response.content) > 2_000_000:
-                    raise LLMRequestFailed("local LLM response is too large")
-                body = response.json()
-        except LLMRequestFailed:
-            raise
-        except (httpx.HTTPError, ValueError) as error:
-            raise LLMRequestFailed(f"local LLM request failed: {error}") from error
-        try:
-            message = body["choices"][0]["message"]
-        except (KeyError, IndexError, TypeError) as error:
-            raise LLMRequestFailed("local LLM returned no assistant message") from error
-        if not isinstance(message, dict):
-            raise LLMRequestFailed("local LLM assistant message is invalid")
-        return message
+        failures: list[str] = []
+        for backend in self._backends():
+            try:
+                payload = {
+                    "model": await self._active_model(backend),
+                    "messages": messages,
+                    "tools": tools,
+                    "tool_choice": tool_choice,
+                    "temperature": 0.2,
+                    "max_tokens": backend.max_output_tokens,
+                }
+                if backend.reasoning_effort:
+                    payload["reasoning_effort"] = backend.reasoning_effort
+                async with httpx.AsyncClient(
+                    timeout=backend.timeout_seconds,
+                    transport=self.transport,
+                    follow_redirects=False,
+                ) as client:
+                    response = await client.post(
+                        self._endpoint(backend, "chat/completions"),
+                        headers=self._headers(backend),
+                        json=payload,
+                    )
+                    response.raise_for_status()
+                    if len(response.content) > 2_000_000:
+                        raise LLMRequestFailed("local LLM response is too large")
+                    body = response.json()
+                message = body["choices"][0]["message"]
+                if not isinstance(message, dict):
+                    raise LLMRequestFailed("local LLM assistant message is invalid")
+                self._active_backend_id = backend.id
+                return message
+            except (httpx.HTTPError, ValueError, KeyError, IndexError, TypeError, LLMRequestFailed) as error:
+                failures.append(f"{backend.id}: {str(error)[:200]}")
+        raise LLMRequestFailed(
+            "all local inference backends failed (" + "; ".join(failures) + ")"
+        )
 
 
 class AssistantTools:

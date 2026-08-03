@@ -146,10 +146,12 @@
                   <option value="tv">Media-room TV</option>
                   <option value="wall">Wall tablet</option>
                   <option value="personal">Personal phone</option>
+                  <option value="vehicle">Vehicle phone (Pilot Drive)</option>
                   <option value="display">Read-only display</option>
                 </select>
               </label>
               <button class="button button-primary" type="submit">Create pairing code</button>
+              <button id="pairing-api-key" class="button button-quiet" type="button">Issue managed API key</button>
             </form>
             <div id="pairing-result" class="pairing-result" hidden>
               <img id="pairing-qr" alt="Scan this one-time Pilot pairing code">
@@ -161,7 +163,7 @@
               <button id="pairing-copy" class="button button-quiet" type="button">Copy code</button>
             </div>
             <p class="panel-copy pairing-note">
-              The code expires quickly and can be redeemed once. The resulting device credential is narrowly scoped, independently revocable, and never exposes Home Assistant, Music Assistant, or administrator secrets.
+              Pairing codes expire quickly and can be redeemed once. Managed API keys are intended for Pilot Drive and other administrator-provisioned clients, are displayed once, and can be revoked independently. Neither route exposes provider or administrator secrets.
             </p>
           </article>
         </section>

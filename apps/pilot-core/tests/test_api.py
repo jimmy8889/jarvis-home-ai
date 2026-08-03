@@ -27,6 +27,7 @@ def settings(audio_asset_path: str = "/tmp/pilot-core-test-audio") -> Settings:
             database_path=":memory:",
             audio_asset_path=audio_asset_path,
             meeting_asset_path=str(Path(audio_asset_path) / "meetings"),
+            public_client_base_url="https://pilot.example.test",
         ),
         integrations=IntegrationSettings(),
         rooms=(
@@ -336,6 +337,7 @@ class ApiTests(unittest.TestCase):
         script = self.client.get("/dashboard/assets/app.js")
         self.assertEqual(script.status_code, 200)
         self.assertIn("sessionStorage", script.text)
+        self.assertIn('"vehicle-maintenance"', script.text)
         for asset_name in (
             "house-day.png",
             "house-day-tesla.png",
@@ -360,7 +362,7 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.headers["cache-control"], "no-store")
         payload = response.json()
-        self.assertEqual(payload["deployment"]["version"], "0.29.3")
+        self.assertEqual(payload["deployment"]["version"], "0.30.1")
         self.assertEqual(payload["summary"]["room_count"], 2)
         self.assertEqual(payload["summary"]["device_count"], 0)
         self.assertEqual(payload["summary"]["armed_room_count"], 0)
@@ -546,6 +548,49 @@ class ApiTests(unittest.TestCase):
             headers={"Authorization": f"Bearer {grant['bootstrap_token']}"},
         )
         self.assertEqual(replay.status_code, 401)
+
+    def test_admin_issues_scoped_managed_device_key_once(self) -> None:
+        request = {
+            "device_id": "pilot-drive",
+            "room_id": "office",
+            "name": "James Pilot Drive",
+            "capabilities": [
+                "portable-client",
+                "vehicle-read",
+                "vehicle-control",
+                "vehicle-maintenance",
+            ],
+        }
+        self.assertEqual(
+            self.client.post("/v1/device-credentials", json=request).status_code,
+            401,
+        )
+        issued = self.client.post(
+            "/v1/device-credentials",
+            headers={"Authorization": "Bearer admin-test"},
+            json=request,
+        )
+        self.assertEqual(issued.status_code, 201)
+        self.assertEqual(issued.headers["cache-control"], "no-store")
+        payload = issued.json()
+        self.assertEqual(payload["core_url"], "https://pilot.example.test")
+        self.assertEqual(
+            payload["credential_bundle"]["schema_version"],
+            "pilot.credentials.v1",
+        )
+        self.assertEqual(
+            payload["credential_bundle"]["device_token"],
+            payload["device_token"],
+        )
+        manifest = self.client.get(
+            "/v1/devices/pilot-drive/manifest",
+            headers={
+                "Authorization": f"Bearer {payload['device_token']}",
+                "X-Pilot-Device-ID": "pilot-drive",
+            },
+        )
+        self.assertEqual(manifest.status_code, 200)
+        self.assertTrue(manifest.json()["features"]["vehicle_read"])
 
     def test_admin_can_update_device_capabilities_without_reenrollment(self) -> None:
         token = self.register_device()

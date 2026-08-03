@@ -32,6 +32,7 @@
     "media": "/v1/devices/pilot-phone/media",
     "assistant": "/v1/devices/pilot-phone/assistant",
     "meetings": "/v1/devices/pilot-phone/meetings",
+    "meeting_recording_upload": "/v1/devices/pilot-phone/meetings/{meeting_id}/recording",
     "rotate_credentials": "/v1/devices/pilot-phone/credentials/rotate-self"
   },
   "realtime": {

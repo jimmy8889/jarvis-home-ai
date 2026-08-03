@@ -159,7 +159,7 @@ pipeline, and requires at least 80% expected-word coverage:
 
 ```bash
 deploy/scripts/pilot-voice-acceptance \
-  --core-url http://10.0.1.64:8770
+  --core-url https://pilot.jameshomeautomation.work
 ```
 
 The route is `POST /v1/voice/acceptance`. It never creates a room audio asset,

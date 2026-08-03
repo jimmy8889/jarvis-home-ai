@@ -87,7 +87,7 @@ Before an audible voice test, validate the central local speech engines:
 
 ```bash
 deploy/scripts/pilot-voice-acceptance \
-  --core-url http://10.0.1.64:8770
+  --core-url https://pilot.jameshomeautomation.work
 ```
 
 This fixed-phrase check must report the configured Piper engine and voice,

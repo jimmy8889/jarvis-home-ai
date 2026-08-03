@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
 import json
 import re
@@ -259,6 +260,69 @@ class Integrations:
                 f"Home Assistant registry snapshot failed: {error}"
             ) from error
 
+    async def home_assistant_state_changes(
+        self, entity_ids: set[str]
+    ) -> AsyncIterator[dict[str, Any]]:
+        """Yield only allowlisted state changes from HA's authenticated stream."""
+
+        if not entity_ids or any(not _ENTITY_ID.fullmatch(item) for item in entity_ids):
+            raise IntegrationRequestFailed("Home Assistant state subscription is invalid")
+        if not self.settings.home_assistant_url:
+            raise IntegrationUnavailable("Home Assistant URL is not configured")
+        token = read_secret(self.settings.home_assistant_token_env)
+        if not token:
+            raise IntegrationUnavailable("Home Assistant token is not configured")
+        base = httpx.URL(self.settings.home_assistant_url)
+        websocket_url = base.copy_with(
+            scheme="wss" if base.scheme == "https" else "ws",
+            path="/api/websocket",
+            query=None,
+            fragment=None,
+        )
+        try:
+            async with self.websocket_factory(
+                str(websocket_url),
+                open_timeout=10,
+                close_timeout=5,
+                max_size=4_000_000,
+            ) as socket:
+                required = await self._websocket_json(socket)
+                if required.get("type") != "auth_required":
+                    raise ValueError("Home Assistant did not request authentication")
+                await socket.send(
+                    json.dumps(
+                        {"type": "auth", "access_token": token},
+                        separators=(",", ":"),
+                    )
+                )
+                authenticated = await self._websocket_json(socket)
+                if authenticated.get("type") != "auth_ok":
+                    raise ValueError("Home Assistant WebSocket authentication failed")
+                await socket.send(
+                    json.dumps(
+                        {"id": 1, "type": "subscribe_events", "event_type": "state_changed"},
+                        separators=(",", ":"),
+                    )
+                )
+                subscribed = await self._websocket_json(socket)
+                if subscribed.get("type") != "result" or subscribed.get("success") is not True:
+                    raise ValueError("Home Assistant state subscription failed")
+                while True:
+                    message = await socket.recv()
+                    if isinstance(message, bytes):
+                        message = message.decode("utf-8")
+                    payload = json.loads(message)
+                    event = payload.get("event", {}) if isinstance(payload, dict) else {}
+                    data = event.get("data", {}) if isinstance(event, dict) else {}
+                    entity_id = data.get("entity_id") if isinstance(data, dict) else None
+                    new_state = data.get("new_state") if isinstance(data, dict) else None
+                    if entity_id in entity_ids and isinstance(new_state, dict):
+                        yield {"entity_id": entity_id, "state": new_state}
+        except (OSError, TimeoutError, ValueError, WebSocketException) as error:
+            raise IntegrationRequestFailed(
+                f"Home Assistant state subscription failed: {error}"
+            ) from error
+
     @staticmethod
     async def _websocket_json(socket: Any) -> dict[str, Any]:
         message = await asyncio.wait_for(socket.recv(), timeout=10)
@@ -392,6 +456,119 @@ class Integrations:
         except (httpx.HTTPError, ValueError) as error:
             raise IntegrationRequestFailed(
                 f"Home Assistant typed action failed: {error}"
+            ) from error
+
+    async def home_assistant_vehicle_action(
+        self,
+        domain: str,
+        service: str,
+        *,
+        entity_id: str = "",
+        device_id: str = "",
+        service_data: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Execute an explicitly configured vehicle service from a fixed allowlist."""
+
+        allowed = {
+            "button": {"press"},
+            "switch": {"turn_on", "turn_off"},
+            "lock": {"lock", "unlock"},
+            "cover": {"open_cover", "close_cover", "stop_cover"},
+            "climate": {"turn_on", "turn_off", "set_temperature"},
+            "number": {"set_value"},
+            "select": {"select_option"},
+            "update": {"install"},
+            "tesla_custom": {"api"},
+        }
+        if service not in allowed.get(domain, set()):
+            raise IntegrationRequestFailed("Home Assistant vehicle action is not allowed")
+        if entity_id and (
+            not _ENTITY_ID.fullmatch(entity_id)
+            or not entity_id.startswith(f"{domain}.")
+        ):
+            raise IntegrationRequestFailed("Home Assistant vehicle entity is invalid")
+        if not entity_id and not device_id and domain != "tesla_custom":
+            raise IntegrationRequestFailed("Home Assistant vehicle target is missing")
+        data = dict(service_data or {})
+        permitted_keys = {
+            "temperature",
+            "value",
+            "option",
+            "level",
+            "command",
+            "parameters",
+        }
+        if set(data) - permitted_keys:
+            raise IntegrationRequestFailed("Home Assistant vehicle data is invalid")
+        if domain == "tesla_custom":
+            if data.get("command") != "SEND_GPS_TO_VEHICLE":
+                raise IntegrationRequestFailed("Tesla Custom command is not allowed")
+            parameters = data.get("parameters")
+            if not isinstance(parameters, dict) or set(parameters) != {
+                "path_vars",
+                "lat",
+                "lon",
+                "order",
+            }:
+                raise IntegrationRequestFailed("Tesla navigation parameters are invalid")
+            path_vars = parameters.get("path_vars")
+            if (
+                not isinstance(path_vars, dict)
+                or set(path_vars) != {"vehicle_id"}
+                or not isinstance(path_vars.get("vehicle_id"), str)
+                or not path_vars["vehicle_id"]
+                or len(path_vars["vehicle_id"]) > 64
+            ):
+                raise IntegrationRequestFailed("Tesla navigation target is invalid")
+            try:
+                latitude = float(parameters["lat"])
+                longitude = float(parameters["lon"])
+            except (TypeError, ValueError) as error:
+                raise IntegrationRequestFailed(
+                    "Tesla navigation coordinates are invalid"
+                ) from error
+            if not -90 <= latitude <= 90 or not -180 <= longitude <= 180:
+                raise IntegrationRequestFailed("Tesla navigation coordinates are invalid")
+            if parameters["order"] != 0:
+                raise IntegrationRequestFailed("Tesla navigation order is invalid")
+            data["parameters"] = {
+                "path_vars": {"vehicle_id": path_vars["vehicle_id"]},
+                "lat": latitude,
+                "lon": longitude,
+                "order": 0,
+            }
+        elif "command" in data or "parameters" in data:
+            raise IntegrationRequestFailed("Home Assistant vehicle data is invalid")
+        if not self.settings.home_assistant_url:
+            raise IntegrationUnavailable("Home Assistant URL is not configured")
+        token = read_secret(self.settings.home_assistant_token_env)
+        if not token:
+            raise IntegrationUnavailable("Home Assistant token is not configured")
+        payload: dict[str, Any] = {}
+        if entity_id:
+            payload["entity_id"] = entity_id
+        if device_id:
+            payload["device_id"] = device_id
+        payload.update(data)
+        try:
+            async with httpx.AsyncClient(
+                timeout=20, transport=self.transport, follow_redirects=False
+            ) as client:
+                response = await client.post(
+                    f"{self.settings.home_assistant_url}/api/services/{domain}/{service}",
+                    headers={"Authorization": f"Bearer {token}"},
+                    json=payload,
+                )
+                response.raise_for_status()
+                result = response.json()
+                if isinstance(result, list):
+                    return {"accepted": True, "changed_state_count": min(len(result), 100)}
+                if isinstance(result, dict):
+                    return {"accepted": True}
+                raise ValueError("service response is not an object or array")
+        except (httpx.HTTPError, ValueError) as error:
+            raise IntegrationRequestFailed(
+                f"Home Assistant vehicle action failed: {error}"
             ) from error
 
     async def denon_avr_command(

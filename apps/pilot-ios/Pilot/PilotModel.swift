@@ -1,10 +1,12 @@
 import Foundation
 import Observation
 import AVFoundation
+import PilotClientKit
 
 @MainActor
 @Observable
 final class PilotModel {
+    static let productionCoreURL = "https://pilot.jameshomeautomation.work"
     let phonePlayback = PhonePlaybackController()
     var coreURL: String
     var deviceID: String
@@ -73,11 +75,20 @@ final class PilotModel {
 
     init(loadStoredSettings: Bool = true) {
         if loadStoredSettings {
-            coreURL = UserDefaults.standard.string(forKey: "pilot.coreURL")
-                ?? "http://10.0.1.64:8770"
+            let storedCoreURL = UserDefaults.standard.string(forKey: "pilot.coreURL")
+            let resolvedCoreURL = Self.migratedCoreURL(
+                storedCoreURL ?? Self.productionCoreURL
+            )
+            coreURL = resolvedCoreURL
+            if storedCoreURL != nil, resolvedCoreURL != storedCoreURL {
+                UserDefaults.standard.set(resolvedCoreURL, forKey: "pilot.coreURL")
+            }
             deviceID = UserDefaults.standard.string(forKey: "pilot.deviceID")
                 ?? "pilot-ios-james"
-            token = KeychainStore.read(account: "device-token")
+            token = PilotSecureStore.read(
+                service: "com.jameshazell.pilot",
+                account: "device-token"
+            )
             selectedRoomID = UserDefaults.standard.string(forKey: "pilot.roomID")
                 ?? "office"
             musicPlaysOnThisIPhone = UserDefaults.standard.bool(
@@ -146,7 +157,11 @@ final class PilotModel {
         UserDefaults.standard.set(activeCoreURL, forKey: "pilot.coreURL")
         UserDefaults.standard.set(activeDeviceID, forKey: "pilot.deviceID")
         UserDefaults.standard.set(selectedRoomID, forKey: "pilot.roomID")
-        try? KeychainStore.save(activeToken, account: "device-token")
+        try? PilotSecureStore.save(
+            activeToken,
+            service: "com.jameshazell.pilot",
+            account: "device-token"
+        )
     }
 
     func selectRoom(_ roomID: String) {
@@ -411,40 +426,13 @@ final class PilotModel {
         _ rawValue: String,
         defaultCoreURL: String
     ) -> (coreURL: URL, token: String)? {
-        let value = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !value.isEmpty else { return nil }
-
-        if
-            let data = value.data(using: .utf8),
-            let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-            let core = (object["core_url"] ?? object["core"]) as? String,
-            let token = (object["bootstrap_token"] ?? object["token"]) as? String,
-            let url = URL(string: Self.normalizedCoreURL(core))
-        {
-            return (url, token)
-        }
-
-        if let components = URLComponents(string: value), components.scheme == "pilot" {
-            let values = Dictionary(
-                uniqueKeysWithValues: (components.queryItems ?? []).map { ($0.name, $0.value ?? "") }
-            )
-            let core = values["core_url"] ?? values["core"]
-            let grant = values["bootstrap_token"] ?? values["token"] ?? values["code"]
-            if
-                let core,
-                let grant,
-                let url = URL(string: Self.normalizedCoreURL(core)),
-                !grant.isEmpty
-            {
-                return (url, grant)
-            }
-        }
-
-        guard
-            let url = URL(string: Self.normalizedCoreURL(defaultCoreURL)),
-            !value.contains(where: \.isWhitespace)
-        else { return nil }
-        return (url, value)
+        let defaultURL = URL(string: Self.normalizedCoreURL(defaultCoreURL))
+        guard let payload = try? PilotPairingPayload.parse(
+            rawValue,
+            defaultCoreURL: defaultURL,
+            allowsInsecureHTTP: true
+        ) else { return nil }
+        return (payload.coreURL, payload.bootstrapToken)
     }
 
     private func handle(_ event: PilotClientEvent) async {
@@ -848,7 +836,8 @@ final class PilotModel {
                 updatePendingRecording(meetingID, state: .uploading, failure: nil)
                 try await service.uploadMeetingRecording(
                     meetingID: meetingID,
-                    recordingURL: recordingURL
+                    recordingURL: recordingURL,
+                    uploadEndpoint: clientManifest?.endpoints["meeting_recording_upload"]
                 )
                 markPendingUploadComplete(meetingID)
             }
@@ -1027,6 +1016,19 @@ final class PilotModel {
     private static func normalizedCoreURL(_ value: String) -> String {
         value.trimmingCharacters(in: .whitespacesAndNewlines)
             .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+    }
+
+    static func migratedCoreURL(_ value: String) -> String {
+        let normalized = normalizedCoreURL(value)
+        guard let url = URL(string: normalized) else { return normalized }
+        let legacyHosts = ["10.0.1.64", "10.0.1.204"]
+        if url.scheme == "http",
+           legacyHosts.contains(url.host ?? ""),
+           url.port == 8770,
+           url.path.isEmpty {
+            return productionCoreURL
+        }
+        return normalized
     }
 
     private static func configurationIsValid(

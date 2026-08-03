@@ -2,7 +2,7 @@
 
 `Pilot Core Conversation` routes a Home Assistant voice pipeline through Pilot
 Core without exposing a Pilot administrator token, Music Assistant token, or
-Ollama endpoint to Home Assistant.
+vLLM endpoint to Home Assistant.
 
 ## Request path
 
@@ -12,7 +12,7 @@ Office microphone
   -> Pilot Core Conversation entity
   -> device-authenticated /v1/devices/{id}/assistant
   -> deterministic Home Assistant conversation attempt
-  -> local Ollama tools when required
+  -> local vLLM model pool and bounded tools when required
   -> response text
   -> Home Assistant Piper TTS
   -> Office endpoint
@@ -36,7 +36,7 @@ Configure:
 
 ```text
 Name: Pilot Core
-Core URL: http://10.0.1.64:8770
+Core URL: https://pilot.jameshomeautomation.work
 Device ID: pilot-ha-office
 Device token: dedicated token created by Pilot Core
 Room ID: office
@@ -52,7 +52,7 @@ In **Settings -> Voice assistants**, edit the Office pipeline:
 - TTS: the existing local Piper provider
 
 Retain the previous pipeline until a real microphone request, deterministic
-Home Assistant action, general Ollama answer, follow-up question, and spoken
+Home Assistant action, general local-model answer, follow-up question, and spoken
 reply have all passed.
 
 ## Accepted deployment

@@ -6,6 +6,7 @@ __pycache__/
 .gradle/
 .kotlin/
 **/build/
+**/.build/
 .idea/
 local.properties
 **/xcuserdata/

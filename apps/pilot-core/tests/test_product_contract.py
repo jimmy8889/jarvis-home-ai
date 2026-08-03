@@ -164,6 +164,10 @@ class ProductContractTests(unittest.TestCase):
         self.assertEqual(manifest.json()["schema_version"], "pilot.client.v1")
         self.assertTrue(manifest.json()["features"]["energy"])
         self.assertTrue(manifest.json()["features"]["realtime"])
+        self.assertEqual(
+            manifest.json()["endpoints"]["meeting_recording_upload"],
+            "/v1/devices/pilot-phone/meetings/{meeting_id}/recording",
+        )
         self.assertNotIn("token", json.dumps(manifest.json()).casefold())
 
         snapshot = self.client.get(

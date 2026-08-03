@@ -2,7 +2,7 @@
 display_node_user: pilot-display
 display_node_hostname: pilot-display
 display_node_timezone: Australia/Brisbane
-display_node_core_url: http://10.0.1.64:8770
+display_node_core_url: https://pilot.jameshomeautomation.work
 display_node_device_id: ""
 display_node_device_token_source_file: ""
 display_node_mode: display

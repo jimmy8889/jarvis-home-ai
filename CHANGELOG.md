@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.30.1 — 2026-08-03
+
+- Added administrator-managed, capability-scoped device API keys with one-time
+  credential bundles for Pilot Drive and other managed Pilot clients.
+- Routed Pilot Drive through the public Pilot Core HTTPS endpoint and added
+  automatic migration from legacy apps01 LAN addresses.
+
+## 0.30.0 — 2026-08-03
+
+- Added the capability-scoped `pilot.vehicle.v1` contract, read-only
+  TeslaMate history adapter, curated Home Assistant vehicle state, maintenance
+  storage, receipt attachments, action audit/reconciliation, and single-use
+  confirmation for sensitive controls.
+- Added Pilot Drive for iOS and iPadOS 17 with Car, Drives, Charging, and Care
+  surfaces, saved route workflows, strict HTTPS pairing, Keychain credentials,
+  resumable updates, offline cache, MapKit history, and biometric confirmation.
+- Extracted pairing, authenticated transport, rotation, Keychain storage, and
+  event resume into `PilotClientKit` shared with the existing Pilot iOS app.
+
 ## 0.29.3 — 2026-07-23
 
 - Battery and Tesla live flows now use a 100 W idle deadband and remain fully

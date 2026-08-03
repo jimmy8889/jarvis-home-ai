@@ -50,6 +50,7 @@ class EventReporter:
                 "Authorization": f"Bearer {self._token()}",
                 "Content-Type": "application/json",
                 "X-Pilot-Device-ID": self.settings.core_device_id,
+                "User-Agent": "Pilot-Room-Agent/1",
             },
             method="POST",
         )

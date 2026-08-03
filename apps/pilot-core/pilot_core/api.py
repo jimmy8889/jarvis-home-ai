@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import asynccontextmanager
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 import math
 import os
 from pathlib import Path
@@ -34,6 +34,7 @@ from .conversation import (
     AssistantTools,
     AssistantUnavailable,
     ConversationEngine,
+    LLMRequestFailed,
     OpenAICompatibleLLM,
 )
 from .dashboard import DashboardService
@@ -65,6 +66,13 @@ from .voice import (
     VoicePipelineUnavailable,
 )
 from .voice_acceptance import VoiceAcceptanceFailed, validate_voice_round_trip
+from .vehicle import (
+    TeslaMateClient,
+    VehicleAttachments,
+    VehicleError,
+    VehicleProviderUnavailable,
+    VehicleService,
+)
 
 
 class DeviceRegistration(BaseModel):
@@ -209,6 +217,55 @@ class DeviceHomeActionRequest(BaseModel):
 class DeviceDashboardActionRequest(BaseModel):
     action: Literal["set_tesla_charging_mode", "set_media_room_mode"]
     value: str = Field(min_length=1, max_length=32)
+
+
+class VehicleDestinationInput(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+    address: str = Field(min_length=1, max_length=500)
+    latitude: float = Field(ge=-90, le=90)
+    longitude: float = Field(ge=-180, le=180)
+    icon: str = Field(default="pin", min_length=1, max_length=50)
+    climate_enabled: bool = True
+    temperature_c: float | None = Field(default=None, ge=15, le=30)
+
+
+class VehicleMaintenanceInput(BaseModel):
+    category: str = Field(min_length=1, max_length=64)
+    title: str = Field(min_length=1, max_length=200)
+    completed_date: date | None = None
+    odometer_km: float | None = Field(default=None, ge=0, le=10_000_000)
+    cost_amount: float | None = Field(default=None, ge=0, le=10_000_000)
+    cost_currency: str = Field(default="AUD", min_length=3, max_length=3)
+    workshop: str = Field(default="", max_length=200)
+    notes: str = Field(default="", max_length=10_000)
+    next_due_date: date | None = None
+    next_due_odometer_km: float | None = Field(default=None, ge=0, le=10_000_000)
+    warning_days: int = Field(default=30, ge=0, le=3650)
+    warning_km: int = Field(default=1000, ge=0, le=100_000)
+
+
+class VehicleActionInput(BaseModel):
+    action: str = Field(min_length=1, max_length=64, pattern=r"^[a-z0-9_]+$")
+    parameters: dict[str, Any] = Field(default_factory=dict)
+    idempotency_key: str = Field(
+        min_length=8, max_length=128, pattern=r"^[A-Za-z0-9._:-]+$"
+    )
+
+    @model_validator(mode="after")
+    def bound_vehicle_parameters(self) -> "VehicleActionInput":
+        if len(self.parameters) > 4 or any(
+            not isinstance(key, str)
+            or len(key) > 64
+            or isinstance(value, (dict, list))
+            or len(str(value)) > 128
+            for key, value in self.parameters.items()
+        ):
+            raise ValueError("vehicle action parameters must be bounded scalar values")
+        return self
+
+
+class VehicleActionConfirmation(BaseModel):
+    biometric_verified: Literal[True]
 
 
 class DeviceVideoCommand(BaseModel):
@@ -521,14 +578,20 @@ def _bearer(authorization: str | None) -> str:
     return authorization.removeprefix("Bearer ").strip()
 
 
-def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
+def create_app(
+    settings: Settings,
+    store: Store | None = None,
+    *,
+    integrations_override: Integrations | None = None,
+    teslamate_override: TeslaMateClient | None = None,
+) -> FastAPI:
     started_at = datetime.now(UTC)
     started_monotonic = time.monotonic()
     registry = Registry.from_settings(settings)
     owns_store = store is None
     database = store or Store(settings.server.database_path, settings)
     orchestrator = RoomOrchestrator(registry, database)
-    integrations = Integrations(settings.integrations)
+    integrations = integrations_override or Integrations(settings.integrations)
     media_states = MediaStateReader(registry, integrations)
     home_intelligence = HomeIntelligence(
         database,
@@ -577,8 +640,20 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
         settings.server.meeting_asset_max_bytes,
     )
     meeting_processor = MeetingProcessor(database, settings.integrations)
+    vehicle_service = VehicleService(
+        settings,
+        database,
+        integrations,
+        teslamate=teslamate_override,
+    )
+    vehicle_attachments = VehicleAttachments(
+        database,
+        settings.server.vehicle_asset_path,
+        settings.server.vehicle_asset_max_bytes,
+    )
     hub = EventHub()
     device_hub = DeviceHub()
+    vehicle_action_tasks: set[asyncio.Task[Any]] = set()
     dashboard_directory = Path(__file__).with_name("dashboard")
     focus_bridge: AssistFocusBridge | None = None
 
@@ -603,15 +678,33 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
             )
             else None
         )
+        vehicle_state_task = (
+            asyncio.create_task(
+                vehicle_service.run_state_updates(), name="vehicle-state-updates"
+            )
+            if (
+                settings.vehicles
+                and settings.integrations.home_assistant_url
+                and read_secret(settings.integrations.home_assistant_token_env)
+            )
+            else None
+        )
         try:
             yield
         finally:
+            for task in vehicle_action_tasks:
+                task.cancel()
+            if vehicle_action_tasks:
+                await asyncio.gather(*vehicle_action_tasks, return_exceptions=True)
             await home_intelligence.stop()
             if home_sync_task:
                 try:
                     await asyncio.wait_for(home_sync_task, timeout=6)
                 except TimeoutError:
                     home_sync_task.cancel()
+            if vehicle_state_task:
+                vehicle_state_task.cancel()
+                await asyncio.gather(vehicle_state_task, return_exceptions=True)
             if focus_bridge:
                 await focus_bridge.stop()
             if focus_task:
@@ -661,6 +754,33 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
             raise HTTPException(status_code=404, detail="device not found")
         return device
 
+    def require_device_capability(
+        device: dict[str, Any], capability: str
+    ) -> None:
+        if capability not in set(device["capabilities"]):
+            raise HTTPException(status_code=403, detail=f"{capability} capability required")
+
+    def schedule_vehicle_action(
+        request_id: str, principal_id: str, *, confirmed: bool
+    ) -> None:
+        async def runner() -> None:
+            try:
+                await vehicle_service.execute_action(
+                    request_id, principal_id, confirmed=confirmed
+                )
+            except Exception:
+                current = database.get_vehicle_action(request_id)
+                if current and current["status"] == "executing":
+                    database.complete_vehicle_action(
+                        request_id,
+                        "failed",
+                        {"error": "vehicle workflow failed unexpectedly"},
+                    )
+
+        task = asyncio.create_task(runner(), name=f"vehicle-action-{request_id}")
+        vehicle_action_tasks.add(task)
+        task.add_done_callback(vehicle_action_tasks.discard)
+
     def device_features(device: dict[str, Any]) -> dict[str, bool]:
         capabilities = set(device["capabilities"])
         return {
@@ -679,12 +799,19 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
             "portable": "portable-client" in capabilities,
             "realtime": True,
             "credential_rotation": True,
+            "vehicle": bool(
+                {"vehicle-read", "vehicle-control", "vehicle-maintenance"}
+                & capabilities
+            ),
+            "vehicle_read": "vehicle-read" in capabilities,
+            "vehicle_control": "vehicle-control" in capabilities,
+            "vehicle_maintenance": "vehicle-maintenance" in capabilities,
         }
 
     def device_manifest_payload(device: dict[str, Any]) -> dict[str, Any]:
         device_id = str(device["id"])
         base = f"/v1/devices/{device_id}"
-        return {
+        payload = {
             "schema_version": "pilot.client.v1",
             "core_version": __version__,
             "registry_revision": registry.revision,
@@ -708,6 +835,12 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
                 "media": f"{base}/media",
                 "assistant": f"{base}/assistant",
                 "meetings": f"{base}/meetings",
+                "meeting_recording_upload": (
+                    f"{settings.server.public_upload_base_url}{base}"
+                    "/meetings/{meeting_id}/recording"
+                    if settings.server.public_upload_base_url
+                    else f"{base}/meetings/{{meeting_id}}/recording"
+                ),
                 "rotate_credentials": f"{base}/credentials/rotate-self",
             },
             "realtime": {
@@ -717,6 +850,9 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
                 "snapshot_recovery": True,
             },
         }
+        if device_features(device)["vehicle"]:
+            payload["endpoints"]["vehicles"] = f"{base}/vehicles"
+        return payload
 
     def assistant_client_payload(result: dict[str, Any]) -> dict[str, Any]:
         return {
@@ -797,6 +933,18 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
                 "schema_version": "pilot.meetings.v1",
                 "items": meetings,
                 "count": len(meetings),
+            }
+        if features["vehicle_read"]:
+            overviews = await asyncio.gather(
+                *(vehicle_service.overview(item["id"]) for item in vehicle_service.list_vehicles()),
+                return_exceptions=True,
+            )
+            payload["vehicle"] = {
+                "schema_version": "pilot.vehicle.v1",
+                "items": [item for item in overviews if isinstance(item, dict)],
+                "provider_error_count": sum(
+                    1 for item in overviews if isinstance(item, Exception)
+                ),
             }
         selected_cursor = cursor if cursor is not None else payload["revision"]
         payload["events"] = database.client_events_after(
@@ -2280,6 +2428,492 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
         response.headers["Cache-Control"] = "no-store"
         return device_manifest_payload(device)
 
+    @app.get("/v1/devices/{device_id}/vehicles")
+    async def device_vehicles(
+        device_id: str,
+        response: Response,
+        x_pilot_device_id: str = Header(),
+        authorization: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        device = authenticated_device(device_id, x_pilot_device_id, authorization)
+        require_device_capability(device, "vehicle-read")
+        response.headers["Cache-Control"] = "private, no-store"
+        return {
+            "schema_version": "pilot.vehicle.v1",
+            "items": vehicle_service.list_vehicles(),
+        }
+
+    @app.get("/v1/devices/{device_id}/vehicles/{vehicle_id}")
+    async def device_vehicle(
+        device_id: str,
+        vehicle_id: str,
+        response: Response,
+        x_pilot_device_id: str = Header(),
+        authorization: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        device = authenticated_device(device_id, x_pilot_device_id, authorization)
+        require_device_capability(device, "vehicle-read")
+        try:
+            result = await vehicle_service.overview(vehicle_id)
+        except KeyError:
+            raise HTTPException(status_code=404, detail="vehicle not found") from None
+        response.headers["Cache-Control"] = "private, no-store"
+        return result
+
+    @app.get("/v1/devices/{device_id}/vehicles/{vehicle_id}/drives")
+    async def device_vehicle_drives(
+        device_id: str,
+        vehicle_id: str,
+        response: Response,
+        limit: int = Query(default=50, ge=1, le=200),
+        cursor: int | None = Query(default=None, ge=1),
+        search: str | None = Query(default=None, max_length=200),
+        x_pilot_device_id: str = Header(),
+        authorization: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        device = authenticated_device(device_id, x_pilot_device_id, authorization)
+        require_device_capability(device, "vehicle-read")
+        try:
+            result = await vehicle_service.drives(
+                vehicle_id, limit=limit, cursor=cursor
+            )
+        except KeyError:
+            raise HTTPException(status_code=404, detail="vehicle not found") from None
+        except VehicleProviderUnavailable as error:
+            raise HTTPException(status_code=503, detail=str(error)) from None
+        if search:
+            query = search.casefold()
+            result["items"] = [
+                item
+                for item in result["items"]
+                if query
+                in " ".join(
+                    str(item.get(key) or "")
+                    for key in ("start_address", "end_address")
+                ).casefold()
+            ]
+        response.headers["Cache-Control"] = "private, no-store"
+        return result
+
+    @app.get("/v1/devices/{device_id}/vehicles/{vehicle_id}/drives/{drive_id}")
+    async def device_vehicle_drive(
+        device_id: str,
+        vehicle_id: str,
+        drive_id: int,
+        response: Response,
+        x_pilot_device_id: str = Header(),
+        authorization: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        device = authenticated_device(device_id, x_pilot_device_id, authorization)
+        require_device_capability(device, "vehicle-read")
+        try:
+            result = await vehicle_service.drive(vehicle_id, drive_id)
+        except KeyError:
+            raise HTTPException(status_code=404, detail="vehicle not found") from None
+        except VehicleProviderUnavailable as error:
+            raise HTTPException(status_code=503, detail=str(error)) from None
+        response.headers["Cache-Control"] = "private, no-store"
+        return result
+
+    @app.get("/v1/devices/{device_id}/vehicles/{vehicle_id}/charges")
+    async def device_vehicle_charges(
+        device_id: str,
+        vehicle_id: str,
+        response: Response,
+        limit: int = Query(default=50, ge=1, le=200),
+        cursor: int | None = Query(default=None, ge=1),
+        x_pilot_device_id: str = Header(),
+        authorization: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        device = authenticated_device(device_id, x_pilot_device_id, authorization)
+        require_device_capability(device, "vehicle-read")
+        try:
+            result = await vehicle_service.charges(
+                vehicle_id, limit=limit, cursor=cursor
+            )
+        except KeyError:
+            raise HTTPException(status_code=404, detail="vehicle not found") from None
+        except VehicleProviderUnavailable as error:
+            raise HTTPException(status_code=503, detail=str(error)) from None
+        response.headers["Cache-Control"] = "private, no-store"
+        return result
+
+    @app.get("/v1/devices/{device_id}/vehicles/{vehicle_id}/battery-health")
+    async def device_vehicle_battery_health(
+        device_id: str,
+        vehicle_id: str,
+        response: Response,
+        x_pilot_device_id: str = Header(),
+        authorization: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        device = authenticated_device(device_id, x_pilot_device_id, authorization)
+        require_device_capability(device, "vehicle-read")
+        try:
+            result = await vehicle_service.battery_health(vehicle_id)
+        except KeyError:
+            raise HTTPException(status_code=404, detail="vehicle not found") from None
+        except VehicleProviderUnavailable as error:
+            raise HTTPException(status_code=503, detail=str(error)) from None
+        response.headers["Cache-Control"] = "private, no-store"
+        return result
+
+    @app.get("/v1/devices/{device_id}/vehicles/{vehicle_id}/destinations")
+    async def device_vehicle_destinations(
+        device_id: str,
+        vehicle_id: str,
+        x_pilot_device_id: str = Header(),
+        authorization: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        device = authenticated_device(device_id, x_pilot_device_id, authorization)
+        require_device_capability(device, "vehicle-read")
+        try:
+            vehicle_service.vehicle(vehicle_id)
+        except KeyError:
+            raise HTTPException(status_code=404, detail="vehicle not found") from None
+        return {"items": database.list_vehicle_destinations(vehicle_id)}
+
+    @app.post(
+        "/v1/devices/{device_id}/vehicles/{vehicle_id}/destinations",
+        status_code=201,
+    )
+    async def create_device_vehicle_destination(
+        device_id: str,
+        vehicle_id: str,
+        request: VehicleDestinationInput,
+        x_pilot_device_id: str = Header(),
+        authorization: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        device = authenticated_device(device_id, x_pilot_device_id, authorization)
+        require_device_capability(device, "vehicle-control")
+        try:
+            vehicle_service.vehicle(vehicle_id)
+        except KeyError:
+            raise HTTPException(status_code=404, detail="vehicle not found") from None
+        result = database.save_vehicle_destination(
+            secrets.token_hex(16),
+            vehicle_id,
+            request.model_dump(),
+        )
+        database.record_client_event(
+            "pilot.vehicle.destinations.v1",
+            {
+                "privacy": "sensitive",
+                "vehicle_id": vehicle_id,
+                "change": "created",
+                "item": result,
+            },
+            required_capability="vehicle-read",
+        )
+        return result
+
+    @app.put("/v1/devices/{device_id}/vehicles/{vehicle_id}/destinations/{destination_id}")
+    async def update_device_vehicle_destination(
+        device_id: str,
+        vehicle_id: str,
+        destination_id: str,
+        request: VehicleDestinationInput,
+        x_pilot_device_id: str = Header(),
+        authorization: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        device = authenticated_device(device_id, x_pilot_device_id, authorization)
+        require_device_capability(device, "vehicle-control")
+        if database.get_vehicle_destination(vehicle_id, destination_id) is None:
+            raise HTTPException(status_code=404, detail="destination not found")
+        result = database.save_vehicle_destination(
+            destination_id, vehicle_id, request.model_dump()
+        )
+        database.record_client_event(
+            "pilot.vehicle.destinations.v1",
+            {
+                "privacy": "sensitive",
+                "vehicle_id": vehicle_id,
+                "change": "updated",
+                "item": result,
+            },
+            required_capability="vehicle-read",
+        )
+        return result
+
+    @app.delete(
+        "/v1/devices/{device_id}/vehicles/{vehicle_id}/destinations/{destination_id}",
+        status_code=204,
+    )
+    async def delete_device_vehicle_destination(
+        device_id: str,
+        vehicle_id: str,
+        destination_id: str,
+        x_pilot_device_id: str = Header(),
+        authorization: str | None = Header(default=None),
+    ) -> None:
+        device = authenticated_device(device_id, x_pilot_device_id, authorization)
+        require_device_capability(device, "vehicle-control")
+        if not database.delete_vehicle_destination(vehicle_id, destination_id):
+            raise HTTPException(status_code=404, detail="destination not found")
+        database.record_client_event(
+            "pilot.vehicle.destinations.v1",
+            {
+                "privacy": "sensitive",
+                "vehicle_id": vehicle_id,
+                "change": "deleted",
+                "id": destination_id,
+            },
+            required_capability="vehicle-read",
+        )
+
+    @app.get("/v1/devices/{device_id}/vehicles/{vehicle_id}/maintenance")
+    async def device_vehicle_maintenance(
+        device_id: str,
+        vehicle_id: str,
+        odometer_km: float | None = Query(default=None, ge=0, le=10_000_000),
+        x_pilot_device_id: str = Header(),
+        authorization: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        device = authenticated_device(device_id, x_pilot_device_id, authorization)
+        require_device_capability(device, "vehicle-maintenance")
+        try:
+            items = vehicle_service.maintenance(vehicle_id, odometer_km)
+        except KeyError:
+            raise HTTPException(status_code=404, detail="vehicle not found") from None
+        for item in items:
+            item["attachments"] = database.list_vehicle_attachments(item["id"])
+            for attachment in item["attachments"]:
+                attachment.pop("path", None)
+        return {"items": items}
+
+    @app.post(
+        "/v1/devices/{device_id}/vehicles/{vehicle_id}/maintenance",
+        status_code=201,
+    )
+    async def create_device_vehicle_maintenance(
+        device_id: str,
+        vehicle_id: str,
+        request: VehicleMaintenanceInput,
+        x_pilot_device_id: str = Header(),
+        authorization: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        device = authenticated_device(device_id, x_pilot_device_id, authorization)
+        require_device_capability(device, "vehicle-maintenance")
+        try:
+            vehicle_service.vehicle(vehicle_id)
+        except KeyError:
+            raise HTTPException(status_code=404, detail="vehicle not found") from None
+        result = database.save_vehicle_maintenance(
+            secrets.token_hex(16),
+            vehicle_id,
+            request.model_dump(mode="json"),
+        )
+        database.record_client_event(
+            "pilot.vehicle.maintenance.v1",
+            {
+                "privacy": "sensitive",
+                "vehicle_id": vehicle_id,
+                "change": "created",
+                "item": result,
+            },
+            required_capability="vehicle-maintenance",
+        )
+        return result
+
+    @app.put("/v1/devices/{device_id}/vehicles/{vehicle_id}/maintenance/{maintenance_id}")
+    async def update_device_vehicle_maintenance(
+        device_id: str,
+        vehicle_id: str,
+        maintenance_id: str,
+        request: VehicleMaintenanceInput,
+        x_pilot_device_id: str = Header(),
+        authorization: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        device = authenticated_device(device_id, x_pilot_device_id, authorization)
+        require_device_capability(device, "vehicle-maintenance")
+        if database.get_vehicle_maintenance(vehicle_id, maintenance_id) is None:
+            raise HTTPException(status_code=404, detail="maintenance record not found")
+        result = database.save_vehicle_maintenance(
+            maintenance_id, vehicle_id, request.model_dump(mode="json")
+        )
+        database.record_client_event(
+            "pilot.vehicle.maintenance.v1",
+            {
+                "privacy": "sensitive",
+                "vehicle_id": vehicle_id,
+                "change": "updated",
+                "item": result,
+            },
+            required_capability="vehicle-maintenance",
+        )
+        return result
+
+    @app.delete(
+        "/v1/devices/{device_id}/vehicles/{vehicle_id}/maintenance/{maintenance_id}",
+        status_code=204,
+    )
+    async def delete_device_vehicle_maintenance(
+        device_id: str,
+        vehicle_id: str,
+        maintenance_id: str,
+        x_pilot_device_id: str = Header(),
+        authorization: str | None = Header(default=None),
+    ) -> None:
+        device = authenticated_device(device_id, x_pilot_device_id, authorization)
+        require_device_capability(device, "vehicle-maintenance")
+        record = database.get_vehicle_maintenance(vehicle_id, maintenance_id)
+        if record is None:
+            raise HTTPException(status_code=404, detail="maintenance record not found")
+        for attachment in record.get("attachments", []):
+            Path(attachment["path"]).unlink(missing_ok=True)
+        database.delete_vehicle_maintenance(vehicle_id, maintenance_id)
+        database.record_client_event(
+            "pilot.vehicle.maintenance.v1",
+            {
+                "privacy": "sensitive",
+                "vehicle_id": vehicle_id,
+                "change": "deleted",
+                "id": maintenance_id,
+            },
+            required_capability="vehicle-maintenance",
+        )
+
+    @app.post(
+        "/v1/devices/{device_id}/vehicles/{vehicle_id}/maintenance/{maintenance_id}/attachments",
+        status_code=201,
+    )
+    async def create_device_vehicle_attachment(
+        device_id: str,
+        vehicle_id: str,
+        maintenance_id: str,
+        request: Request,
+        filename: str = Query(default="receipt", max_length=200),
+        x_pilot_device_id: str = Header(),
+        authorization: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        device = authenticated_device(device_id, x_pilot_device_id, authorization)
+        require_device_capability(device, "vehicle-maintenance")
+        if database.get_vehicle_maintenance(vehicle_id, maintenance_id) is None:
+            raise HTTPException(status_code=404, detail="maintenance record not found")
+        content_length = request.headers.get("content-length")
+        if content_length:
+            try:
+                if int(content_length) > settings.server.vehicle_asset_max_bytes:
+                    raise HTTPException(status_code=413, detail="receipt is too large")
+            except ValueError:
+                raise HTTPException(status_code=400, detail="invalid content-length") from None
+        try:
+            asset = await vehicle_attachments.save(
+                maintenance_id,
+                filename,
+                request.headers.get("content-type", ""),
+                request.stream(),
+            )
+        except VehicleError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from None
+        asset.pop("path", None)
+        database.record_client_event(
+            "pilot.vehicle.maintenance.v1",
+            {
+                "privacy": "sensitive",
+                "vehicle_id": vehicle_id,
+                "change": "attachment_created",
+                "maintenance_id": maintenance_id,
+                "item": asset,
+            },
+            required_capability="vehicle-maintenance",
+        )
+        return asset
+
+    @app.get(
+        "/v1/devices/{device_id}/vehicles/{vehicle_id}/maintenance/{maintenance_id}/attachments/{attachment_id}"
+    )
+    async def download_device_vehicle_attachment(
+        device_id: str,
+        vehicle_id: str,
+        maintenance_id: str,
+        attachment_id: str,
+        x_pilot_device_id: str = Header(),
+        authorization: str | None = Header(default=None),
+    ) -> FileResponse:
+        device = authenticated_device(device_id, x_pilot_device_id, authorization)
+        require_device_capability(device, "vehicle-maintenance")
+        if database.get_vehicle_maintenance(vehicle_id, maintenance_id) is None:
+            raise HTTPException(status_code=404, detail="maintenance record not found")
+        attachment = database.get_vehicle_attachment(attachment_id)
+        if attachment is None or attachment["maintenance_id"] != maintenance_id:
+            raise HTTPException(status_code=404, detail="receipt not found")
+        if not Path(attachment["path"]).is_file():
+            raise HTTPException(status_code=404, detail="receipt file not found")
+        return FileResponse(
+            attachment["path"],
+            media_type=attachment["content_type"],
+            filename=attachment["filename"],
+            headers={
+                "Cache-Control": "private, no-store",
+                "X-Pilot-SHA256": attachment["sha256"],
+                "X-Content-Type-Options": "nosniff",
+            },
+        )
+
+    @app.post(
+        "/v1/devices/{device_id}/vehicles/{vehicle_id}/actions",
+        status_code=202,
+    )
+    async def create_device_vehicle_action(
+        device_id: str,
+        vehicle_id: str,
+        request: VehicleActionInput,
+        x_pilot_device_id: str = Header(),
+        authorization: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        device = authenticated_device(device_id, x_pilot_device_id, authorization)
+        require_device_capability(device, "vehicle-control")
+        try:
+            action, created = vehicle_service.request_action(
+                principal_id=device_id,
+                vehicle_id=vehicle_id,
+                action=request.action,
+                parameters=request.parameters,
+                idempotency_key=request.idempotency_key,
+            )
+        except KeyError:
+            raise HTTPException(status_code=404, detail="vehicle or destination not found") from None
+        except VehicleError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from None
+        if created and not action["confirmation_required"]:
+            schedule_vehicle_action(action["id"], device_id, confirmed=False)
+            await asyncio.sleep(0)
+            action = database.get_vehicle_action(action["id"]) or action
+        return action
+
+    @app.get("/v1/devices/{device_id}/actions/{action_id}")
+    async def get_device_vehicle_action(
+        device_id: str,
+        action_id: str,
+        x_pilot_device_id: str = Header(),
+        authorization: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        device = authenticated_device(device_id, x_pilot_device_id, authorization)
+        require_device_capability(device, "vehicle-control")
+        result = database.get_vehicle_action(action_id)
+        if result is None or result["principal_id"] != device_id:
+            raise HTTPException(status_code=404, detail="vehicle action not found")
+        return result
+
+    @app.post("/v1/devices/{device_id}/actions/{action_id}/confirm", status_code=202)
+    async def confirm_device_vehicle_action(
+        device_id: str,
+        action_id: str,
+        _request: VehicleActionConfirmation,
+        x_pilot_device_id: str = Header(),
+        authorization: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        device = authenticated_device(device_id, x_pilot_device_id, authorization)
+        require_device_capability(device, "vehicle-control")
+        result = database.get_vehicle_action(action_id)
+        if result is None or result["principal_id"] != device_id:
+            raise HTTPException(status_code=404, detail="vehicle action not found")
+        if result["status"] != "pending_confirmation":
+            raise HTTPException(status_code=409, detail="vehicle action is not confirmable")
+        schedule_vehicle_action(action_id, device_id, confirmed=True)
+        await asyncio.sleep(0)
+        return database.get_vehicle_action(action_id) or result
+
     @app.get("/v1/devices/{device_id}/events/snapshot")
     async def device_events_snapshot(
         device_id: str,
@@ -2513,6 +3147,44 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
         except KeyError:
             raise HTTPException(status_code=404, detail="room not found") from None
         return {"device_id": request.device_id, "device_token": token}
+
+    @app.post(
+        "/v1/device-credentials",
+        dependencies=[Depends(require_admin)],
+        status_code=201,
+    )
+    async def issue_device_credentials(
+        request: DeviceRegistration, response: Response
+    ) -> dict[str, Any]:
+        """Issue a managed device credential and reveal its secret exactly once."""
+        response.headers["Cache-Control"] = "no-store"
+        if not settings.server.public_client_base_url:
+            raise HTTPException(
+                status_code=503,
+                detail="public client endpoint is not configured",
+            )
+        try:
+            token = database.register_device(
+                request.device_id,
+                request.room_id,
+                request.name,
+                request.capabilities,
+            )
+        except KeyError:
+            raise HTTPException(status_code=404, detail="room not found") from None
+        await device_hub.close(request.device_id, "device credentials reissued")
+        bundle = {
+            "schema_version": "pilot.credentials.v1",
+            "core_url": settings.server.public_client_base_url,
+            "device_id": request.device_id,
+            "device_token": token,
+        }
+        return {
+            "device_id": request.device_id,
+            "core_url": settings.server.public_client_base_url,
+            "device_token": token,
+            "credential_bundle": bundle,
+        }
 
     @app.post("/v1/devices/{device_id}/meetings", status_code=201)
     async def create_device_meeting(
@@ -3728,6 +4400,19 @@ def create_app(settings: Settings, store: Store | None = None) -> FastAPI:
     @app.get("/v1/assistant/status", dependencies=[Depends(require_admin)])
     async def assistant_status() -> dict[str, Any]:
         return conversation_engine.status()
+
+    @app.get("/v1/assistant/models", dependencies=[Depends(require_admin)])
+    async def assistant_models() -> dict[str, Any]:
+        try:
+            backends = await local_llm.inventory()
+        except (AssistantUnavailable, LLMRequestFailed) as error:
+            raise HTTPException(status_code=503, detail=str(error)) from None
+        return {
+            "provider": settings.integrations.llm_provider,
+            "active_backend": local_llm.status()["active_backend"],
+            "active_model": local_llm.status()["model"],
+            "backends": backends,
+        }
 
     @app.get("/v1/conversations", dependencies=[Depends(require_admin)])
     async def conversations(

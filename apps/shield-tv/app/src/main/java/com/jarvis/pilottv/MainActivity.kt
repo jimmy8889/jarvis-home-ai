@@ -168,7 +168,7 @@ private fun PairingScreen(
     pairing: Boolean,
     onPair: (String, String) -> Unit,
 ) {
-    var address by remember { mutableStateOf("http://10.0.1.64:8770") }
+    var address by remember { mutableStateOf("https://pilot.jameshomeautomation.work") }
     var code by remember { mutableStateOf("") }
     Row(
         modifier = Modifier

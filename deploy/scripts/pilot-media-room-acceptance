@@ -28,7 +28,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--core-url",
-        default=os.environ.get("PILOT_CORE_URL", "http://10.0.1.64:8770"),
+        default=os.environ.get("PILOT_CORE_URL", "https://pilot.jameshomeautomation.work"),
     )
     parser.add_argument(
         "--token-file",

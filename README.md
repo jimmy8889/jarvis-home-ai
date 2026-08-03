@@ -137,6 +137,10 @@ The adaptive native iPhone and iPad room, media, and assistant client is
 documented in
 [docs/PILOT_IOS.md](docs/PILOT_IOS.md).
 
+The separate Pilot Drive Tesla companion, read-only TeslaMate adapter,
+capability boundary, saved-route workflow, and physical vehicle acceptance
+runbook are documented in [docs/PILOT_DRIVE.md](docs/PILOT_DRIVE.md).
+
 The native Android wall-tablet client, including secure enrolment, energy
 visualisation, night operation, and kiosk-readiness boundaries, is documented
 in [docs/PILOT_ANDROID.md](docs/PILOT_ANDROID.md).
@@ -210,13 +214,15 @@ It defines:
 apps/room-agent/       Local health/status API
 apps/pilot-core/       Central room and player registry API
 apps/pilot-ios/        Native iPhone and iPad home, media, and assistant client
+apps/pilot-drive/      Native iPhone and iPad Tesla companion client
+apps/teslamate-adapter/ Bounded read-only TeslaMate 4.0.1 history adapter
 apps/pilot-android/    Native Android wall-tablet Pilot client
 apps/shield-tv/        Kotlin/Compose for TV media-room client
 config/                Versioned example room configuration
 deploy/ansible/        Reproducible Debian 13 deployment
 deploy/scripts/        Inventory, validation, and rollback commands
 docs/                  Architecture, ADRs, research, and operator runbooks
-packages/              Shared schemas and future SDK packages
+packages/              Shared schemas and PilotClientKit
 systemd/               Service definitions
 infra/                 Central Pilot Core container deployment
 firmware/              ESP32 room-node firmware and hardware support

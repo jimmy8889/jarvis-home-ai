@@ -112,6 +112,7 @@ class AudioFetcherTests(unittest.TestCase):
             self.assertEqual(
                 request.get_header("X-pilot-device-id"), "pilot-office"
             )
+            self.assertEqual(request.get_header("User-agent"), "Pilot-Room-Agent/1")
             self.assertEqual(captured["timeout"], 15)
 
     def test_fetch_rejects_digest_mismatch_without_caching_file(self) -> None:

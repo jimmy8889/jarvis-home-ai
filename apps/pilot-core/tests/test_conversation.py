@@ -10,6 +10,7 @@ import httpx
 
 from pilot_core.config import (
     IntegrationSettings,
+    LLMBackend,
     Player,
     Room,
     ServerSettings,
@@ -277,6 +278,50 @@ class ConversationEngineTests(unittest.IsolatedAsyncioTestCase):
         await llm.chat([{"role": "user", "content": "Hello"}], [])
         self.assertEqual(observed["reasoning_effort"], "none")
         self.assertEqual(observed["tool_choice"], "auto")
+        self.assertEqual(observed["max_tokens"], 1024)
+
+    async def test_vllm_pool_fails_over_and_reports_active_backend(self) -> None:
+        requested_hosts: list[str] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            requested_hosts.append(request.url.host or "")
+            if request.url.host == "ai3090":
+                return httpx.Response(503, json={"error": "busy"})
+            return httpx.Response(
+                200,
+                json={
+                    "choices": [
+                        {"message": {"role": "assistant", "content": "Fallback."}}
+                    ]
+                },
+            )
+
+        settings = IntegrationSettings(
+            llm_provider="vllm",
+            llm_backends=(
+                LLMBackend(
+                    id="ai3090-primary",
+                    url="http://ai3090:8000/v1",
+                    model="primary",
+                    roles=("assistant", "meeting"),
+                    priority=10,
+                ),
+                LLMBackend(
+                    id="ai3080-verifier",
+                    url="http://ai3080:8000/v1",
+                    model="verifier",
+                    roles=("assistant", "verification"),
+                    priority=100,
+                ),
+            ),
+        )
+        llm = OpenAICompatibleLLM(settings, httpx.MockTransport(handler))
+        message = await llm.chat([{"role": "user", "content": "Hello"}], [])
+
+        self.assertEqual(message["content"], "Fallback.")
+        self.assertEqual(requested_hosts, ["ai3090", "ai3080"])
+        self.assertEqual(llm.status()["active_backend"], "ai3080-verifier")
+        self.assertEqual(llm.status()["backend_count"], 2)
 
     async def test_meeting_question_forces_evidence_search_tool(self) -> None:
         engine, store, integrations, llm = self.engine(test_settings(llm=True))

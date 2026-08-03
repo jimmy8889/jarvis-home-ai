@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pilot.local/schemas/pilot-vehicle-v1.schema.json",
+  "title": "Pilot capability-scoped vehicle snapshot v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "items", "provider_error_count"],
+  "properties": {
+    "schema_version": {"const": "pilot.vehicle.v1"},
+    "items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "schema_version",
+          "id",
+          "name",
+          "freshness",
+          "state",
+          "tyres",
+          "available_controls",
+          "providers"
+        ],
+        "properties": {
+          "schema_version": {"const": "pilot.vehicle.v1"},
+          "id": {"type": "string"},
+          "name": {"type": "string"},
+          "observed_at": {"type": ["string", "null"]},
+          "freshness": {"enum": ["fresh", "stale", "unavailable", "unverified"]},
+          "state": {"type": "object"},
+          "tyres": {"type": "object"},
+          "available_controls": {"type": "array", "items": {"type": "string"}},
+          "providers": {"type": "object"}
+        },
+        "additionalProperties": false
+      }
+    },
+    "provider_error_count": {"type": "integer", "minimum": 0}
+  }
+}

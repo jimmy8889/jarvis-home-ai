@@ -1,4 +1,5 @@
 import Foundation
+import PilotClientKit
 
 struct PilotAPI: Sendable {
     let coreURL: URL
@@ -10,33 +11,15 @@ struct PilotAPI: Sendable {
         method: String = "GET",
         body: Data? = nil
     ) async throws -> Data {
-        let url = coreURL.appending(path: path)
-        var request = URLRequest(url: url)
-        request.httpMethod = method
-        request.httpBody = body
-        request.timeoutInterval = 70
-        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        request.setValue(deviceID, forHTTPHeaderField: "X-Pilot-Device-ID")
-        request.setValue("application/json", forHTTPHeaderField: "Accept")
-        if body != nil {
-            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        }
-        let (data, response) = try await URLSession.shared.data(for: request)
-        guard let http = response as? HTTPURLResponse else {
-            throw PilotAPIError.invalidResponse
-        }
-        guard (200..<300).contains(http.statusCode) else {
-            let detail = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["detail"]
-            if http.statusCode == 401 || http.statusCode == 403 {
-                throw PilotAPIError.authentication(
-                    detail as? String ?? "This Pilot device credential was rejected."
-                )
-            }
-            throw PilotAPIError.server(
-                detail as? String ?? "Pilot Core returned HTTP \(http.statusCode)."
-            )
-        }
-        return data
+        let transport = try PilotClientKit.PilotTransport(
+            credentials: PilotClientKit.PilotCredentials(
+                coreURL: coreURL,
+                deviceID: deviceID,
+                deviceToken: token
+            ),
+            allowsInsecureHTTP: true
+        )
+        return try await transport.data(path: path, method: method, body: body)
     }
 
     func media() async throws -> DeviceMediaEnvelope {
@@ -95,52 +78,45 @@ struct PilotAPI: Sendable {
         token bootstrapToken: String,
         coreURL: URL
     ) async throws -> BootstrapCredentials {
-        let url = coreURL.appending(path: "v1/devices/bootstrap")
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.timeoutInterval = 30
-        request.setValue("Bearer \(bootstrapToken)", forHTTPHeaderField: "Authorization")
-        request.setValue("application/json", forHTTPHeaderField: "Accept")
-        let (data, response) = try await URLSession.shared.data(for: request)
-        try validate(response, data: data)
-        return try JSONDecoder().decode(BootstrapCredentials.self, from: data)
+        let credentials = try await PilotClientKit.PilotTransport.redeem(
+            PilotClientKit.PilotPairingPayload(
+                coreURL: coreURL,
+                bootstrapToken: bootstrapToken
+            ),
+            allowsInsecureHTTP: true
+        )
+        return BootstrapCredentials(
+            deviceID: credentials.deviceID,
+            deviceToken: credentials.deviceToken
+        )
     }
 
     func eventSnapshot(after cursor: String?) async throws -> ClientEventSnapshot {
-        var components = URLComponents(
-            url: coreURL.appending(path: "v1/devices/\(deviceID)/events/snapshot"),
-            resolvingAgainstBaseURL: false
+        let transport = try PilotClientKit.PilotTransport(
+            credentials: .init(coreURL: coreURL, deviceID: deviceID, deviceToken: token),
+            allowsInsecureHTTP: true
         )
-        if let cursor, !cursor.isEmpty {
-            components?.queryItems = [URLQueryItem(name: "cursor", value: cursor)]
-        }
-        guard let url = components?.url else { throw PilotAPIError.invalidURL }
-        var eventRequest = URLRequest(url: url)
-        eventRequest.timeoutInterval = 30
-        eventRequest.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        eventRequest.setValue(deviceID, forHTTPHeaderField: "X-Pilot-Device-ID")
-        let (data, response) = try await URLSession.shared.data(for: eventRequest)
-        try Self.validate(response, data: data)
+        let data = try await transport.data(
+            path: "v1/devices/\(deviceID)/events/snapshot",
+            queryItems: cursor.map { [URLQueryItem(name: "cursor", value: $0)] } ?? []
+        )
         return try JSONDecoder().decode(ClientEventSnapshot.self, from: data)
     }
 
     func pollEvents(after cursor: String?) async throws -> ClientEventSnapshot {
-        var components = URLComponents(
-            url: coreURL.appending(path: "v1/devices/\(deviceID)/events"),
-            resolvingAgainstBaseURL: false
-        )
         var query = [URLQueryItem(name: "timeout_seconds", value: "25")]
         if let cursor, !cursor.isEmpty {
             query.append(URLQueryItem(name: "cursor", value: cursor))
         }
-        components?.queryItems = query
-        guard let url = components?.url else { throw PilotAPIError.invalidURL }
-        var eventRequest = URLRequest(url: url)
-        eventRequest.timeoutInterval = 35
-        eventRequest.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        eventRequest.setValue(deviceID, forHTTPHeaderField: "X-Pilot-Device-ID")
-        let (data, response) = try await URLSession.shared.data(for: eventRequest)
-        try Self.validate(response, data: data)
+        let transport = try PilotClientKit.PilotTransport(
+            credentials: .init(coreURL: coreURL, deviceID: deviceID, deviceToken: token),
+            allowsInsecureHTTP: true
+        )
+        let data = try await transport.data(
+            path: "v1/devices/\(deviceID)/events",
+            queryItems: query,
+            timeout: 35
+        )
         return try JSONDecoder().decode(ClientEventSnapshot.self, from: data)
     }
 
@@ -330,11 +306,29 @@ struct PilotAPI: Sendable {
 
     func uploadMeetingRecording(
         meetingID: String,
-        recordingURL: URL
+        recordingURL: URL,
+        uploadEndpoint: String? = nil
     ) async throws {
-        let url = coreURL.appending(
-            path: "v1/devices/\(deviceID)/meetings/\(meetingID)/recording"
-        )
+        let url: URL
+        if let uploadEndpoint, !uploadEndpoint.isEmpty {
+            let resolved = uploadEndpoint.replacingOccurrences(
+                of: "{meeting_id}",
+                with: meetingID
+            )
+            guard let advertisedURL = URL(string: resolved) else {
+                throw PilotAPIError.invalidResponse
+            }
+            if advertisedURL.scheme != nil && advertisedURL.scheme != "https" {
+                throw PilotAPIError.invalidResponse
+            }
+            url = advertisedURL.scheme == nil
+                ? coreURL.appending(path: resolved)
+                : advertisedURL
+        } else {
+            url = coreURL.appending(
+                path: "v1/devices/\(deviceID)/meetings/\(meetingID)/recording"
+            )
+        }
         var request = URLRequest(url: url)
         request.httpMethod = "PUT"
         request.timeoutInterval = 600

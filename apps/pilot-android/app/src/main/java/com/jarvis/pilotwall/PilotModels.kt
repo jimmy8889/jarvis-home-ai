@@ -5,7 +5,7 @@ import org.json.JSONObject
 import java.time.Instant
 
 data class PilotConfig(
-    val coreUrl: String = "http://10.0.1.64:8770/",
+    val coreUrl: String = "https://pilot.jameshomeautomation.work/",
     val deviceId: String = "pilot-wall-tablet",
     val refreshSeconds: Int = 15,
     val keepScreenOn: Boolean = true,

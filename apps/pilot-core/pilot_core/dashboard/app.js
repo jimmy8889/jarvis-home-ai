@@ -30,6 +30,7 @@ const elements = {
   pairingCode: document.querySelector("#pairing-code"),
   pairingExpiry: document.querySelector("#pairing-expiry"),
   pairingCopy: document.querySelector("#pairing-copy"),
+  pairingApiKey: document.querySelector("#pairing-api-key"),
 };
 
 const capabilityProfiles = {
@@ -42,6 +43,12 @@ const capabilityProfiles = {
     "home-control",
     "voice",
     "meetings",
+  ],
+  vehicle: [
+    "portable-client",
+    "vehicle-read",
+    "vehicle-control",
+    "vehicle-maintenance",
   ],
   display: ["display", "home-read"],
 };
@@ -967,6 +974,7 @@ elements.pairingForm.addEventListener("submit", async (event) => {
   submit.disabled = true;
   elements.pairingResult.hidden = true;
   try {
+    elements.pairingQr.hidden = false;
     const profile = elements.pairingProfile.value;
     const payload = await api("/v1/bootstrap-grants", {
       method: "POST",
@@ -989,6 +997,35 @@ elements.pairingForm.addEventListener("submit", async (event) => {
     showToast(error.message);
   } finally {
     submit.disabled = false;
+  }
+});
+
+elements.pairingApiKey.addEventListener("click", async () => {
+  if (!elements.pairingForm.reportValidity()) {
+    return;
+  }
+  elements.pairingApiKey.disabled = true;
+  elements.pairingResult.hidden = true;
+  try {
+    const profile = elements.pairingProfile.value;
+    const payload = await api("/v1/device-credentials", {
+      method: "POST",
+      body: JSON.stringify({
+        device_id: elements.pairingDeviceId.value.trim(),
+        room_id: elements.pairingRoom.value,
+        name: elements.pairingName.value.trim(),
+        capabilities: capabilityProfiles[profile] || capabilityProfiles.display,
+      }),
+    });
+    elements.pairingQr.hidden = true;
+    elements.pairingCode.textContent = JSON.stringify(payload.credential_bundle);
+    elements.pairingExpiry.textContent = "Copy this bundle now. Pilot Core will not reveal this API key again.";
+    elements.pairingResult.hidden = false;
+    showToast("Managed device API key issued.");
+  } catch (error) {
+    showToast(error.message);
+  } finally {
+    elements.pairingApiKey.disabled = false;
   }
 });
 

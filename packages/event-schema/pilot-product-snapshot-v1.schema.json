@@ -28,6 +28,7 @@
     "energy": {"type": "object"},
     "media": {"type": "object"},
     "meetings": {"type": "object"},
+    "vehicle": {"$ref": "pilot-vehicle-v1.schema.json"},
     "events": {
       "type": "array",
       "items": {"$ref": "pilot-client-event-v1.schema.json"}

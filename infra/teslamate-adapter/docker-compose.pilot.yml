@@ -1,0 +1,51 @@
+services:
+  pilot-teslamate-adapter:
+    image: "jarvis-home-ai/pilot-teslamate-adapter:0.1.0"
+    build:
+      context: ../../apps/teslamate-adapter
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    init: true
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=16m
+    ports:
+      - "10.0.1.192:8781:8781"
+    environment:
+      TESLAMATE_DATABASE_URL_FILE: /run/secrets/teslamate_database_url
+      PILOT_TESLAMATE_ADAPTER_TOKEN_FILE: /run/secrets/teslamate_adapter_token
+      TESLAMATE_STATEMENT_TIMEOUT_MS: "5000"
+      TESLAMATE_MAXIMUM_RESPONSE_BYTES: "8000000"
+    secrets:
+      - teslamate_database_url
+      - teslamate_adapter_token
+    networks:
+      - teslamate
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - >-
+          import urllib.request;
+          urllib.request.urlopen('http://127.0.0.1:8781/readyz', timeout=3)
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+networks:
+  teslamate:
+    external: true
+    name: "${TESLAMATE_DOCKER_NETWORK:-teslamate_default}"
+
+secrets:
+  teslamate_database_url:
+    file: ./secrets/teslamate_database_url
+  teslamate_adapter_token:
+    file: ./secrets/teslamate_adapter_token

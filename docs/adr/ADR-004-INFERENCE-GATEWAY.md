@@ -1,10 +1,13 @@
 # ADR-004: Unified Inference Gateway
 
-Status: Proposed
+Status: Accepted (initial LLM routing implemented)
 
 ## Context
 
-Pilot will run live STT, meeting transcription, diarisation, TTS, embeddings, and several LLM routes across CPUs, a GTX 1060, and an RTX 3080. Letting each application load models independently would waste VRAM and produce inconsistent fallback behaviour.
+Pilot runs live STT, meeting transcription, diarisation, TTS, embeddings, and
+several LLM routes across CPUs, an RTX 3080, and an RTX 3090. Letting each
+application load models independently would waste VRAM and produce inconsistent
+fallback behaviour.
 
 ## Decision
 
@@ -29,15 +32,20 @@ routes:
   meeting_stt:
     primary: gtx1060-distil-whisper
   assistant_fast:
-    primary: rtx3080-qwen-small
+    primary: rtx3090-primary
+    fallback: rtx3080-verifier
   meeting_summary:
-    primary: rtx3080-qwen-medium
+    primary: rtx3090-primary
   tts:
     primary: cpu-kokoro
     fallback: cpu-piper
 ```
 
-Live voice requests take priority over meeting batch jobs.
+Pilot Core now implements authenticated, role-based LLM routes and bounded
+failover. The RTX 3080 currently uses mutually exclusive verifier, vision, and
+speech modes; Core discovers live availability but does not silently switch GPU
+modes because doing so would interrupt STT/TTS. Live voice requests take
+priority over meeting batch jobs.
 
 ## Consequences
 

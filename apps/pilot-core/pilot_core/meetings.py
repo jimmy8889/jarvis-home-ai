@@ -119,6 +119,7 @@ class MeetingProcessor:
             settings,
             transport=transport,
             model=settings.meeting_analysis_model or settings.llm_model,
+            role="meeting",
         )
         self.transport = transport
 

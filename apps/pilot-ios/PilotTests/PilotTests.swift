@@ -290,17 +290,38 @@ final class PilotTests: XCTestCase {
         XCTAssertEqual(bare.token, "grant-token")
     }
 
+    @MainActor
+    func testLegacyCoreAddressesMigrateToApps01BackedOrigin() {
+        XCTAssertEqual(
+            PilotModel.migratedCoreURL("http://10.0.1.64:8770/"),
+            PilotModel.productionCoreURL
+        )
+        XCTAssertEqual(
+            PilotModel.migratedCoreURL("http://10.0.1.204:8770"),
+            PilotModel.productionCoreURL
+        )
+        XCTAssertEqual(
+            PilotModel.migratedCoreURL("https://pilot.example.test/"),
+            "https://pilot.example.test"
+        )
+    }
+
     func testClientManifestAndResumableEventsDecode() throws {
         let manifest = Data(
             """
             {"schema_version":"pilot.client.v1","core_version":"0.25.0",
              "features":{"home":true,"realtime":true},
-             "endpoints":{"events":"/v1/devices/phone/events"}}
+             "endpoints":{"events":"/v1/devices/phone/events",
+                          "meeting_recording_upload":"https://pilot-upload.example.com/v1/devices/phone/meetings/{meeting_id}/recording"}}
             """.utf8
         )
         let decoded = try JSONDecoder().decode(PilotClientManifest.self, from: manifest)
         XCTAssertEqual(decoded.schemaVersion, "pilot.client.v1")
         XCTAssertEqual(decoded.features["realtime"], true)
+        XCTAssertEqual(
+            decoded.endpoints["meeting_recording_upload"],
+            "https://pilot-upload.example.com/v1/devices/phone/meetings/{meeting_id}/recording"
+        )
 
         let events = Data(
             """

@@ -9,12 +9,12 @@
 /* Begin PBXBuildFile section */
 		0766FAAC59F3AF4F6BB1A4C0 /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AEDFE53775C96B8F08B3A077 /* RootView.swift */; };
 		260C6B29B047979CE7181505 /* PilotAPI.swift in Sources */ = {isa = PBXBuildFile; fileRef = F5C5898A0D20AD0532CB74F5 /* PilotAPI.swift */; };
-		2C66CABBDDEA7F3B797AC6A8 /* KeychainStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3A10FDF9ED1E34E334E2FD50 /* KeychainStore.swift */; };
+		261B33A90351935B3E847324 /* SendspinKit in Frameworks */ = {isa = PBXBuildFile; productRef = 1415F6AAF3FCC263AA335360 /* SendspinKit */; };
 		93570751D7B731E10026294F /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0403CF9AD9A373A5C4ECA2C /* Models.swift */; };
 		9778D75A4D000C2405F0F53E /* PilotTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5169EE5BCE182D7B1AFBC22B /* PilotTests.swift */; };
 		A2F6BD8D8D4A937B4D8CD6E3 /* PhonePlaybackController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B45F19FEC453C7C45B90BB83 /* PhonePlaybackController.swift */; };
 		AD1B14677B9B6BD4063C4B8B /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 83A4E73A78886F255F2ED460 /* Assets.xcassets */; };
-		BB2E1AB014C6C81377A42F25 /* SendspinKit in Frameworks */ = {isa = PBXBuildFile; productRef = 1415F6AAF3FCC263AA335360 /* SendspinKit */; };
+		BB2E1AB014C6C81377A42F25 /* PilotClientKit in Frameworks */ = {isa = PBXBuildFile; productRef = 4251A525458A5949FCC12F9C /* PilotClientKit */; };
 		DF4427ABDB61AE355381264B /* PilotModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A3D7B9A9354E56EC99B7E08 /* PilotModel.swift */; };
 		F1D9C21F86E27295DA5AA39F /* PilotApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 88E48CEE1B3F4DF8D6EDB216 /* PilotApp.swift */; };
 /* End PBXBuildFile section */
@@ -31,13 +31,13 @@
 
 /* Begin PBXFileReference section */
 		033B7B0DFB321D06AF6959AE /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
-		3A10FDF9ED1E34E334E2FD50 /* KeychainStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainStore.swift; sourceTree = "<group>"; };
 		5169EE5BCE182D7B1AFBC22B /* PilotTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PilotTests.swift; sourceTree = "<group>"; };
+		51E6679F15E94024CDFE97BC /* PilotClientKit */ = {isa = PBXFileReference; lastKnownFileType = folder; name = PilotClientKit; path = ../../packages/PilotClientKit; sourceTree = SOURCE_ROOT; };
 		6A3D7B9A9354E56EC99B7E08 /* PilotModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PilotModel.swift; sourceTree = "<group>"; };
 		83A4E73A78886F255F2ED460 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		88E48CEE1B3F4DF8D6EDB216 /* PilotApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PilotApp.swift; sourceTree = "<group>"; };
-		A69638DA27EA76C10C483DDC /* PilotTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = PilotTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-		AB85CEC11BD665F9FF73BE7E /* Pilot.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Pilot.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		A69638DA27EA76C10C483DDC /* PilotTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = PilotTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		AB85CEC11BD665F9FF73BE7E /* Pilot.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = Pilot.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		AEDFE53775C96B8F08B3A077 /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
 		B0403CF9AD9A373A5C4ECA2C /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
 		B45F19FEC453C7C45B90BB83 /* PhonePlaybackController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhonePlaybackController.swift; sourceTree = "<group>"; };
@@ -49,7 +49,8 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				BB2E1AB014C6C81377A42F25 /* SendspinKit in Frameworks */,
+				BB2E1AB014C6C81377A42F25 /* PilotClientKit in Frameworks */,
+				261B33A90351935B3E847324 /* SendspinKit in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -67,10 +68,19 @@
 		5DCCA06A0E104DBA6E91894C = {
 			isa = PBXGroup;
 			children = (
+				8B571694C3218DABEF4077E0 /* Packages */,
 				F1EA1129CE9D13BD867B1F21 /* Pilot */,
 				2DB63B66A426AB40F3323889 /* PilotTests */,
 				DC7D82CC69762577B57556DA /* Products */,
 			);
+			sourceTree = "<group>";
+		};
+		8B571694C3218DABEF4077E0 /* Packages */ = {
+			isa = PBXGroup;
+			children = (
+				51E6679F15E94024CDFE97BC /* PilotClientKit */,
+			);
+			name = Packages;
 			sourceTree = "<group>";
 		};
 		DC7D82CC69762577B57556DA /* Products */ = {
@@ -87,7 +97,6 @@
 			children = (
 				83A4E73A78886F255F2ED460 /* Assets.xcassets */,
 				033B7B0DFB321D06AF6959AE /* Info.plist */,
-				3A10FDF9ED1E34E334E2FD50 /* KeychainStore.swift */,
 				B0403CF9AD9A373A5C4ECA2C /* Models.swift */,
 				B45F19FEC453C7C45B90BB83 /* PhonePlaybackController.swift */,
 				F5C5898A0D20AD0532CB74F5 /* PilotAPI.swift */,
@@ -133,6 +142,7 @@
 			);
 			name = Pilot;
 			packageProductDependencies = (
+				4251A525458A5949FCC12F9C /* PilotClientKit */,
 				1415F6AAF3FCC263AA335360 /* SendspinKit */,
 			);
 			productName = Pilot;
@@ -146,7 +156,7 @@
 			isa = PBXProject;
 			attributes = {
 				BuildIndependentTargetsInParallel = YES;
-				LastUpgradeCheck = 2660;
+				LastUpgradeCheck = 1430;
 				TargetAttributes = {
 					FE8ED209D7643DC0791F345F = {
 						DevelopmentTeam = 362V48U65C;
@@ -157,12 +167,14 @@
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
 			knownRegions = (
+				Base,
 				en,
 			);
 			mainGroup = 5DCCA06A0E104DBA6E91894C;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				CCCB69F4349AB3E1C2966687 /* XCRemoteSwiftPackageReference "SendspinKit" */,
+				3F09279BF4E45C3F97B29AD2 /* XCLocalSwiftPackageReference "../../packages/PilotClientKit" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = DC7D82CC69762577B57556DA /* Products */;
@@ -191,7 +203,6 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				2C66CABBDDEA7F3B797AC6A8 /* KeychainStore.swift in Sources */,
 				93570751D7B731E10026294F /* Models.swift in Sources */,
 				A2F6BD8D8D4A937B4D8CD6E3 /* PhonePlaybackController.swift in Sources */,
 				260C6B29B047979CE7181505 /* PilotAPI.swift in Sources */,
@@ -291,7 +302,6 @@
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
-				ENABLE_USER_SCRIPT_SANDBOXING = YES;
 				GCC_C_LANGUAGE_STANDARD = gnu11;
 				GCC_DYNAMIC_NO_PIC = NO;
 				GCC_NO_COMMON_BLOCKS = YES;
@@ -313,7 +323,6 @@
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
-				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 				SWIFT_VERSION = 6.0;
 			};
@@ -374,7 +383,6 @@
 				COPY_PHASE_STRIP = NO;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				ENABLE_NS_ASSERTIONS = NO;
-				ENABLE_USER_SCRIPT_SANDBOXING = YES;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				GCC_C_LANGUAGE_STANDARD = gnu11;
 				GCC_NO_COMMON_BLOCKS = YES;
@@ -390,7 +398,6 @@
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
 				SWIFT_COMPILATION_MODE = wholemodule;
-				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_OPTIMIZATION_LEVEL = "-O";
 				SWIFT_VERSION = 6.0;
 			};
@@ -447,6 +454,13 @@
 		};
 /* End XCConfigurationList section */
 
+/* Begin XCLocalSwiftPackageReference section */
+		3F09279BF4E45C3F97B29AD2 /* XCLocalSwiftPackageReference "../../packages/PilotClientKit" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = ../../packages/PilotClientKit;
+		};
+/* End XCLocalSwiftPackageReference section */
+
 /* Begin XCRemoteSwiftPackageReference section */
 		CCCB69F4349AB3E1C2966687 /* XCRemoteSwiftPackageReference "SendspinKit" */ = {
 			isa = XCRemoteSwiftPackageReference;
@@ -463,6 +477,10 @@
 			isa = XCSwiftPackageProductDependency;
 			package = CCCB69F4349AB3E1C2966687 /* XCRemoteSwiftPackageReference "SendspinKit" */;
 			productName = SendspinKit;
+		};
+		4251A525458A5949FCC12F9C /* PilotClientKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = PilotClientKit;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

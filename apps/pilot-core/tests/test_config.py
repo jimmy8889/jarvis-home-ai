@@ -77,6 +77,54 @@ class ConfigTests(unittest.TestCase):
         )
         self.assertFalse(self._load(configured).server.legacy_bootstrap_enabled)
 
+    def test_validates_public_upload_base_url(self) -> None:
+        configured = VALID_CONFIG.replace(
+            "listen_port = 8770",
+            'listen_port = 8770\npublic_upload_base_url = "https://pilot-upload.example.com/"',
+        )
+        self.assertEqual(
+            self._load(configured).server.public_upload_base_url,
+            "https://pilot-upload.example.com",
+        )
+        for invalid in (
+            "http://pilot-upload.example.com",
+            "https://pilot-upload.example.com/private",
+            "https://user:secret@pilot-upload.example.com",
+        ):
+            with self.subTest(invalid=invalid), self.assertRaisesRegex(
+                ValueError, "public_upload_base_url"
+            ):
+                self._load(
+                    VALID_CONFIG.replace(
+                        "listen_port = 8770",
+                        f'listen_port = 8770\npublic_upload_base_url = "{invalid}"',
+                    )
+                )
+
+    def test_validates_public_client_base_url(self) -> None:
+        configured = VALID_CONFIG.replace(
+            "listen_port = 8770",
+            'listen_port = 8770\npublic_client_base_url = "https://pilot.example.com/"',
+        )
+        self.assertEqual(
+            self._load(configured).server.public_client_base_url,
+            "https://pilot.example.com",
+        )
+        for invalid in (
+            "http://pilot.example.com",
+            "https://pilot.example.com/private",
+            "https://user:secret@pilot.example.com",
+        ):
+            with self.subTest(invalid=invalid), self.assertRaisesRegex(
+                ValueError, "public_client_base_url"
+            ):
+                self._load(
+                    VALID_CONFIG.replace(
+                        "listen_port = 8770",
+                        f'listen_port = 8770\npublic_client_base_url = "{invalid}"',
+                    )
+                )
+
     def test_rejects_unknown_default_player(self) -> None:
         with self.assertRaisesRegex(ValueError, "unknown player"):
             self._load(
@@ -164,6 +212,38 @@ llm_model = "qwen3:8b"
         )
         with self.assertRaisesRegex(ValueError, "llm_url"):
             self._load(invalid)
+
+    def test_loads_vllm_backend_pool(self) -> None:
+        configured = VALID_CONFIG.replace(
+            "[[rooms]]",
+            """[integrations]
+llm_provider = "vllm"
+
+[[integrations.llm_backends]]
+id = "ai3090-primary"
+url = "http://ai3090:8000/v1"
+model = "primary"
+token_env = "PILOT_LLM_3090_TOKEN"
+roles = ["assistant", "reasoning", "meeting"]
+priority = 10
+max_output_tokens = 1536
+timeout_seconds = 90
+
+[[integrations.llm_backends]]
+id = "ai3080-verifier"
+url = "http://ai3080:8000/v1"
+model = "verifier"
+token_env = "PILOT_LLM_3080_TOKEN"
+roles = ["assistant", "verification"]
+priority = 100
+
+[[rooms]]""",
+            1,
+        )
+        settings = self._load(configured)
+        self.assertEqual(len(settings.integrations.llm_backends), 2)
+        self.assertEqual(settings.integrations.llm_backends[0].id, "ai3090-primary")
+        self.assertEqual(settings.integrations.llm_backends[0].max_output_tokens, 1536)
 
     def test_validates_display_temperature_sensors(self) -> None:
         configured = VALID_CONFIG.replace(

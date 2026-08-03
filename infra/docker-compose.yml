@@ -24,12 +24,22 @@ services:
       MUSIC_ASSISTANT_TOKEN_FILE: /run/secrets/music_assistant_token
       HOME_ASSISTANT_TOKEN_FILE: /run/secrets/home_assistant_token
       PILOT_TTS_TOKEN_FILE: /run/secrets/tts_token
+      PILOT_LLM_TOKEN_FILE: /run/secrets/llm_token
+      PILOT_LLM_3090_TOKEN_FILE: /run/secrets/llm_3090_token
+      PILOT_LLM_3080_TOKEN_FILE: /run/secrets/llm_3080_token
+      PILOT_TESLAMATE_ADAPTER_TOKEN_FILE: /run/secrets/teslamate_adapter_token
+      PILOT_TESLA_VEHICLE_ID_FILE: /run/secrets/tesla_vehicle_id
     secrets:
       - pilot_core_admin_token
       - pilot_core_bootstrap_token
       - music_assistant_token
       - home_assistant_token
       - tts_token
+      - llm_token
+      - llm_3090_token
+      - llm_3080_token
+      - teslamate_adapter_token
+      - tesla_vehicle_id
     volumes:
       - ../config/core.container.toml:/config/core.toml:ro
       - pilot-core-data:/data
@@ -65,3 +75,13 @@ secrets:
     file: ./secrets/home_assistant_token
   tts_token:
     file: ./secrets/tts_token
+  llm_token:
+    file: ./secrets/llm_token
+  llm_3090_token:
+    file: ./secrets/llm_3090_token
+  llm_3080_token:
+    file: ./secrets/llm_3080_token
+  teslamate_adapter_token:
+    file: ./secrets/teslamate_adapter_token
+  tesla_vehicle_id:
+    file: ./secrets/tesla_vehicle_id

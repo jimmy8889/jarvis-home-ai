@@ -355,6 +355,86 @@ class Store:
                 );
                 CREATE INDEX IF NOT EXISTS home_action_audit_request
                     ON home_action_audit(request_id, id);
+                CREATE TABLE IF NOT EXISTS vehicle_destinations (
+                    id TEXT PRIMARY KEY,
+                    vehicle_id TEXT NOT NULL,
+                    name TEXT NOT NULL,
+                    address TEXT NOT NULL,
+                    latitude REAL NOT NULL,
+                    longitude REAL NOT NULL,
+                    icon TEXT NOT NULL,
+                    climate_enabled INTEGER NOT NULL DEFAULT 1,
+                    temperature_c REAL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS vehicle_destinations_vehicle
+                    ON vehicle_destinations(vehicle_id, name COLLATE NOCASE);
+                CREATE TABLE IF NOT EXISTS vehicle_maintenance (
+                    id TEXT PRIMARY KEY,
+                    vehicle_id TEXT NOT NULL,
+                    category TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    completed_date TEXT,
+                    odometer_km REAL,
+                    cost_amount REAL,
+                    cost_currency TEXT NOT NULL DEFAULT 'AUD',
+                    workshop TEXT NOT NULL DEFAULT '',
+                    notes TEXT NOT NULL DEFAULT '',
+                    next_due_date TEXT,
+                    next_due_odometer_km REAL,
+                    warning_days INTEGER NOT NULL DEFAULT 30,
+                    warning_km INTEGER NOT NULL DEFAULT 1000,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS vehicle_maintenance_vehicle
+                    ON vehicle_maintenance(vehicle_id, updated_at DESC);
+                CREATE TABLE IF NOT EXISTS vehicle_maintenance_attachments (
+                    id TEXT PRIMARY KEY,
+                    maintenance_id TEXT NOT NULL REFERENCES vehicle_maintenance(id)
+                        ON DELETE CASCADE,
+                    filename TEXT NOT NULL,
+                    content_type TEXT NOT NULL,
+                    sha256 TEXT NOT NULL,
+                    size_bytes INTEGER NOT NULL,
+                    path TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS vehicle_attachments_maintenance
+                    ON vehicle_maintenance_attachments(maintenance_id, created_at);
+                CREATE TABLE IF NOT EXISTS vehicle_action_requests (
+                    id TEXT PRIMARY KEY,
+                    idempotency_key TEXT NOT NULL,
+                    principal_id TEXT NOT NULL,
+                    vehicle_id TEXT NOT NULL,
+                    action TEXT NOT NULL,
+                    parameters_json TEXT NOT NULL,
+                    risk TEXT NOT NULL,
+                    confirmation_required INTEGER NOT NULL,
+                    status TEXT NOT NULL,
+                    steps_json TEXT NOT NULL DEFAULT '[]',
+                    created_at TEXT NOT NULL,
+                    expires_at TEXT NOT NULL,
+                    confirmed_at TEXT,
+                    executed_at TEXT,
+                    result_json TEXT,
+                    UNIQUE(principal_id, idempotency_key)
+                );
+                CREATE INDEX IF NOT EXISTS vehicle_actions_principal
+                    ON vehicle_action_requests(principal_id, created_at DESC);
+                CREATE INDEX IF NOT EXISTS vehicle_actions_status
+                    ON vehicle_action_requests(status, expires_at);
+                CREATE TABLE IF NOT EXISTS vehicle_action_audit (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    request_id TEXT NOT NULL REFERENCES vehicle_action_requests(id),
+                    event_type TEXT NOT NULL,
+                    actor_id TEXT NOT NULL,
+                    payload_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS vehicle_action_audit_request
+                    ON vehicle_action_audit(request_id, id);
                 """
             )
             room_columns = {
@@ -2773,6 +2853,446 @@ class Store:
             "delivered_at": row["delivered_at"],
             "completed_at": row["completed_at"],
             "expires_at": row["expires_at"],
+        }
+
+    def save_vehicle_destination(
+        self,
+        destination_id: str,
+        vehicle_id: str,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        now = _now()
+        with self._lock, self._connection:
+            self._connection.execute(
+                """INSERT INTO vehicle_destinations
+                   (id, vehicle_id, name, address, latitude, longitude, icon,
+                    climate_enabled, temperature_c, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(id) DO UPDATE SET
+                     name = excluded.name, address = excluded.address,
+                     latitude = excluded.latitude, longitude = excluded.longitude,
+                     icon = excluded.icon,
+                     climate_enabled = excluded.climate_enabled,
+                     temperature_c = excluded.temperature_c,
+                     updated_at = excluded.updated_at
+                   WHERE vehicle_destinations.vehicle_id = excluded.vehicle_id""",
+                (
+                    destination_id,
+                    vehicle_id,
+                    payload["name"],
+                    payload["address"],
+                    payload["latitude"],
+                    payload["longitude"],
+                    payload["icon"],
+                    int(payload["climate_enabled"]),
+                    payload.get("temperature_c"),
+                    now,
+                    now,
+                ),
+            )
+        result = self.get_vehicle_destination(vehicle_id, destination_id)
+        if result is None:
+            raise KeyError(destination_id)
+        return result
+
+    def list_vehicle_destinations(self, vehicle_id: str) -> list[dict[str, Any]]:
+        with self._lock:
+            rows = self._connection.execute(
+                """SELECT * FROM vehicle_destinations
+                   WHERE vehicle_id = ? ORDER BY name COLLATE NOCASE""",
+                (vehicle_id,),
+            ).fetchall()
+        return [self._vehicle_destination_view(row) for row in rows]
+
+    def get_vehicle_destination(
+        self, vehicle_id: str, destination_id: str
+    ) -> dict[str, Any] | None:
+        with self._lock:
+            row = self._connection.execute(
+                """SELECT * FROM vehicle_destinations
+                   WHERE vehicle_id = ? AND id = ?""",
+                (vehicle_id, destination_id),
+            ).fetchone()
+        return self._vehicle_destination_view(row) if row else None
+
+    def delete_vehicle_destination(self, vehicle_id: str, destination_id: str) -> bool:
+        with self._lock, self._connection:
+            cursor = self._connection.execute(
+                "DELETE FROM vehicle_destinations WHERE vehicle_id = ? AND id = ?",
+                (vehicle_id, destination_id),
+            )
+        return cursor.rowcount == 1
+
+    @staticmethod
+    def _vehicle_destination_view(row: sqlite3.Row) -> dict[str, Any]:
+        return {
+            "id": row["id"],
+            "vehicle_id": row["vehicle_id"],
+            "name": row["name"],
+            "address": row["address"],
+            "latitude": row["latitude"],
+            "longitude": row["longitude"],
+            "icon": row["icon"],
+            "climate_enabled": bool(row["climate_enabled"]),
+            "temperature_c": row["temperature_c"],
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+        }
+
+    def save_vehicle_maintenance(
+        self,
+        maintenance_id: str,
+        vehicle_id: str,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        now = _now()
+        with self._lock, self._connection:
+            self._connection.execute(
+                """INSERT INTO vehicle_maintenance
+                   (id, vehicle_id, category, title, completed_date, odometer_km,
+                    cost_amount, cost_currency, workshop, notes, next_due_date,
+                    next_due_odometer_km, warning_days, warning_km, created_at,
+                    updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(id) DO UPDATE SET
+                     category = excluded.category, title = excluded.title,
+                     completed_date = excluded.completed_date,
+                     odometer_km = excluded.odometer_km,
+                     cost_amount = excluded.cost_amount,
+                     cost_currency = excluded.cost_currency,
+                     workshop = excluded.workshop, notes = excluded.notes,
+                     next_due_date = excluded.next_due_date,
+                     next_due_odometer_km = excluded.next_due_odometer_km,
+                     warning_days = excluded.warning_days,
+                     warning_km = excluded.warning_km,
+                     updated_at = excluded.updated_at
+                   WHERE vehicle_maintenance.vehicle_id = excluded.vehicle_id""",
+                (
+                    maintenance_id,
+                    vehicle_id,
+                    payload["category"],
+                    payload["title"],
+                    payload.get("completed_date"),
+                    payload.get("odometer_km"),
+                    payload.get("cost_amount"),
+                    payload.get("cost_currency", "AUD"),
+                    payload.get("workshop", ""),
+                    payload.get("notes", ""),
+                    payload.get("next_due_date"),
+                    payload.get("next_due_odometer_km"),
+                    payload.get("warning_days", 30),
+                    payload.get("warning_km", 1000),
+                    now,
+                    now,
+                ),
+            )
+        result = self.get_vehicle_maintenance(vehicle_id, maintenance_id)
+        if result is None:
+            raise KeyError(maintenance_id)
+        return result
+
+    def list_vehicle_maintenance(self, vehicle_id: str) -> list[dict[str, Any]]:
+        with self._lock:
+            rows = self._connection.execute(
+                """SELECT * FROM vehicle_maintenance
+                   WHERE vehicle_id = ?
+                   ORDER BY COALESCE(completed_date, next_due_date) DESC, updated_at DESC""",
+                (vehicle_id,),
+            ).fetchall()
+        return [self._vehicle_maintenance_view(row) for row in rows]
+
+    def get_vehicle_maintenance(
+        self, vehicle_id: str, maintenance_id: str
+    ) -> dict[str, Any] | None:
+        with self._lock:
+            row = self._connection.execute(
+                """SELECT * FROM vehicle_maintenance
+                   WHERE vehicle_id = ? AND id = ?""",
+                (vehicle_id, maintenance_id),
+            ).fetchone()
+        if row is None:
+            return None
+        result = self._vehicle_maintenance_view(row)
+        result["attachments"] = self.list_vehicle_attachments(maintenance_id)
+        return result
+
+    def delete_vehicle_maintenance(self, vehicle_id: str, maintenance_id: str) -> bool:
+        with self._lock, self._connection:
+            cursor = self._connection.execute(
+                "DELETE FROM vehicle_maintenance WHERE vehicle_id = ? AND id = ?",
+                (vehicle_id, maintenance_id),
+            )
+        return cursor.rowcount == 1
+
+    @staticmethod
+    def _vehicle_maintenance_view(row: sqlite3.Row) -> dict[str, Any]:
+        return {
+            "id": row["id"],
+            "vehicle_id": row["vehicle_id"],
+            "category": row["category"],
+            "title": row["title"],
+            "completed_date": row["completed_date"],
+            "odometer_km": row["odometer_km"],
+            "cost_amount": row["cost_amount"],
+            "cost_currency": row["cost_currency"],
+            "workshop": row["workshop"],
+            "notes": row["notes"],
+            "next_due_date": row["next_due_date"],
+            "next_due_odometer_km": row["next_due_odometer_km"],
+            "warning_days": row["warning_days"],
+            "warning_km": row["warning_km"],
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+        }
+
+    def create_vehicle_attachment(
+        self,
+        attachment_id: str,
+        maintenance_id: str,
+        *,
+        filename: str,
+        content_type: str,
+        digest: str,
+        size_bytes: int,
+        path: str,
+    ) -> dict[str, Any]:
+        with self._lock, self._connection:
+            self._connection.execute(
+                """INSERT INTO vehicle_maintenance_attachments
+                   (id, maintenance_id, filename, content_type, sha256,
+                    size_bytes, path, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    attachment_id,
+                    maintenance_id,
+                    filename,
+                    content_type,
+                    digest,
+                    size_bytes,
+                    path,
+                    _now(),
+                ),
+            )
+        result = self.get_vehicle_attachment(attachment_id)
+        assert result is not None
+        return result
+
+    def get_vehicle_attachment(self, attachment_id: str) -> dict[str, Any] | None:
+        with self._lock:
+            row = self._connection.execute(
+                "SELECT * FROM vehicle_maintenance_attachments WHERE id = ?",
+                (attachment_id,),
+            ).fetchone()
+        return self._vehicle_attachment_view(row) if row else None
+
+    def list_vehicle_attachments(self, maintenance_id: str) -> list[dict[str, Any]]:
+        with self._lock:
+            rows = self._connection.execute(
+                """SELECT * FROM vehicle_maintenance_attachments
+                   WHERE maintenance_id = ? ORDER BY created_at""",
+                (maintenance_id,),
+            ).fetchall()
+        return [self._vehicle_attachment_view(row) for row in rows]
+
+    @staticmethod
+    def _vehicle_attachment_view(row: sqlite3.Row) -> dict[str, Any]:
+        return {
+            "id": row["id"],
+            "maintenance_id": row["maintenance_id"],
+            "filename": row["filename"],
+            "content_type": row["content_type"],
+            "sha256": row["sha256"],
+            "size_bytes": row["size_bytes"],
+            "path": row["path"],
+            "created_at": row["created_at"],
+        }
+
+    def create_vehicle_action(
+        self,
+        request_id: str,
+        idempotency_key: str,
+        principal_id: str,
+        vehicle_id: str,
+        action: str,
+        parameters: dict[str, Any],
+        *,
+        risk: str,
+        confirmation_required: bool,
+        ttl_seconds: int = 120,
+    ) -> tuple[dict[str, Any], bool]:
+        now = datetime.now(UTC)
+        expires_at = now + timedelta(seconds=ttl_seconds)
+        initial_status = "pending_confirmation" if confirmation_required else "accepted"
+        with self._lock, self._connection:
+            existing = self._connection.execute(
+                """SELECT * FROM vehicle_action_requests
+                   WHERE principal_id = ? AND idempotency_key = ?""",
+                (principal_id, idempotency_key),
+            ).fetchone()
+            if existing:
+                return self._vehicle_action_view(existing), False
+            self._connection.execute(
+                """INSERT INTO vehicle_action_requests
+                   (id, idempotency_key, principal_id, vehicle_id, action,
+                    parameters_json, risk, confirmation_required, status,
+                    created_at, expires_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    request_id,
+                    idempotency_key,
+                    principal_id,
+                    vehicle_id,
+                    action,
+                    json.dumps(parameters, separators=(",", ":"), sort_keys=True),
+                    risk,
+                    int(confirmation_required),
+                    initial_status,
+                    now.isoformat(),
+                    expires_at.isoformat(),
+                ),
+            )
+            self._append_vehicle_action_audit_locked(
+                request_id,
+                "requested",
+                principal_id,
+                {"action": action, "risk": risk},
+            )
+            self._append_vehicle_action_audit_locked(
+                request_id,
+                initial_status,
+                "pilot-core",
+                {"expires_at": expires_at.isoformat()},
+            )
+        result = self.get_vehicle_action(request_id)
+        assert result is not None
+        return result, True
+
+    def get_vehicle_action(self, request_id: str) -> dict[str, Any] | None:
+        with self._lock, self._connection:
+            self._expire_vehicle_actions_locked()
+            row = self._connection.execute(
+                "SELECT * FROM vehicle_action_requests WHERE id = ?",
+                (request_id,),
+            ).fetchone()
+        return self._vehicle_action_view(row) if row else None
+
+    def claim_vehicle_action(
+        self, request_id: str, principal_id: str, *, confirmed: bool
+    ) -> dict[str, Any]:
+        expected = "pending_confirmation" if confirmed else "accepted"
+        now = _now()
+        with self._lock, self._connection:
+            self._expire_vehicle_actions_locked()
+            cursor = self._connection.execute(
+                """UPDATE vehicle_action_requests
+                   SET status = 'executing',
+                       confirmed_at = CASE WHEN ? THEN ? ELSE confirmed_at END
+                   WHERE id = ? AND principal_id = ? AND status = ?""",
+                (int(confirmed), now, request_id, principal_id, expected),
+            )
+            if cursor.rowcount != 1:
+                raise ValueError("vehicle action is not claimable")
+            self._append_vehicle_action_audit_locked(
+                request_id,
+                "confirmed" if confirmed else "accepted",
+                principal_id,
+                {},
+            )
+        result = self.get_vehicle_action(request_id)
+        assert result is not None
+        return result
+
+    def update_vehicle_action_steps(
+        self, request_id: str, steps: list[dict[str, Any]]
+    ) -> dict[str, Any]:
+        with self._lock, self._connection:
+            cursor = self._connection.execute(
+                """UPDATE vehicle_action_requests SET steps_json = ?
+                   WHERE id = ? AND status = 'executing'""",
+                (json.dumps(steps, separators=(",", ":"), sort_keys=True), request_id),
+            )
+            if cursor.rowcount != 1:
+                raise ValueError("vehicle action is not executing")
+            self._append_vehicle_action_audit_locked(
+                request_id, "progress", "pilot-core", {"steps": steps}
+            )
+        result = self.get_vehicle_action(request_id)
+        assert result is not None
+        return result
+
+    def complete_vehicle_action(
+        self, request_id: str, status: str, result: dict[str, Any]
+    ) -> dict[str, Any]:
+        if status not in {"reconciled", "failed", "unverified"}:
+            raise ValueError("invalid vehicle action completion status")
+        with self._lock, self._connection:
+            cursor = self._connection.execute(
+                """UPDATE vehicle_action_requests
+                   SET status = ?, result_json = ?, executed_at = ?
+                   WHERE id = ? AND status = 'executing'""",
+                (
+                    status,
+                    json.dumps(result, separators=(",", ":"), sort_keys=True),
+                    _now(),
+                    request_id,
+                ),
+            )
+            if cursor.rowcount != 1:
+                raise ValueError("vehicle action is not executing")
+            self._append_vehicle_action_audit_locked(
+                request_id, status, "pilot-core", result
+            )
+        completed = self.get_vehicle_action(request_id)
+        assert completed is not None
+        return completed
+
+    def _expire_vehicle_actions_locked(self) -> None:
+        now = _now()
+        self._connection.execute(
+            """UPDATE vehicle_action_requests SET status = 'expired'
+               WHERE status IN ('pending_confirmation', 'accepted')
+                 AND expires_at <= ?""",
+            (now,),
+        )
+
+    def _append_vehicle_action_audit_locked(
+        self,
+        request_id: str,
+        event_type: str,
+        actor_id: str,
+        payload: dict[str, Any],
+    ) -> None:
+        self._connection.execute(
+            """INSERT INTO vehicle_action_audit
+               (request_id, event_type, actor_id, payload_json, created_at)
+               VALUES (?, ?, ?, ?, ?)""",
+            (
+                request_id,
+                event_type,
+                actor_id,
+                json.dumps(payload, separators=(",", ":"), sort_keys=True),
+                _now(),
+            ),
+        )
+
+    @staticmethod
+    def _vehicle_action_view(row: sqlite3.Row) -> dict[str, Any]:
+        return {
+            "id": row["id"],
+            "idempotency_key": row["idempotency_key"],
+            "principal_id": row["principal_id"],
+            "vehicle_id": row["vehicle_id"],
+            "action": row["action"],
+            "parameters": json.loads(row["parameters_json"]),
+            "risk": row["risk"],
+            "confirmation_required": bool(row["confirmation_required"]),
+            "status": row["status"],
+            "steps": json.loads(row["steps_json"]),
+            "created_at": row["created_at"],
+            "expires_at": row["expires_at"],
+            "confirmed_at": row["confirmed_at"],
+            "executed_at": row["executed_at"],
+            "result": json.loads(row["result_json"]) if row["result_json"] else None,
         }
 
     @staticmethod

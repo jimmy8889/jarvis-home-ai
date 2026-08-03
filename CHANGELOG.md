@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.31.1 — 2026-08-03
+
+- Recognized room-qualified light capability questions such as “which office
+  lights can change colour?” as forced, grounded catalogue reads while keeping
+  hypothetical and negated light mutations fail-closed.
+
 ## 0.31.0 — 2026-08-03
 
 - Added the complete authenticated Pilot iOS voice loop: microphone-responsive

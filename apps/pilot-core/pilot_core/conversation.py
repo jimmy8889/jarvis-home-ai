@@ -259,7 +259,12 @@ def _required_read_tool(text: str) -> str | None:
         )
     ):
         return "get_energy_snapshot"
-    if any(
+    if re.search(
+        r"\b(?:which|what)\s+(?!(?:if|would)\b)"
+        r"(?:[a-z0-9_-]+\s+){0,4}"
+        r"(?:lights?|switches?|entities|devices|controls)\b",
+        normalized,
+    ) or any(
         phrase in normalized
         for phrase in (
             "which lights",

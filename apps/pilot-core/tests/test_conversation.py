@@ -23,6 +23,7 @@ from pilot_core.conversation import (
     LLMRequestFailed,
     OpenAICompatibleLLM,
     _required_action_tool,
+    _required_read_tool,
 )
 from pilot_core.home_intelligence import HomeResolutionError
 from pilot_core.integrations import Integrations
@@ -81,6 +82,12 @@ class ConversationEngineTests(unittest.IsolatedAsyncioTestCase):
         os.environ.pop("HOME_ASSISTANT_TOKEN", None)
 
     def test_read_only_light_capability_question_never_forces_action(self) -> None:
+        self.assertEqual(
+            _required_read_tool(
+                "Which office lights can change colour? Do not change anything."
+            ),
+            "search_home_entities",
+        )
         self.assertIsNone(
             _required_action_tool(
                 "Which office lights can change colour? Do not change anything."

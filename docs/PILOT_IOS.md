@@ -25,14 +25,21 @@ provides:
   animated power/rack presentation, and drag-selectable power, tariff and
   temperature history charts with exact timestamp/value inspection;
 - compact and expanded now-playing presentation;
-- room-selectable contextual Pilot conversations with structured cards,
-  citations and action results;
+- room-selectable typed and spoken Pilot conversations with structured cards,
+  citations and action results. The voice surface includes a live
+  microphone-responsive aura, speech-aware automatic submission, local
+  STT/reasoning/TTS, authenticated reply audio, cancellation and retry;
 - foreground auto-refresh and explicit loading, stale, offline, and error
   states;
 - cached last-known media, home, energy and meeting state;
 - an explicit-tap AAC meeting recorder whose retained upload queue survives a
   failed transfer and can be retried;
 - accessibility labels, Dynamic Type support, haptics, fixtures and previews.
+
+The microphone path records 16 kHz signed 16-bit mono PCM and stops after 45
+seconds (1,440,000 PCM bytes). Pilot Core accepts a strictly bounded
+1,600,000-byte voice request so the longest valid utterance fits without
+opening an unbounded upload path.
 
 The next major application surface is the Pilot Home Digital Twin: an
 interactive 3D representation of the house with live room state and bounded
@@ -78,6 +85,11 @@ portable-client
 `portable-client` is required because the app may explicitly target any
 registered room. Redeem the pairing grant in the app; the resulting token is
 written to the iOS Keychain and must not be committed to source control.
+
+The paired identity also requires `voice` for `/voice` and reply-audio access,
+and `home-control` for governed light or other entity mutations. Pilot sends
+the selected room as `X-Pilot-Room-ID`; Core accepts that header only from a
+portable device and continues to isolate fixed-room sessions and audio.
 
 Legacy manually enrolled identities remain supported, but they do not gain new
 capabilities automatically. Review their manifest or pair a fresh personal
@@ -140,6 +152,10 @@ iPad, verify:
    restart and Wi-Fi loss;
 5. a long real meeting recording, retained failed upload, retry, processing and
    evidence review without data loss.
+6. phone voice capture in quiet and noisy rooms, automatic end-of-speech,
+   cancellation, TTS playback and music-session restoration; then exercise
+   light on/off, brightness and colour in each curated room and confirm the
+   resulting Home Assistant state and Pilot audit entry.
 
 Production meeting transcription on the planned RTX 3080 remains deferred
 until that GPU is installed and a private Whisper-compatible endpoint passes

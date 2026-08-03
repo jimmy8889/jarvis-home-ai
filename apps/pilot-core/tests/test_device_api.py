@@ -709,6 +709,141 @@ class DisplayNodeApiTests(unittest.TestCase):
         )
         self.assertNotIn("path", payload["audio"])
 
+    def test_portable_voice_reply_is_device_private_and_revocation_safe(self) -> None:
+        token = self.store.register_device(
+            "pilot-ios-voice",
+            "bedroom",
+            "Pilot iOS Voice",
+            ["portable-client", "voice"],
+        )
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "X-Pilot-Device-ID": "pilot-ios-voice",
+            "Content-Type": "audio/l16",
+            "X-Pilot-Sample-Rate": "16000",
+            "X-Pilot-Room-ID": "office",
+        }
+        synthesized = SynthesizedAudio(
+            content=WAV,
+            content_type="audio/wav",
+            filename="speech.wav",
+            provider="home_assistant",
+            voice="en_US-amy-low",
+            model="tts.piper",
+            language="en-AU",
+        )
+
+        async def transcribe(_pipeline, audio, **_kwargs):
+            async for _chunk in audio:
+                pass
+            return "Turn the lights blue"
+
+        with (
+            patch.object(HomeAssistantVoicePipeline, "transcribe", new=transcribe),
+            patch.object(
+                Integrations,
+                "home_assistant_conversation",
+                new=AsyncMock(
+                    return_value={
+                        "conversation_id": "ha-office-voice",
+                        "response": {
+                            "response_type": "action_done",
+                            "speech": {"plain": {"speech": "The lights are blue."}},
+                        },
+                    }
+                ),
+            ),
+            patch.object(
+                LocalTTS,
+                "synthesize",
+                new=AsyncMock(return_value=synthesized),
+            ),
+        ):
+            response = self.client.post(
+                "/v1/devices/pilot-ios-voice/voice",
+                headers=headers,
+                content=b"\x00\x00" * 8000,
+            )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        payload = response.json()
+        self.assertEqual(payload["room_id"], "office")
+        self.assertEqual(payload["transcript"], "Turn the lights blue")
+        self.assertEqual(payload["audio"]["recipient_device_id"], "pilot-ios-voice")
+
+        unrelated_token = self.store.register_device(
+            "pilot-ios-unrelated",
+            "bedroom",
+            "Unrelated Pilot iOS",
+            ["portable-client", "voice"],
+        )
+        unrelated = self.client.get(
+            payload["audio"]["download_url"],
+            headers={
+                "Authorization": f"Bearer {unrelated_token}",
+                "X-Pilot-Device-ID": "pilot-ios-unrelated",
+            },
+        )
+        self.assertEqual(unrelated.status_code, 403, unrelated.text)
+
+        downloaded = self.client.get(
+            payload["audio"]["download_url"],
+            headers={
+                "Authorization": f"Bearer {token}",
+                "X-Pilot-Device-ID": "pilot-ios-voice",
+            },
+        )
+        self.assertEqual(downloaded.status_code, 200, downloaded.text)
+        self.assertEqual(downloaded.content, WAV)
+
+        self.store.revoke_device("pilot-ios-voice")
+        revoked = self.client.get(
+            payload["audio"]["download_url"],
+            headers={
+                "Authorization": f"Bearer {token}",
+                "X-Pilot-Device-ID": "pilot-ios-voice",
+            },
+        )
+        self.assertEqual(revoked.status_code, 401, revoked.text)
+
+    def test_fixed_voice_device_cannot_override_its_room(self) -> None:
+        response = self.client.post(
+            "/v1/devices/pilot-bedroom-display/voice",
+            headers={
+                **self.headers,
+                "Content-Type": "audio/l16",
+                "X-Pilot-Sample-Rate": "16000",
+                "X-Pilot-Room-ID": "office",
+            },
+            content=b"\x00\x00" * 8000,
+        )
+        self.assertEqual(response.status_code, 403, response.text)
+        self.assertEqual(
+            response.json()["detail"],
+            "fixed-room device cannot change conversation room",
+        )
+
+    def test_portable_voice_rejects_unknown_selected_room(self) -> None:
+        token = self.store.register_device(
+            "pilot-ios-unknown-room",
+            "bedroom",
+            "Pilot iOS unknown room",
+            ["portable-client", "voice"],
+        )
+        response = self.client.post(
+            "/v1/devices/pilot-ios-unknown-room/voice",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "X-Pilot-Device-ID": "pilot-ios-unknown-room",
+                "Content-Type": "audio/l16",
+                "X-Pilot-Sample-Rate": "16000",
+                "X-Pilot-Room-ID": "not-a-room",
+            },
+            content=b"\x00\x00" * 8000,
+        )
+        self.assertEqual(response.status_code, 404, response.text)
+        self.assertEqual(response.json()["detail"], "room not found")
+
     def test_firmware_manifest_and_image_require_device_credentials(self) -> None:
         release_dir = Path(self.root.name) / "firmware" / "esp32-c6-touch-amoled-2.16"
         release_dir.mkdir(parents=True)

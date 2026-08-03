@@ -21,8 +21,12 @@ The polished v1 application provides:
 - Media Room On/Off controls, Grid/Solar Tesla charging mode and an optional
   embedded Music Assistant web player when playback should originate from the
   iPhone itself;
-- a contextual Pilot conversation surface with rich result cards, tool outcomes,
-  citations, room selection, continued sessions, errors, and new-session actions;
+- a full Pilot voice surface with a live microphone-responsive aura, robust
+  end-of-speech detection plus explicit Done/Cancel controls,
+  authenticated 16 kHz PCM upload, selected-room context, local STT/reasoning/TTS,
+  authenticated spoken-response playback, cancellation and safe retry; typed
+  conversation remains available with rich result cards, tool outcomes,
+  citations, continued sessions, errors, and new-session actions;
 - transactional onboarding: manually entered credentials are not activated or
   persisted until Core authenticates them, while single-use bootstrap grants can
   be pasted or scanned as QR codes;
@@ -63,6 +67,8 @@ The client consumes the device-scoped `pilot.client.v1` product contract:
 - `/manifest` for features and authorized endpoint discovery;
 - `/events/snapshot` plus resumable `/events` long polling;
 - `/energy`, `/home`, `/media`, `/assistant`, and `/meetings` projections;
+- `/voice` for authenticated phone microphone input and authenticated
+  `/v1/audio-assets/{id}` response playback;
 - `/dashboard` plus `/dashboard/actions` for the shared monitoring contract;
 - `/media/browse` for provider-backed artist, album and playlist detail;
 - explainable entity presentation metadata and normalized media state.

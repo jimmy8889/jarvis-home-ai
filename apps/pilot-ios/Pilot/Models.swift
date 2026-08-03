@@ -231,6 +231,83 @@ struct AssistantReply: Codable, Sendable {
     }
 }
 
+struct VoiceAssistantReply: Codable, Sendable {
+    let transcript: String
+    let responseText: String
+    let conversationID: String
+    let provider: String
+    let continueConversation: Bool
+    let roomID: String
+    let status: String?
+    let result: JSONValue?
+    let toolCalls: [AssistantToolCall]?
+    let cards: [AssistantCard]?
+    let sources: [AssistantSource]?
+    let actions: [AssistantAction]?
+    let audio: VoiceAssistantAudio
+
+    enum CodingKeys: String, CodingKey {
+        case transcript, provider, status, result, cards, sources, actions, audio
+        case responseText = "response_text"
+        case conversationID = "conversation_id"
+        case continueConversation = "continue_conversation"
+        case roomID = "room_id"
+        case toolCalls = "tool_calls"
+    }
+}
+
+struct VoiceAssistantAudio: Codable, Sendable {
+    let id: String?
+    let contentType: String?
+    let sizeBytes: Int?
+    let downloadURL: String
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case contentType = "content_type"
+        case sizeBytes = "size_bytes"
+        case downloadURL = "download_url"
+    }
+}
+
+enum VoiceAssistantPhase: Equatable, Sendable {
+    case idle
+    case requestingPermission
+    case listening
+    case processing
+    case speaking
+    case failed(String)
+
+    var isActive: Bool {
+        switch self {
+        case .requestingPermission, .listening, .processing, .speaking: true
+        case .idle, .failed: false
+        }
+    }
+
+    var title: String {
+        switch self {
+        case .idle: "Talk to Pilot"
+        case .requestingPermission: "Preparing microphone"
+        case .listening: "Listening"
+        case .processing: "Understanding"
+        case .speaking: "Pilot is speaking"
+        case .failed: "Voice request failed"
+        }
+    }
+
+    var accessibilityHint: String {
+        switch self {
+        case .idle: "Double-tap to start listening."
+        case .requestingPermission: "Pilot is requesting microphone access."
+        case .listening: "Double-tap Done when you have finished speaking."
+        case .processing: "Pilot is transcribing and reasoning locally."
+        case .speaking: "Double-tap to stop the spoken response."
+        case .failed: "Retry the request or start a new recording."
+        }
+    }
+}
+
 struct AssistantToolCall: Codable, Identifiable, Hashable, Sendable {
     let id: String?
     let name: String

@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+from dataclasses import replace
 import json
 import os
 from datetime import UTC, datetime
 import unittest
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import httpx
 
@@ -19,8 +20,11 @@ from pilot_core.config import (
 from pilot_core.conversation import (
     AssistantTools,
     ConversationEngine,
+    LLMRequestFailed,
     OpenAICompatibleLLM,
+    _required_action_tool,
 )
+from pilot_core.home_intelligence import HomeResolutionError
 from pilot_core.integrations import Integrations
 from pilot_core.media_state import MediaStateReader
 from pilot_core.orchestration import RoomOrchestrator
@@ -76,6 +80,27 @@ class ConversationEngineTests(unittest.IsolatedAsyncioTestCase):
     async def asyncTearDown(self) -> None:
         os.environ.pop("HOME_ASSISTANT_TOKEN", None)
 
+    def test_read_only_light_capability_question_never_forces_action(self) -> None:
+        self.assertIsNone(
+            _required_action_tool(
+                "Which office lights can change colour? Do not change anything."
+            )
+        )
+        self.assertIsNone(
+            _required_action_tool("What lights are available without changing them?")
+        )
+
+    def test_unsafe_light_phrases_never_force_action(self) -> None:
+        for text in (
+            "Don't turn off the lights.",
+            "Never dim the bedroom lights.",
+            "What if I turned off the lights?",
+            "How do I change the light colour?",
+            "Turn every light in the whole house off.",
+        ):
+            with self.subTest(text=text):
+                self.assertIsNone(_required_action_tool(text))
+
     def engine(self, settings: Settings):
         store = Store(":memory:", settings)
         registry = Registry.from_settings(settings)
@@ -117,7 +142,7 @@ class ConversationEngineTests(unittest.IsolatedAsyncioTestCase):
             ]
         )
         first = await engine.respond(
-            "Turn on the light",
+            "Turn on the fan",
             "bedroom",
             device_id="bedroom-display",
         )
@@ -143,6 +168,217 @@ class ConversationEngineTests(unittest.IsolatedAsyncioTestCase):
             [turn["role"] for turn in store.conversation_turns(first.session_id)],
             ["user", "assistant", "user", "assistant"],
         )
+        store.close()
+
+    async def test_governed_light_llm_outage_never_falls_back_to_ha(self) -> None:
+        engine, store, integrations, llm = self.engine(test_settings(llm=True))
+        integrations.home_assistant_conversation = AsyncMock()
+        llm.chat = AsyncMock(side_effect=LLMRequestFailed("inference offline"))
+
+        result = await engine.respond(
+            "Turn off the bedroom light",
+            "bedroom",
+            device_id="bedroom-display",
+        )
+
+        self.assertEqual(result.provider, "pilot_guardrail")
+        self.assertEqual(result.result["status"], "not_executed")
+        integrations.home_assistant_conversation.assert_not_awaited()
+        store.close()
+
+    async def test_successful_light_action_survives_response_llm_outage(self) -> None:
+        engine, store, integrations, llm = self.engine(test_settings(llm=True))
+        integrations.home_assistant_conversation = AsyncMock()
+        engine.tools.execute = AsyncMock(
+            return_value={
+                "success": True,
+                "status": "succeeded",
+                "room_id": "bedroom",
+                "entity_id": "light.bedroom_main",
+                "action": "turn_off",
+                "audit_id": "audit-1",
+            }
+        )
+        llm.chat = AsyncMock(
+            side_effect=[
+                {
+                    "tool_calls": [
+                        {
+                            "id": "light-1",
+                            "function": {
+                                "name": "control_light",
+                                "arguments": json.dumps(
+                                    {
+                                        "entity": "Bedroom light",
+                                        "action": "turn_off",
+                                    }
+                                ),
+                            },
+                        }
+                    ]
+                },
+                LLMRequestFailed("response model unavailable"),
+            ]
+        )
+
+        result = await engine.respond(
+            "Turn off the bedroom light",
+            "bedroom",
+            device_id="bedroom-display",
+        )
+
+        self.assertEqual(result.provider, "pilot_core")
+        self.assertIn("is off", result.response_text)
+        self.assertEqual(len(result.tool_calls), 1)
+        engine.tools.execute.assert_awaited_once()
+        integrations.home_assistant_conversation.assert_not_awaited()
+        store.close()
+
+    async def test_only_one_light_mutation_executes_per_turn(self) -> None:
+        engine, store, integrations, llm = self.engine(test_settings(llm=True))
+        integrations.home_assistant_conversation = AsyncMock()
+        engine.tools.execute = AsyncMock(
+            return_value={
+                "success": True,
+                "status": "succeeded",
+                "room_id": "bedroom",
+                "entity_id": "light.bedroom_main",
+                "action": "turn_off",
+                "audit_id": "audit-1",
+            }
+        )
+        call_payload = {
+            "function": {
+                "name": "control_light",
+                "arguments": json.dumps(
+                    {"entity": "Bedroom light", "action": "turn_off"}
+                ),
+            }
+        }
+        llm.chat = AsyncMock(
+            side_effect=[
+                {
+                    "tool_calls": [
+                        {"id": "light-1", **call_payload},
+                        {"id": "light-2", **call_payload},
+                    ]
+                },
+                {"content": "The bedroom light is off."},
+            ]
+        )
+
+        result = await engine.respond(
+            "Turn off the bedroom light",
+            "bedroom",
+            device_id="bedroom-display",
+        )
+
+        engine.tools.execute.assert_awaited_once()
+        self.assertEqual(len(result.tool_calls), 2)
+        self.assertFalse(result.tool_calls[1]["output"]["success"])
+        self.assertIn("only one", result.tool_calls[1]["output"]["error"])
+        integrations.home_assistant_conversation.assert_not_awaited()
+        store.close()
+
+    async def test_guarded_unsafe_requests_never_reach_ha(self) -> None:
+        for text in (
+            "Don't turn off the lights.",
+            "What if I turned off the lights?",
+            "Turn every light in the whole house off.",
+            "Unlock the front door.",
+            "Open the garage door.",
+        ):
+            with self.subTest(text=text):
+                engine, store, integrations, _ = self.engine(test_settings())
+                integrations.home_assistant_conversation = AsyncMock()
+                result = await engine.respond(text, "bedroom")
+                self.assertEqual(result.provider, "pilot_guardrail")
+                self.assertEqual(result.result["status"], "not_executed")
+                integrations.home_assistant_conversation.assert_not_awaited()
+                store.close()
+
+    async def test_cross_room_light_target_must_be_named_by_user(self) -> None:
+        base = test_settings(llm=True)
+        media_room = Room(
+            id="media-room",
+            name="Media Room",
+            response_player_id="media-response",
+            default_music_player_id="media-music",
+        )
+        multi_room = replace(
+            base,
+            rooms=(*base.rooms, media_room),
+            players=(
+                *base.players,
+                Player(
+                    id="media-response",
+                    room_id="media-room",
+                    name="Media response",
+                    protocol="pilot",
+                    kind="response",
+                ),
+                Player(
+                    id="media-music",
+                    room_id="media-room",
+                    name="Media music",
+                    protocol="future",
+                    kind="music",
+                    control_enabled=False,
+                ),
+            ),
+        )
+        engine, store, _, _ = self.engine(multi_room)
+        store.register_device(
+            "pilot-phone",
+            "bedroom",
+            "Pilot Phone",
+            ["voice", "home-control", "portable-client"],
+        )
+        engine.tools.home_intelligence = MagicMock()
+        engine.tools.home_actions = MagicMock()
+        engine.tools.home_actions.authorize_room.return_value = "media-room"
+        engine.tools.home_actions.prepare.return_value = {
+            "id": "action-1",
+            "confirmation_required": False,
+        }
+        engine.tools.home_actions.execute = AsyncMock(
+            return_value={"id": "action-1", "status": "succeeded", "result": {}}
+        )
+        engine.tools._resolve_light = MagicMock(
+            return_value={"entity_id": "light.media_room"}
+        )
+
+        with self.assertRaisesRegex(HomeResolutionError, "cross-room"):
+            await engine.tools.execute(
+                "control_light",
+                {
+                    "entity": "Media Room lights",
+                    "room": "media-room",
+                    "action": "turn_off",
+                },
+                room_id="bedroom",
+                language="en",
+                provider_conversation_id=None,
+                device_id="pilot-phone",
+                user_text="Turn the bedroom lights off",
+            )
+        engine.tools.home_actions.authorize_room.assert_not_called()
+
+        result = await engine.tools.execute(
+            "control_light",
+            {
+                "entity": "Media Room lights",
+                "room": "media-room",
+                "action": "turn_off",
+            },
+            room_id="bedroom",
+            language="en",
+            provider_conversation_id=None,
+            device_id="pilot-phone",
+            user_text="Turn the media room lights off",
+        )
+        self.assertTrue(result["success"])
+        engine.tools.home_actions.execute.assert_awaited_once()
         store.close()
 
     async def test_no_intent_falls_back_to_local_llm_and_typed_tool(self) -> None:

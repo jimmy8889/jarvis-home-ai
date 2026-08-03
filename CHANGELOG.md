@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.31.0 — 2026-08-03
+
+- Added the complete authenticated Pilot iOS voice loop: microphone-responsive
+  listening, speech-aware end detection, selected-room STT and reasoning,
+  device-private TTS download, spoken phone playback, cancellation, retry and
+  native iPhone music-session restoration. The bounded Core upload envelope now
+  accommodates the client's full 45-second PCM recording limit.
+- Added a governed assistant light tool for power, toggle, brightness, named
+  colours and bounded RGB. Targets must be grounded in the user's request,
+  curated into the selected room with authoritative metadata, permitted by the
+  originating device and reconciled and audited after Home Assistant execution.
+- Made governed light actions fail closed: model outages cannot fall through to
+  generic Home Assistant or execute twice, cross-room targets must be named,
+  only one mutation may run per turn, and negated, hypothetical, how-to,
+  whole-home, lock, secured-entry and alarm requests are blocked before action.
+- Added short-lived audited light referents so follow-ups such as “make them 60
+  percent” remain contextual without allowing the model to choose a new target.
+- Allowed portable voice clients to select configured rooms without weakening
+  fixed-room authorization. Every assistant reply remains bound to the exact
+  active recipient credential; announcements remain room- and capability-bound.
+- Added reproducible production presentation overrides for the Office, Bedroom
+  and Media Room aggregate lights, plus a safe synchronization tool that can
+  capture the prior overrides before applying them.
+- Added a non-mutating assistant evaluation corpus and runner for latency,
+  provider, tool, action, context and safety regression testing.
+
 ## 0.30.2 — 2026-08-03
 
 - Replaced the Pilot Drive software-version tile with battery SOC, estimated

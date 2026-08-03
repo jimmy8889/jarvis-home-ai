@@ -29,6 +29,26 @@ class HomeActionConflict(HomeActionError):
     pass
 
 
+LIGHT_COLOR_RGB: dict[str, tuple[int, int, int]] = {
+    "amber": (255, 191, 0),
+    "blue": (0, 90, 255),
+    "cool_white": (201, 226, 255),
+    "cyan": (0, 255, 255),
+    "green": (0, 255, 0),
+    "indigo": (75, 0, 130),
+    "magenta": (255, 0, 255),
+    "orange": (255, 128, 0),
+    "pink": (255, 105, 180),
+    "purple": (160, 32, 240),
+    "red": (255, 0, 0),
+    "teal": (0, 255, 170),
+    "warm_white": (255, 214, 170),
+    "white": (255, 255, 255),
+    "yellow": (255, 255, 0),
+}
+LIGHT_COLOUR_MODES = frozenset({"hs", "rgb", "rgbw", "rgbww", "xy"})
+
+
 @dataclass(frozen=True)
 class ActionPlan:
     domain: str
@@ -239,6 +259,14 @@ class HomeActions:
             actions = ["turn_on", "turn_off", "toggle"]
             if domain == "light":
                 actions.append("set_brightness")
+                supported_modes = entity.get("attributes", {}).get(
+                    "supported_color_modes", []
+                )
+                if isinstance(supported_modes, (list, tuple)) and any(
+                    str(mode).casefold() in LIGHT_COLOUR_MODES
+                    for mode in supported_modes
+                ):
+                    actions.append("set_color")
             return actions
         if domain == "fan":
             return ["turn_on", "turn_off", "toggle", "set_percentage"]
@@ -269,6 +297,30 @@ class HomeActions:
             value = self._number(parameters, "value", 0, 100)
             service = "turn_on"
             data["brightness_pct"] = round(value)
+        elif action == "set_color":
+            service = "turn_on"
+            colour = str(parameters.get("color", "")).strip().casefold()
+            colour = colour.replace("-", "_").replace(" ", "_")
+            rgb_keys = ("red", "green", "blue")
+            supplied_rgb = [key in parameters for key in rgb_keys]
+            if colour and any(supplied_rgb):
+                raise HomeActionConflict("use either color or RGB values, not both")
+            if colour:
+                rgb = LIGHT_COLOR_RGB.get(colour)
+                if rgb is None:
+                    raise HomeActionConflict("unsupported light color")
+            elif all(supplied_rgb):
+                rgb = tuple(
+                    self._integer(parameters, key, 0, 255) for key in rgb_keys
+                )
+            else:
+                raise HomeActionConflict(
+                    "set_color requires a supported color or red, green, and blue"
+                )
+            data["rgb_color"] = list(rgb)
+            if "brightness" in parameters:
+                brightness = self._number(parameters, "brightness", 0, 100)
+                data["brightness_pct"] = round(brightness)
         elif action == "set_percentage":
             value = self._number(parameters, "value", 0, 100)
             data["percentage"] = round(value)
@@ -341,6 +393,7 @@ class HomeActions:
                         "current_position",
                         "hvac_mode",
                         "percentage",
+                        "rgb_color",
                         "temperature",
                     )
                     if key in raw.get("attributes", {})
@@ -375,6 +428,29 @@ class HomeActions:
             expected = plan.service_data["brightness_pct"] * 255 / 100
             actual = attributes.get("brightness")
             return isinstance(actual, (int, float)) and abs(actual - expected) <= 5
+        if action == "set_color":
+            if state != "on":
+                return False
+            expected_rgb = plan.service_data["rgb_color"]
+            actual_rgb = attributes.get("rgb_color")
+            if not (
+                isinstance(actual_rgb, (list, tuple))
+                and len(actual_rgb) == 3
+                and all(isinstance(value, (int, float)) for value in actual_rgb)
+            ):
+                return None
+            colour_matches = all(
+                abs(float(actual) - float(expected)) <= 12
+                for actual, expected in zip(actual_rgb, expected_rgb, strict=True)
+            )
+            expected_brightness = plan.service_data.get("brightness_pct")
+            if expected_brightness is None:
+                return colour_matches
+            actual_brightness = attributes.get("brightness")
+            brightness_matches = isinstance(actual_brightness, (int, float)) and abs(
+                actual_brightness - expected_brightness * 255 / 100
+            ) <= 5
+            return colour_matches and brightness_matches
         if action == "set_percentage":
             return attributes.get("percentage") == plan.service_data["percentage"]
         if action == "set_temperature":
@@ -448,6 +524,19 @@ class HomeActions:
                 f"{key} must be between {minimum:g} and {maximum:g}"
             )
         return selected
+
+    @classmethod
+    def _integer(
+        cls,
+        parameters: dict[str, Any],
+        key: str,
+        minimum: int,
+        maximum: int,
+    ) -> int:
+        value = cls._number(parameters, key, minimum, maximum)
+        if not value.is_integer():
+            raise HomeActionConflict(f"{key} must be a whole number")
+        return int(value)
 
     @staticmethod
     def _area_ids(room: Room) -> tuple[str, ...]:

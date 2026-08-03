@@ -41,6 +41,7 @@ _SAFE_ATTRIBUTES = frozenset(
         "media_title",
         "percentage",
         "position",
+        "rgb_color",
         "source",
         "source_list",
         "state_class",
@@ -787,7 +788,7 @@ class HomeIntelligence:
             "icon": override.get("icon") or attributes.get("icon"),
             "section": override.get("section") or section,
             "control": override.get("control") or control,
-            "supported_actions": self._supported_actions(domain),
+            "supported_actions": self._supported_actions(domain, attributes),
             "canonical_id": canonical_id,
             "duplicate_of": duplicate_of,
             "updated_at": override.get("updated_at"),
@@ -926,7 +927,9 @@ class HomeIntelligence:
         return "status", "Other", 20, "status"
 
     @staticmethod
-    def _supported_actions(domain: str) -> list[str]:
+    def _supported_actions(
+        domain: str, attributes: dict[str, Any] | None = None
+    ) -> list[str]:
         actions = {
             "alarm_control_panel": ["arm_home", "arm_away", "disarm"],
             "climate": [
@@ -943,7 +946,14 @@ class HomeIntelligence:
             "scene": ["activate"],
             "switch": ["turn_on", "turn_off", "toggle"],
         }
-        return list(actions.get(domain, ()))
+        supported = list(actions.get(domain, ()))
+        color_modes = (attributes or {}).get("supported_color_modes", [])
+        if domain == "light" and isinstance(color_modes, (list, tuple)) and any(
+            str(mode).casefold() in {"hs", "rgb", "rgbw", "rgbww", "xy"}
+            for mode in color_modes
+        ):
+            supported.append("set_color")
+        return supported
 
     @staticmethod
     def public_entity(entity: dict[str, Any]) -> dict[str, Any]:

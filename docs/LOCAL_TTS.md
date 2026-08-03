@@ -118,7 +118,9 @@ Content-Type: application/json
 ```
 
 The response contains synthesis metadata, the room-bound asset manifest, the
-resolved endpoint and response player, and the durable room command.
+resolved endpoint and response player, and the durable room command. Assistant
+audio is additionally bound to that exact endpoint device; announcements remain
+available only to audio-capable devices registered in the room.
 
 `POST /v1/assistant` also accepts `"speak": true`. Pilot Core sends the input
 to Home Assistant's conversation API, extracts the returned plain speech, then

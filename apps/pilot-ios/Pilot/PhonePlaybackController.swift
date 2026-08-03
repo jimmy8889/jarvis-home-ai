@@ -265,6 +265,17 @@ final class PhonePlaybackController {
         try session.setActive(true)
     }
 
+    @discardableResult
+    func restoreAudioSessionAfterVoice() -> Bool {
+        do {
+            try configureAudioSession()
+            return true
+        } catch {
+            status = .failed("Pilot could not restore the music audio session")
+            return false
+        }
+    }
+
     private func configureSystemMediaIntegration() {
         guard !mediaIntegrationConfigured else { return }
         mediaIntegrationConfigured = true

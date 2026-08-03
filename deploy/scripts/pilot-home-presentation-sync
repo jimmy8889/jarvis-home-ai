@@ -1,0 +1,187 @@
+#!/usr/bin/env python3
+"""Apply reviewed Home Assistant presentation overrides to Pilot Core."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+from pathlib import Path
+import sys
+from typing import Any
+from urllib.error import HTTPError, URLError
+from urllib.parse import quote
+from urllib.request import Request, urlopen
+
+
+SCHEMA_VERSION = "pilot.home-presentation-overrides.v1"
+ALLOWED_FIELDS = {
+    "exposure_policy",
+    "reason",
+    "category",
+    "priority",
+    "room_id",
+    "display_name",
+    "icon",
+    "section",
+    "control",
+    "canonical_id",
+    "duplicate_of",
+}
+
+
+def request_json(
+    core_url: str,
+    token: str,
+    path: str,
+    *,
+    method: str = "GET",
+    payload: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    body = None if payload is None else json.dumps(payload).encode()
+    request = Request(
+        f"{core_url.rstrip('/')}{path}",
+        data=body,
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+        },
+        method=method,
+    )
+    try:
+        with urlopen(request, timeout=15) as response:
+            result = json.load(response)
+    except HTTPError as error:
+        detail = error.read().decode(errors="replace")
+        raise RuntimeError(
+            f"Pilot Core returned HTTP {error.code} for {path}: {detail}"
+        ) from error
+    except (OSError, URLError, ValueError) as error:
+        raise RuntimeError(f"Pilot Core request failed for {path}: {error}") from error
+    if not isinstance(result, dict):
+        raise RuntimeError(f"Pilot Core returned an invalid response for {path}")
+    return result
+
+
+def load_config(path: Path) -> list[dict[str, Any]]:
+    try:
+        document = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as error:
+        raise RuntimeError(f"could not read presentation config: {error}") from error
+    if (
+        not isinstance(document, dict)
+        or document.get("schema_version") != SCHEMA_VERSION
+    ):
+        raise RuntimeError(f"presentation config must use {SCHEMA_VERSION}")
+    overrides = document.get("overrides")
+    if not isinstance(overrides, list) or not overrides:
+        raise RuntimeError("presentation config must contain at least one override")
+    seen: set[str] = set()
+    validated: list[dict[str, Any]] = []
+    for index, item in enumerate(overrides):
+        if not isinstance(item, dict):
+            raise RuntimeError(f"override {index + 1} must be an object")
+        entity_id = item.get("entity_id")
+        if not isinstance(entity_id, str) or "." not in entity_id:
+            raise RuntimeError(f"override {index + 1} has an invalid entity_id")
+        if entity_id in seen:
+            raise RuntimeError(f"duplicate override for {entity_id}")
+        unknown = set(item) - ALLOWED_FIELDS - {"entity_id"}
+        if unknown:
+            raise RuntimeError(
+                f"override for {entity_id} has unsupported fields: {sorted(unknown)}"
+            )
+        seen.add(entity_id)
+        validated.append(item)
+    return validated
+
+
+def main() -> int:
+    repo_root = Path(__file__).resolve().parents[2]
+    parser = argparse.ArgumentParser(
+        description="Synchronize reviewed entity presentation with Pilot Core"
+    )
+    parser.add_argument("--core-url", required=True)
+    parser.add_argument(
+        "--config",
+        type=Path,
+        default=repo_root / "config/home-presentation.production.json",
+    )
+    parser.add_argument("--admin-token-file", type=Path)
+    parser.add_argument("--backup", type=Path)
+    parser.add_argument("--dry-run", action="store_true")
+    args = parser.parse_args()
+
+    token = os.environ.get("PILOT_CORE_ADMIN_TOKEN", "").strip()
+    if args.admin_token_file:
+        try:
+            token = args.admin_token_file.read_text(encoding="utf-8").strip()
+        except OSError as error:
+            raise SystemExit(f"could not read administrator token: {error}") from error
+    if not token:
+        raise SystemExit("PILOT_CORE_ADMIN_TOKEN or --admin-token-file is required")
+
+    try:
+        overrides = load_config(args.config)
+        current: list[dict[str, Any]] = []
+        for item in overrides:
+            entity_id = str(item["entity_id"])
+            path = f"/v1/home/presentation/{quote(entity_id, safe='._-')}"
+            existing = request_json(args.core_url, token, path)
+            current.append(
+                {
+                    "entity_id": entity_id,
+                    "override": existing.get("override"),
+                }
+            )
+
+        if args.backup:
+            backup = {
+                "schema_version": "pilot.home-presentation-backup.v1",
+                "source": args.core_url,
+                "overrides": current,
+            }
+            args.backup.parent.mkdir(parents=True, exist_ok=True)
+            args.backup.write_text(
+                json.dumps(backup, indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+
+        if args.dry_run:
+            for item, before in zip(overrides, current, strict=True):
+                status = (
+                    "unchanged"
+                    if before["override"]
+                    == {key: value for key, value in item.items() if key != "entity_id"}
+                    else "would update"
+                )
+                print(f"{item['entity_id']}: {status}")
+            return 0
+
+        for item in overrides:
+            entity_id = str(item["entity_id"])
+            payload = {key: value for key, value in item.items() if key != "entity_id"}
+            path = f"/v1/home/presentation/{quote(entity_id, safe='._-')}"
+            result = request_json(
+                args.core_url,
+                token,
+                path,
+                method="PATCH",
+                payload=payload,
+            )
+            presentation = result.get("presentation") or {}
+            room = presentation.get("room") or {}
+            if not presentation.get("included") or not room.get("authoritative"):
+                raise RuntimeError(
+                    f"{entity_id} did not become an included authoritative entity"
+                )
+            print(f"{entity_id}: synchronized to {room.get('id')}")
+    except RuntimeError as error:
+        print(str(error), file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

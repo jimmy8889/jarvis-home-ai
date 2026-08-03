@@ -74,6 +74,55 @@ class IntegrationDiagnosticTests(unittest.IsolatedAsyncioTestCase):
                 "media_player.media_room/../../config"
             )
 
+    async def test_typed_light_action_accepts_bounded_rgb_color(self) -> None:
+        requests: list[httpx.Request] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            requests.append(request)
+            return httpx.Response(200, json=[])
+
+        integrations = Integrations(
+            IntegrationSettings(home_assistant_url="http://ha.local:8123"),
+            httpx.MockTransport(handler),
+        )
+        result = await integrations.home_assistant_typed_action(
+            "light",
+            "turn_on",
+            "light.office_lamp",
+            {"rgb_color": [12, 34, 56], "brightness_pct": 40},
+        )
+        self.assertEqual(result["changed_state_count"], 0)
+        self.assertEqual(requests[0].url.path, "/api/services/light/turn_on")
+        self.assertEqual(
+            json.loads(requests[0].content),
+            {
+                "entity_id": "light.office_lamp",
+                "rgb_color": [12, 34, 56],
+                "brightness_pct": 40,
+            },
+        )
+
+    async def test_typed_light_action_rejects_invalid_rgb_without_network(self) -> None:
+        called = False
+
+        def handler(_request: httpx.Request) -> httpx.Response:
+            nonlocal called
+            called = True
+            return httpx.Response(200, json=[])
+
+        integrations = Integrations(
+            IntegrationSettings(home_assistant_url="http://ha.local:8123"),
+            httpx.MockTransport(handler),
+        )
+        with self.assertRaisesRegex(IntegrationRequestFailed, "RGB"):
+            await integrations.home_assistant_typed_action(
+                "light",
+                "turn_on",
+                "light.office_lamp",
+                {"rgb_color": [256, 0, 0]},
+            )
+        self.assertFalse(called)
+
     async def test_home_assistant_catalogue_fetch_is_read_only_and_bounded(self) -> None:
         requests: list[httpx.Request] = []
 

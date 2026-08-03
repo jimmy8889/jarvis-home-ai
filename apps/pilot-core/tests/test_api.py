@@ -362,7 +362,7 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.headers["cache-control"], "no-store")
         payload = response.json()
-        self.assertEqual(payload["deployment"]["version"], "0.30.2")
+        self.assertEqual(payload["deployment"]["version"], "0.31.0")
         self.assertEqual(payload["summary"]["room_count"], 2)
         self.assertEqual(payload["summary"]["device_count"], 0)
         self.assertEqual(payload["summary"]["armed_room_count"], 0)
@@ -737,17 +737,14 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(upload.status_code, 201)
         asset = upload.json()
         self.assertNotIn("path", asset)
-
-        download = self.client.get(
+        unbound_download = self.client.get(
             f"/v1/audio-assets/{asset['id']}",
             headers={
                 "Authorization": f"Bearer {office_token}",
                 "X-Pilot-Device-ID": "office-n150",
             },
         )
-        self.assertEqual(download.status_code, 200)
-        self.assertEqual(download.content, b"RIFF-pilot-test")
-        self.assertEqual(download.headers["x-pilot-sha256"], asset["sha256"])
+        self.assertEqual(unbound_download.status_code, 403)
 
         queued = self.client.post(
             "/v1/rooms/office/audio",
@@ -761,8 +758,22 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(payload["sha256"], asset["sha256"])
         self.assertEqual(payload["size_bytes"], len(b"RIFF-pilot-test"))
         self.assertEqual(queued.json()["target"]["id"], "office-n150")
+        self.assertEqual(
+            queued.json()["asset"]["recipient_device_id"], "office-n150"
+        )
 
-    def test_audio_asset_cannot_cross_room_boundary(self) -> None:
+        download = self.client.get(
+            f"/v1/audio-assets/{asset['id']}",
+            headers={
+                "Authorization": f"Bearer {office_token}",
+                "X-Pilot-Device-ID": "office-n150",
+            },
+        )
+        self.assertEqual(download.status_code, 200)
+        self.assertEqual(download.content, b"RIFF-pilot-test")
+        self.assertEqual(download.headers["x-pilot-sha256"], asset["sha256"])
+
+    def test_announcement_requires_audio_capable_same_room_device(self) -> None:
         office_token = self.register_device()
         media_registration = self.client.post(
             "/v1/devices/register",
@@ -784,6 +795,21 @@ class ApiTests(unittest.TestCase):
             content=b"fLaC-pilot-test",
         )
         asset_id = upload.json()["id"]
+
+        display_token = self.store.register_device(
+            "office-display-only",
+            "office",
+            "Office display only",
+            ["display"],
+        )
+        incapable_download = self.client.get(
+            f"/v1/audio-assets/{asset_id}",
+            headers={
+                "Authorization": f"Bearer {display_token}",
+                "X-Pilot-Device-ID": "office-display-only",
+            },
+        )
+        self.assertEqual(incapable_download.status_code, 403)
 
         denied_download = self.client.get(
             f"/v1/audio-assets/{asset_id}",
@@ -889,6 +915,9 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(result["command"]["payload"]["action"], "play_audio")
         self.assertEqual(result["command"]["payload"]["volume"], 0.75)
         self.assertEqual(result["synthesis"]["provider"], "home_assistant")
+        self.assertEqual(
+            result["asset"]["recipient_device_id"], "office-n150"
+        )
         synthesize.assert_awaited_once_with("Hello office", "en-AU", "default")
 
     def test_room_speak_requires_configured_tts(self) -> None:
@@ -919,7 +948,7 @@ class ApiTests(unittest.TestCase):
         self.register_device()
         conversation.return_value = {
             "response": {
-                "speech": {"plain": {"speech": "The office light is now on."}}
+                "speech": {"plain": {"speech": "The office is ready."}}
             },
             "conversation_id": "conversation-1",
         }
@@ -936,7 +965,7 @@ class ApiTests(unittest.TestCase):
             "/v1/assistant",
             headers={"Authorization": "Bearer admin-test"},
             json={
-                "text": "Turn on the office light",
+                "text": "What is the office status?",
                 "room_id": "office",
                 "speak": True,
             },
@@ -967,7 +996,7 @@ class ApiTests(unittest.TestCase):
             headers={"Authorization": "Bearer admin-test"},
         )
         self.assertEqual(status.json()["session_owner"], "pilot_core")
-        synthesize.assert_awaited_once_with("The office light is now on.", "en", None)
+        synthesize.assert_awaited_once_with("The office is ready.", "en", None)
 
     def test_room_state_combines_registered_device_and_default_targets(self) -> None:
         token = self.register_device()

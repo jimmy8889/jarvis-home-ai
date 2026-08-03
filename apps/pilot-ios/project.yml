@@ -26,7 +26,7 @@ targets:
           NSAllowsArbitraryLoads: true
         NSLocalNetworkUsageDescription: Pilot connects to your local Pilot Core server and room audio devices.
         NSCameraUsageDescription: Pilot uses the camera only when you choose to scan a single-use Pilot Core pairing code.
-        NSMicrophoneUsageDescription: Pilot records meetings you explicitly start and uploads them to your private Pilot Core for local transcription.
+        NSMicrophoneUsageDescription: Pilot uses the microphone when you talk to your private local voice assistant or explicitly record a meeting.
         UIBackgroundModes:
           - audio
         UIApplicationSceneManifest:

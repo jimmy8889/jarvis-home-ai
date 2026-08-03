@@ -8,6 +8,7 @@ import PilotClientKit
 final class PilotModel {
     static let productionCoreURL = "https://pilot.jameshomeautomation.work"
     let phonePlayback = PhonePlaybackController()
+    let voiceAudio = VoiceAudioController()
     var coreURL: String
     var deviceID: String
     var token: String
@@ -53,6 +54,8 @@ final class PilotModel {
     var liveUpdatesConnected = false
     var lastEventAt: Date?
     var assistantStatus = "ready"
+    var voiceAssistantPhase: VoiceAssistantPhase = .idle
+    var lastVoiceTranscript: String?
     private(set) var hasActiveConfiguration = false
     @ObservationIgnored private var activeCoreURL = ""
     @ObservationIgnored private var activeDeviceID = ""
@@ -61,6 +64,9 @@ final class PilotModel {
     @ObservationIgnored private var meetingRecorder: AVAudioRecorder?
     @ObservationIgnored private var meetingRecordingURL: URL?
     @ObservationIgnored private var activeMeetingTitle: String?
+    @ObservationIgnored private var voiceRequestTask: Task<Void, Never>?
+    @ObservationIgnored private var retryVoicePCM: Data?
+    @ObservationIgnored private var resumePhoneMusicAfterVoice = false
 
     private enum StorageKey {
         static let mediaCache = "pilot.cache.media.v1"
@@ -114,6 +120,15 @@ final class PilotModel {
         restoreDurableState()
         phonePlayback.setRemoteCommandHandler { [weak self] action, position in
             await self?.commandPhonePlayback(action, positionSeconds: position)
+        }
+        voiceAudio.setCaptureHandlers { [weak self] in
+            guard self?.voiceAssistantPhase == .listening else { return }
+            self?.submitVoiceAssistant()
+        } noSpeech: { [weak self] in
+            self?.failVoiceAssistant(
+                VoiceAudioError.noSpeechDetected,
+                canRetry: false
+            )
         }
     }
 
@@ -687,7 +702,199 @@ final class PilotModel {
         }
     }
 
+    var canRetryVoiceAssistant: Bool { retryVoicePCM != nil }
+
+    func startVoiceAssistant() {
+        guard hasActiveConfiguration else {
+            voiceAssistantPhase = .failed("Connect Pilot before starting voice.")
+            return
+        }
+        guard clientManifest?.features["assistant"] != false else {
+            voiceAssistantPhase = .failed(
+                "This Pilot device credential does not include voice access."
+            )
+            return
+        }
+        guard !isRecordingMeeting else {
+            voiceAssistantPhase = .failed(
+                "Finish the active meeting recording before talking to Pilot."
+            )
+            return
+        }
+        cancelVoiceRequest(restoreAudio: false)
+        voiceAssistantPhase = .requestingPermission
+        assistantStatus = "listening"
+        retryVoicePCM = nil
+        lastVoiceTranscript = nil
+        voiceRequestTask = Task { [weak self] in
+            guard let self else { return }
+            resumePhoneMusicAfterVoice = musicPlaysOnThisIPhone
+                && phonePlayback.isPlaying
+            if resumePhoneMusicAfterVoice {
+                await commandPhonePlayback("pause")
+            }
+            guard !Task.isCancelled else { return }
+            do {
+                try await voiceAudio.startCapture()
+                guard !Task.isCancelled else {
+                    voiceAudio.cancelCapture()
+                    return
+                }
+                voiceAssistantPhase = .listening
+            } catch is CancellationError {
+                return
+            } catch {
+                failVoiceAssistant(error, canRetry: false)
+            }
+        }
+    }
+
+    func submitVoiceAssistant() {
+        guard voiceAssistantPhase == .listening else { return }
+        do {
+            let pcm = try voiceAudio.finishCapture()
+            retryVoicePCM = pcm
+            voiceAssistantPhase = .processing
+            assistantStatus = "thinking"
+            isSendingMessage = true
+            voiceRequestTask = Task { [weak self] in
+                await self?.performVoiceRequest(pcm)
+            }
+        } catch {
+            failVoiceAssistant(error, canRetry: false)
+        }
+    }
+
+    func retryVoiceAssistant() {
+        guard let pcm = retryVoicePCM else {
+            startVoiceAssistant()
+            return
+        }
+        voiceRequestTask?.cancel()
+        voiceAssistantPhase = .processing
+        assistantStatus = "thinking"
+        isSendingMessage = true
+        voiceRequestTask = Task { [weak self] in
+            guard let self else { return }
+            resumePhoneMusicAfterVoice = musicPlaysOnThisIPhone
+                && phonePlayback.isPlaying
+            if resumePhoneMusicAfterVoice {
+                await commandPhonePlayback("pause")
+            }
+            guard !Task.isCancelled else { return }
+            await performVoiceRequest(pcm)
+        }
+    }
+
+    func cancelVoiceAssistant() {
+        let shouldRestoreAudio = voiceAssistantPhase.isActive
+            || voiceAudio.isCapturing
+            || voiceAudio.isPlaying
+            || resumePhoneMusicAfterVoice
+        cancelVoiceRequest(restoreAudio: shouldRestoreAudio)
+        retryVoicePCM = nil
+        voiceAssistantPhase = .idle
+        assistantStatus = "ready"
+        isSendingMessage = false
+    }
+
+    private func performVoiceRequest(_ pcm: Data) async {
+        do {
+            let service = try api()
+            let reply = try await service.voice(
+                pcmData: pcm,
+                roomID: selectedRoomID,
+                conversationID: conversationID
+            )
+            try Task.checkCancellation()
+
+            conversationID = reply.conversationID
+            lastVoiceTranscript = reply.transcript
+            messages.append(ChatMessage(role: .user, text: reply.transcript))
+            messages.append(
+                ChatMessage(
+                    role: .pilot,
+                    text: reply.responseText,
+                    provider: reply.provider,
+                    cards: reply.cards ?? [],
+                    sources: reply.sources ?? [],
+                    actions: reply.actions ?? [],
+                    toolCalls: reply.toolCalls ?? []
+                )
+            )
+            assistantStatus = reply.status ?? "speaking"
+            connectionState = .connected
+            retryVoicePCM = nil
+            isSendingMessage = false
+
+            do {
+                let audio = try await service.voiceResponseAudio(
+                    at: reply.audio.downloadURL
+                )
+                try Task.checkCancellation()
+                voiceAssistantPhase = .speaking
+                assistantStatus = "speaking"
+                let duration = try voiceAudio.playResponse(audio)
+                try await Task.sleep(
+                    for: .milliseconds(Int(max(duration, 0.2) * 1_000) + 120)
+                )
+                try Task.checkCancellation()
+                voiceAudio.stopPlayback()
+                voiceAssistantPhase = .idle
+                assistantStatus = "ready"
+                restoreAudioAfterVoice()
+            } catch is CancellationError {
+                return
+            } catch {
+                failVoiceAssistant(
+                    PilotAPIError.server(
+                        "Pilot answered, but the spoken response could not play. "
+                            + Self.friendlyMessage(for: error)
+                    ),
+                    canRetry: false
+                )
+            }
+        } catch is CancellationError {
+            return
+        } catch {
+            failVoiceAssistant(error, canRetry: true)
+        }
+    }
+
+    private func failVoiceAssistant(_ error: Error, canRetry: Bool) {
+        let message = Self.friendlyMessage(for: error)
+        if !canRetry { retryVoicePCM = nil }
+        voiceAssistantPhase = .failed(message)
+        assistantStatus = "error"
+        isSendingMessage = false
+        voiceAudio.cancelCapture()
+        voiceAudio.stopPlayback()
+        restoreAudioAfterVoice()
+    }
+
+    private func cancelVoiceRequest(restoreAudio: Bool) {
+        voiceRequestTask?.cancel()
+        voiceRequestTask = nil
+        voiceAudio.cancelCapture()
+        voiceAudio.stopPlayback()
+        if restoreAudio { restoreAudioAfterVoice() }
+    }
+
+    private func restoreAudioAfterVoice() {
+        if musicPlaysOnThisIPhone && phonePlayback.isReady {
+            _ = phonePlayback.restoreAudioSessionAfterVoice()
+        } else {
+            voiceAudio.finishAudioSession()
+        }
+        guard resumePhoneMusicAfterVoice else { return }
+        resumePhoneMusicAfterVoice = false
+        Task { [weak self] in
+            await self?.commandPhonePlayback("play")
+        }
+    }
+
     func startNewConversation() {
+        cancelVoiceAssistant()
         conversationID = nil
         messages = []
     }
@@ -721,6 +928,13 @@ final class PilotModel {
     func startMeeting(title: String) async {
         let normalized = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !normalized.isEmpty, !isRecordingMeeting else { return }
+        guard !voiceAssistantPhase.isActive,
+              !voiceAudio.isCapturing,
+              !voiceAudio.isPlaying
+        else {
+            meetingError = "Finish the active Pilot voice request before recording a meeting."
+            return
+        }
         do {
             guard await AVAudioApplication.requestRecordPermission() else {
                 meetingError = "Microphone permission is required to record a meeting."

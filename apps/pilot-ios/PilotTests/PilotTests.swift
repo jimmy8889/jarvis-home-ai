@@ -4,6 +4,146 @@ import UIKit
 @testable import Pilot
 
 final class PilotTests: XCTestCase {
+    func testVoiceRequestCarriesPortableRoomConversationAndAudioContract() throws {
+        let request = PilotAPI.voiceRequest(
+            coreURL: try XCTUnwrap(URL(string: "https://pilot.example")),
+            deviceID: "pilot-ios-james",
+            token: "device-secret",
+            roomID: "media-room",
+            conversationID: "conversation-42"
+        )
+
+        XCTAssertEqual(request.httpMethod, "POST")
+        XCTAssertEqual(request.url?.path, "/v1/devices/pilot-ios-james/voice")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer device-secret")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "X-Pilot-Device-ID"), "pilot-ios-james")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "X-Pilot-Room-ID"), "media-room")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "X-Pilot-Conversation-ID"), "conversation-42")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "X-Pilot-Sample-Rate"), "16000")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "Content-Type"), "audio/l16")
+    }
+
+    func testVoiceResponseAudioDownloadIsSameOriginAndAuthenticated() throws {
+        let coreURL = try XCTUnwrap(URL(string: "https://pilot.example/base"))
+        let url = try PilotAPI.resolvedVoiceAudioURL(
+            "/v1/audio-assets/abc123",
+            relativeTo: coreURL
+        )
+        XCTAssertEqual(url.absoluteString, "https://pilot.example/v1/audio-assets/abc123")
+
+        let request = PilotAPI.voiceAudioRequest(
+            url: url,
+            deviceID: "pilot-ios-james",
+            token: "device-secret"
+        )
+        XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer device-secret")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "X-Pilot-Device-ID"), "pilot-ios-james")
+        XCTAssertThrowsError(
+            try PilotAPI.resolvedVoiceAudioURL(
+                "https://malicious.example/speech.wav",
+                relativeTo: coreURL
+            )
+        )
+    }
+
+    func testVoiceReplyDecodesTranscriptToolsAndAuthenticatedAudioPath() throws {
+        let data = Data(
+            """
+            {
+              "transcript":"Make the office lights blue",
+              "response_text":"The office lights are now blue.",
+              "conversation_id":"conversation-42",
+              "provider":"vllm:ai3090-primary",
+              "continue_conversation":true,
+              "room_id":"office",
+              "status":"completed",
+              "tool_calls":[{"id":"tool-1","name":"control_home","status":"succeeded"}],
+              "cards":[],"sources":[],"actions":[],
+              "audio":{"id":"asset-1","content_type":"audio/wav","size_bytes":4128,
+                "download_url":"/v1/audio-assets/asset-1"}
+            }
+            """.utf8
+        )
+
+        let reply = try JSONDecoder().decode(VoiceAssistantReply.self, from: data)
+        XCTAssertEqual(reply.transcript, "Make the office lights blue")
+        XCTAssertEqual(reply.toolCalls?.first?.name, "control_home")
+        XCTAssertEqual(reply.audio.sizeBytes, 4128)
+        XCTAssertEqual(reply.audio.downloadURL, "/v1/audio-assets/asset-1")
+    }
+
+    func testVoicePCMExtractorReturnsOnlySigned16BitMonoPayload() throws {
+        let samples = Data([0x01, 0x80, 0xFF, 0x7F, 0x00, 0x00])
+        let wave = Self.waveFile(pcm: samples)
+
+        XCTAssertEqual(
+            try VoicePCMExtractor.signed16BitMonoPCM(fromWave: wave),
+            samples
+        )
+        XCTAssertThrowsError(
+            try VoicePCMExtractor.signed16BitMonoPCM(fromWave: Data("not wave".utf8))
+        )
+    }
+
+    func testVoicePhaseLabelsRemainUsefulToVoiceOver() {
+        XCTAssertEqual(VoiceAssistantPhase.listening.title, "Listening")
+        XCTAssertTrue(VoiceAssistantPhase.listening.accessibilityHint.contains("Done"))
+        XCTAssertTrue(VoiceAssistantPhase.processing.isActive)
+        XCTAssertFalse(VoiceAssistantPhase.failed("offline").isActive)
+    }
+
+    func testEndOfSpeechRequiresRealSpeechThenSustainedSilence() {
+        var detector = VoiceEndOfSpeechDetector()
+        XCTAssertEqual(detector.observe(decibels: -24, duration: 0.10), .none)
+        XCTAssertEqual(detector.observe(decibels: -23, duration: 0.15), .none)
+        XCTAssertEqual(detector.observe(decibels: -22, duration: 0.20), .none)
+        XCTAssertEqual(detector.observe(decibels: -21, duration: 0.25), .none)
+        XCTAssertEqual(detector.observe(decibels: -50, duration: 1.30), .none)
+        XCTAssertEqual(detector.observe(decibels: -50, duration: 1.36), .submit)
+        XCTAssertEqual(detector.observe(decibels: -20, duration: 2.0), .none)
+    }
+
+    func testEndOfSpeechNeverSubmitsQuietOrSingleNoiseSpike() {
+        var quiet = VoiceEndOfSpeechDetector()
+        XCTAssertEqual(quiet.observe(decibels: -60, duration: 12), .none)
+        XCTAssertEqual(quiet.observe(decibels: -60, duration: 45), .noSpeech)
+
+        var noiseSpike = VoiceEndOfSpeechDetector()
+        XCTAssertEqual(noiseSpike.observe(decibels: -18, duration: 0.2), .none)
+        XCTAssertEqual(noiseSpike.observe(decibels: -60, duration: 44.9), .none)
+        XCTAssertEqual(noiseSpike.observe(decibels: -60, duration: 45), .noSpeech)
+    }
+
+    func testEndOfSpeechFortyFiveSecondCapSubmitsDetectedSpeech() {
+        var detector = VoiceEndOfSpeechDetector()
+        for index in 0..<4 {
+            XCTAssertEqual(
+                detector.observe(
+                    decibels: -20,
+                    duration: 44.70 + Double(index) * 0.05
+                ),
+                .none
+            )
+        }
+        XCTAssertEqual(detector.observe(decibels: -20, duration: 45), .submit)
+    }
+
+    @MainActor
+    func testVoiceCancelReturnsModelToReadyState() {
+        let model = PilotModel(loadStoredSettings: false)
+        model.voiceAssistantPhase = .processing
+        model.isSendingMessage = true
+        model.assistantStatus = "thinking"
+
+        model.cancelVoiceAssistant()
+
+        XCTAssertEqual(model.voiceAssistantPhase, .idle)
+        XCTAssertFalse(model.isSendingMessage)
+        XCTAssertEqual(model.assistantStatus, "ready")
+        XCTAssertFalse(model.voiceAudio.isCapturing)
+        XCTAssertFalse(model.voiceAudio.isPlaying)
+    }
+
     func testMusicAssistantSearchFlattening() {
         let input: [String: Any] = [
             "tracks": [
@@ -21,6 +161,35 @@ final class PilotTests: XCTestCase {
         XCTAssertEqual(results[0].title, "Teardrop")
         XCTAssertEqual(results[0].uri, "tidal://track/1")
         XCTAssertEqual(results[0].kind, .track)
+    }
+
+    private static func waveFile(pcm: Data) -> Data {
+        var output = Data("RIFF".utf8)
+        append(UInt32(36 + pcm.count), to: &output)
+        output.append(Data("WAVEfmt ".utf8))
+        append(UInt32(16), to: &output)
+        append(UInt16(1), to: &output)
+        append(UInt16(1), to: &output)
+        append(UInt32(16_000), to: &output)
+        append(UInt32(32_000), to: &output)
+        append(UInt16(2), to: &output)
+        append(UInt16(16), to: &output)
+        output.append(Data("data".utf8))
+        append(UInt32(pcm.count), to: &output)
+        output.append(pcm)
+        return output
+    }
+
+    private static func append(_ value: UInt16, to data: inout Data) {
+        data.append(UInt8(value & 0xFF))
+        data.append(UInt8((value >> 8) & 0xFF))
+    }
+
+    private static func append(_ value: UInt32, to data: inout Data) {
+        data.append(UInt8(value & 0xFF))
+        data.append(UInt8((value >> 8) & 0xFF))
+        data.append(UInt8((value >> 16) & 0xFF))
+        data.append(UInt8((value >> 24) & 0xFF))
     }
 
     func testSearchFlatteningGroupsKindsAndRemovesDuplicateURIs() {

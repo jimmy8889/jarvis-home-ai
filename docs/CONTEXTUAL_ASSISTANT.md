@@ -52,6 +52,7 @@ commands, or entity IDs. Pilot currently exposes:
 - `get_weather`
 - `get_temperature` for the two configured sensor aliases
 - `control_home` through Home Assistant's restricted Assist agent
+- `control_light` through Pilot's curated, typed and audited Home Actions layer
 - `search_music` through Music Assistant
 - `play_music` and `control_media` through a configured room player
 
@@ -63,9 +64,36 @@ in the system prompt.
 Pilot forces the corresponding read-only tool for clear requests about current
 temperature, weather, forecast, and now-playing state. This guards the voice
 experience against a small model returning a plausible sensor value from its
-language prior instead of consulting the live home. Mutating tools are never
-forced by keyword; real-world actions still pass through Home Assistant or
-Music Assistant and their existing control gates.
+language prior instead of consulting the live home.
+
+Explicit light mutations are a separate governed route. When the local model
+is available, phrases such as “turn the office lamp off”, “dim the bedroom
+light to 30 percent”, or “make the media-room lights blue” force the
+`control_light` schema before Home Assistant's natural-language agent. The
+tool accepts only on/off/toggle, brightness and bounded colour arguments. It
+then resolves the user's target against the curated catalogue, enforces the
+originating device and room permissions, sends one allowlisted Home Assistant
+service call, reads the entity back, and records an audit.
+
+The model cannot supply a Home Assistant service name or use a catalogue result
+to authorize an action in the same request. Governed light requests fail closed
+if local inference is unavailable and never fall through to the free-form Home
+Assistant conversation boundary. If a light mutation succeeds but the model
+cannot compose the final sentence, Core produces a deterministic response from
+the audited tool result instead of retrying the action. Negated, hypothetical,
+how-to, broad whole-home, ambiguous, and model-invented cross-room requests do
+nothing. Other low-risk real-world actions continue through Home Assistant or
+Music Assistant and their existing control gates; secured-entry and alarm
+requests are intercepted for explicit Pilot confirmation.
+
+Pilot retains one successful governed light target as short-lived working
+context inside the same device-scoped conversation. A follow-up such as “now
+make them 60 percent” can therefore reuse the exact audited entity and room.
+This is not free-form memory: pronouns are accepted only when the immediately
+preceding exchange contains a successful `control_light` result, and the tool
+must repeat that exact entity and room through the normal authorization path.
+An unrelated turn, expired session, different device or different target drops
+the referent and requires the user to name the light again.
 
 ## Configuration
 

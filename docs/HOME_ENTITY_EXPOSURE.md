@@ -61,6 +61,21 @@ GET   /v1/home/presentation/{entity_id}
 PATCH /v1/home/presentation/{entity_id}
 ```
 
+Reviewed production overrides can be applied reproducibly without exposing an
+administrator credential in source control:
+
+```bash
+deploy/scripts/pilot-home-presentation-sync \
+  --core-url https://pilot.example \
+  --admin-token-file /run/secrets/pilot_core_admin_token \
+  --config config/home-presentation.production.json \
+  --backup /secure/backups/presentation-before.json
+```
+
+Use `--dry-run` to validate entity existence and show the intended changes.
+The generated backup records the previous override values; the normal Pilot
+Core database archive remains the authoritative full rollback path.
+
 The operations dashboard exposes the common **Auto**, **Show** and **Hide**
 decisions alongside the reason and room trust. More detailed overrides remain
 available through the authenticated API.
@@ -84,6 +99,11 @@ retain confirmation and expiry requirements.
 This rule is intentional: an entity may be readable while Pilot is still
 learning where it belongs, but an LLM or client cannot turn that uncertainty
 into a real Home Assistant service call.
+
+Colour is capability-sensitive. A light advertises `set_color` only when Home
+Assistant reports an RGB-, HS-, XY-, RGBW-, or RGBWW-capable colour mode.
+Colourless lights retain on/off/toggle and brightness without presenting a
+control that cannot reconcile successfully.
 
 ## Client contract
 

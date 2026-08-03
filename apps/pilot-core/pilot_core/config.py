@@ -24,7 +24,10 @@ class ServerSettings:
     firmware_asset_max_bytes: int = 8_000_000
     vehicle_asset_path: str = "/var/lib/pilot-core/vehicle-assets"
     vehicle_asset_max_bytes: int = 10_000_000
-    voice_audio_max_bytes: int = 1_000_000
+    # A 45 second, 16 kHz, signed 16-bit mono utterance is 1,440,000 bytes.
+    # Retain a small envelope above that fixed client contract while keeping
+    # voice uploads tightly bounded.
+    voice_audio_max_bytes: int = 1_600_000
     conversation_session_ttl_seconds: int = 900
     conversation_max_turns: int = 20
     admin_token_env: str = "PILOT_CORE_ADMIN_TOKEN"
@@ -521,7 +524,7 @@ def load_settings(path: str | Path) -> Settings:
             server_values.get("vehicle_asset_max_bytes", 10_000_000)
         ),
         voice_audio_max_bytes=int(
-            server_values.get("voice_audio_max_bytes", 1_000_000)
+            server_values.get("voice_audio_max_bytes", 1_600_000)
         ),
         conversation_session_ttl_seconds=int(
             server_values.get("conversation_session_ttl_seconds", 900)

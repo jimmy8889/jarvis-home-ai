@@ -51,7 +51,7 @@ operator command:
 
 ```bash
 deploy/scripts/pilot-core-sync \
-  --host root@10.0.1.64 \
+  --host root@10.0.1.204 \
   --path /opt/jarvis-home-ai
 ```
 
@@ -94,7 +94,7 @@ On the deployed Docker server the full path is:
 Read it from a trusted terminal without placing the value in a command argument:
 
 ```bash
-ssh root@10.0.1.64 \
+ssh root@10.0.1.204 \
   'sudo cat /opt/jarvis-home-ai/infra/secrets/pilot_core_admin_token'
 ```
 

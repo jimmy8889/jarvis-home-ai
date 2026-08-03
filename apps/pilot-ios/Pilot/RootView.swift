@@ -2841,9 +2841,9 @@ private struct AssistantView: View {
     @FocusState private var promptFocused: Bool
 
     private let suggestions = [
-        "What's playing here?",
+        "Make the lights in here a warm white",
+        "Which lights are on?",
         "How much solar are we producing?",
-        "Summarise the house",
     ]
 
     var body: some View {
@@ -2876,7 +2876,11 @@ private struct AssistantView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(spacing: 15) {
-                    if model.messages.isEmpty {
+                    if model.voiceAssistantPhase != .idle {
+                        VoiceInteractionPanel()
+                            .id("voice-interaction")
+                    }
+                    if model.messages.isEmpty && model.voiceAssistantPhase == .idle {
                         AssistantWelcome()
                         suggestionChips
                     } else {
@@ -2885,7 +2889,7 @@ private struct AssistantView: View {
                                 .id(message.id)
                         }
                     }
-                    if model.isSendingMessage {
+                    if model.isSendingMessage && model.voiceAssistantPhase == .idle {
                         ThinkingBubble()
                             .id("thinking")
                     }
@@ -2900,6 +2904,13 @@ private struct AssistantView: View {
             .onChange(of: model.isSendingMessage) {
                 if model.isSendingMessage {
                     withAnimation(.snappy) { proxy.scrollTo("thinking", anchor: .bottom) }
+                }
+            }
+            .onChange(of: model.voiceAssistantPhase) {
+                if model.voiceAssistantPhase != .idle {
+                    withAnimation(.snappy) {
+                        proxy.scrollTo("voice-interaction", anchor: .center)
+                    }
                 }
             }
         }
@@ -2943,7 +2954,10 @@ private struct AssistantHeader: View {
 
     var body: some View {
         HStack(spacing: 14) {
-            ListeningOrb(isActive: model.isSendingMessage, size: 48)
+            ListeningOrb(
+                isActive: model.isSendingMessage || model.voiceAssistantPhase.isActive,
+                size: 48
+            )
             VStack(alignment: .leading, spacing: 2) {
                 Text(statusTitle)
                     .font(.headline)
@@ -2976,6 +2990,9 @@ private struct AssistantHeader: View {
     }
 
     private var statusTitle: String {
+        if model.voiceAssistantPhase != .idle {
+            return model.voiceAssistantPhase.title
+        }
         if model.isSendingMessage { return "Pilot is reasoning" }
         let status = model.assistantStatus.lowercased()
         if status.contains("listen") { return "Pilot is listening" }
@@ -2986,9 +3003,19 @@ private struct AssistantHeader: View {
 }
 
 private struct AssistantWelcome: View {
+    @Environment(PilotModel.self) private var model
+
     var body: some View {
         VStack(spacing: 16) {
-            ListeningOrb(isActive: false, size: 88)
+            Button {
+                model.startVoiceAssistant()
+                PilotHaptics.impact()
+            } label: {
+                ListeningOrb(isActive: false, size: 88)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Talk to Pilot")
+            .accessibilityHint("Starts listening through this iPhone microphone")
             VStack(spacing: 6) {
                 Text("What can I help with?")
                     .font(.system(.title2, design: .rounded, weight: .bold))
@@ -2999,6 +3026,260 @@ private struct AssistantWelcome: View {
         }
         .padding(.vertical, 28)
         .frame(maxWidth: 520)
+    }
+}
+
+private struct VoiceInteractionPanel: View {
+    @Environment(PilotModel.self) private var model
+
+    var body: some View {
+        VStack(spacing: 15) {
+            VoiceAura(
+                phase: model.voiceAssistantPhase,
+                level: model.voiceAudio.level
+            )
+            .frame(height: 176)
+
+            VStack(spacing: 5) {
+                Text(model.voiceAssistantPhase.title)
+                    .font(.system(.title3, design: .rounded, weight: .bold))
+                Text(detail)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .contentTransition(.numericText())
+            }
+
+            HStack(spacing: 11) {
+                switch model.voiceAssistantPhase {
+                case .listening:
+                    Button(role: .cancel) {
+                        model.cancelVoiceAssistant()
+                    } label: {
+                        Label("Cancel", systemImage: "xmark")
+                    }
+                    .buttonStyle(.bordered)
+                    Button {
+                        model.submitVoiceAssistant()
+                        PilotHaptics.impact()
+                    } label: {
+                        Label("Done", systemImage: "checkmark")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(PilotTheme.cyan)
+                    .foregroundStyle(.black)
+                case .requestingPermission, .processing, .speaking:
+                    Button(role: .cancel) {
+                        model.cancelVoiceAssistant()
+                    } label: {
+                        Label(
+                            model.voiceAssistantPhase == .speaking ? "Stop" : "Cancel",
+                            systemImage: "xmark"
+                        )
+                    }
+                    .buttonStyle(.bordered)
+                case .failed:
+                    if model.canRetryVoiceAssistant {
+                        Button {
+                            model.retryVoiceAssistant()
+                        } label: {
+                            Label("Retry", systemImage: "arrow.clockwise")
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(PilotTheme.cyan)
+                    }
+                    Button {
+                        model.startVoiceAssistant()
+                    } label: {
+                        Label("Speak again", systemImage: "mic.fill")
+                    }
+                    .buttonStyle(.bordered)
+                case .idle:
+                    EmptyView()
+                }
+            }
+            .font(.subheadline.weight(.semibold))
+        }
+        .padding(18)
+        .frame(maxWidth: 560)
+        .background(
+            LinearGradient(
+                colors: [
+                    PilotTheme.violet.opacity(0.14),
+                    PilotTheme.blue.opacity(0.08),
+                    Color.white.opacity(0.045),
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            ),
+            in: RoundedRectangle(cornerRadius: 28, style: .continuous)
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: 28, style: .continuous)
+                .stroke(
+                    LinearGradient(
+                        colors: [PilotTheme.cyan.opacity(0.30), PilotTheme.violet.opacity(0.12)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+        }
+        .accessibilityElement(children: .contain)
+    }
+
+    private var detail: String {
+        switch model.voiceAssistantPhase {
+        case .idle:
+            ""
+        case .requestingPermission:
+            "Getting the microphone ready…"
+        case .listening:
+            model.voiceAudio.duration < 1
+                ? "Go ahead — I’ll send after a short pause"
+                : "\(Int(model.voiceAudio.duration)) seconds · pause or tap Done"
+        case .processing:
+            "Transcribing locally, checking live context and choosing safe tools…"
+        case .speaking:
+            model.lastVoiceTranscript.map { "You asked: “\($0)”" }
+                ?? "Playing the response through this iPhone"
+        case let .failed(message):
+            message
+        }
+    }
+}
+
+private struct VoiceAura: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    let phase: VoiceAssistantPhase
+    let level: Double
+
+    var body: some View {
+        TimelineView(
+            .animation(
+                minimumInterval: reduceMotion ? 1 : 1.0 / 30.0,
+                paused: reduceMotion
+            )
+        ) { context in
+            let time = context.date.timeIntervalSinceReferenceDate
+            ZStack {
+                Circle()
+                    .fill(
+                        RadialGradient(
+                            colors: [primary.opacity(0.30), primary.opacity(0.02), .clear],
+                            center: .center,
+                            startRadius: 4,
+                            endRadius: 84
+                        )
+                    )
+                    .scaleEffect(0.94 + pulse(time, offset: 0) * 0.12)
+                    .blur(radius: 8)
+
+                ForEach(0..<3, id: \.self) { ring in
+                    Circle()
+                        .trim(from: 0.06 + Double(ring) * 0.04, to: 0.89)
+                        .stroke(
+                            AngularGradient(
+                                colors: palette + [palette[0]],
+                                center: .center
+                            ),
+                            style: StrokeStyle(
+                                lineWidth: CGFloat(4 - ring) + CGFloat(activity * 2.5),
+                                lineCap: .round
+                            )
+                        )
+                        .rotationEffect(
+                            .degrees(
+                                time * speed * (ring.isMultiple(of: 2) ? 22 : -18)
+                                    + Double(ring * 56)
+                            )
+                        )
+                        .scaleEffect(
+                            0.63 + CGFloat(ring) * 0.12
+                                + pulse(time, offset: Double(ring) * 0.7) * 0.055
+                        )
+                        .opacity(0.68 - Double(ring) * 0.11)
+                }
+
+                HStack(alignment: .center, spacing: 4) {
+                    ForEach(0..<13, id: \.self) { index in
+                        Capsule()
+                            .fill(
+                                LinearGradient(
+                                    colors: [PilotTheme.cyan, PilotTheme.violet, PilotTheme.mint],
+                                    startPoint: .top,
+                                    endPoint: .bottom
+                                )
+                            )
+                            .frame(
+                                width: 3.5,
+                                height: barHeight(index: index, time: time)
+                            )
+                    }
+                }
+                .frame(width: 76, height: 54)
+                .padding(12)
+                .background(.ultraThinMaterial, in: Circle())
+                .overlay { Circle().stroke(Color.white.opacity(0.18)) }
+                .shadow(color: primary.opacity(0.45), radius: 18)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .accessibilityHidden(true)
+    }
+
+    private var activity: Double {
+        switch phase {
+        case .idle: 0.05
+        case .requestingPermission: 0.16
+        case .listening: max(0.08, min(level, 1))
+        case .processing: 0.48
+        case .speaking: 0.64
+        case .failed: 0.10
+        }
+    }
+
+    private var speed: Double {
+        switch phase {
+        case .processing: 1.6
+        case .speaking: 1.2
+        case .listening: 0.8 + activity
+        case .requestingPermission: 0.65
+        case .idle, .failed: 0.25
+        }
+    }
+
+    private var primary: Color {
+        switch phase {
+        case .listening: PilotTheme.cyan
+        case .processing: PilotTheme.violet
+        case .speaking: PilotTheme.mint
+        case .failed: PilotTheme.amber
+        case .idle, .requestingPermission: PilotTheme.blue
+        }
+    }
+
+    private var palette: [Color] {
+        switch phase {
+        case .speaking:
+            [PilotTheme.mint, PilotTheme.cyan, PilotTheme.blue]
+        case .failed:
+            [PilotTheme.amber, .orange, PilotTheme.violet]
+        default:
+            [PilotTheme.cyan, PilotTheme.blue, PilotTheme.violet, PilotTheme.mint]
+        }
+    }
+
+    private func pulse(_ time: TimeInterval, offset: Double) -> CGFloat {
+        guard !reduceMotion else { return CGFloat(activity * 0.35) }
+        let value = (sin(time * speed * 2.4 + offset) + 1) / 2
+        return CGFloat(value * (0.25 + activity * 0.75))
+    }
+
+    private func barHeight(index: Int, time: TimeInterval) -> CGFloat {
+        let center = 1 - abs(Double(index - 6)) / 8
+        guard !reduceMotion else { return CGFloat(8 + center * 15 * activity) }
+        let wave = (sin(time * (4.8 + speed) + Double(index) * 0.78) + 1) / 2
+        return CGFloat(7 + center * (12 + 32 * activity) * (0.30 + wave * 0.70))
     }
 }
 
@@ -3161,6 +3442,7 @@ private struct Composer: View {
 
     var body: some View {
         HStack(alignment: .bottom, spacing: 10) {
+            voiceButton
             TextField("Message Pilot", text: $prompt, axis: .vertical)
                 .focused(isFocused)
                 .lineLimit(1...5)
@@ -3189,6 +3471,55 @@ private struct Composer: View {
         }
         .padding(12)
         .background(.ultraThinMaterial)
+    }
+
+    private var voiceButton: some View {
+        Button {
+            PilotHaptics.impact()
+            switch model.voiceAssistantPhase {
+            case .idle, .failed:
+                model.startVoiceAssistant()
+            case .listening:
+                model.submitVoiceAssistant()
+            case .requestingPermission, .processing, .speaking:
+                model.cancelVoiceAssistant()
+            }
+        } label: {
+            Image(systemName: voiceButtonSymbol)
+                .font(.headline.weight(.semibold))
+                .frame(width: 44, height: 44)
+                .background(voiceButtonColor, in: Circle())
+                .foregroundStyle(.white)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(voiceButtonLabel)
+        .accessibilityHint(model.voiceAssistantPhase.accessibilityHint)
+    }
+
+    private var voiceButtonSymbol: String {
+        switch model.voiceAssistantPhase {
+        case .idle, .failed: "mic.fill"
+        case .listening: "checkmark"
+        case .requestingPermission, .processing, .speaking: "xmark"
+        }
+    }
+
+    private var voiceButtonLabel: String {
+        switch model.voiceAssistantPhase {
+        case .idle, .failed: "Talk to Pilot"
+        case .listening: "Done speaking"
+        case .requestingPermission, .processing, .speaking: "Cancel voice assistant"
+        }
+    }
+
+    private var voiceButtonColor: Color {
+        switch model.voiceAssistantPhase {
+        case .idle: PilotTheme.violet
+        case .requestingPermission, .processing: PilotTheme.blue
+        case .listening: PilotTheme.cyan
+        case .speaking: PilotTheme.mint
+        case .failed: PilotTheme.amber
+        }
     }
 }
 

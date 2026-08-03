@@ -101,7 +101,11 @@ class HomeActionApiTests(unittest.TestCase):
                 {
                     "entity_id": "light.office_lamp",
                     "state": "off",
-                    "attributes": {"friendly_name": "Office Lamp", "brightness": 0},
+                    "attributes": {
+                        "friendly_name": "Office Lamp",
+                        "brightness": 0,
+                        "supported_color_modes": ["rgb"],
+                    },
                     "last_updated": "2026-07-21T00:00:00+00:00",
                 },
                 {
@@ -202,6 +206,7 @@ class HomeActionApiTests(unittest.TestCase):
         )
         self.assertEqual(entity["entity_id"], "light.office_lamp")
         self.assertIn("set_brightness", entity["actions"])
+        self.assertIn("set_color", entity["actions"])
         self.assertNotIn("lock.bedroom_door", response.text)
         self.assertNotIn("sensor.office_linkquality", response.text)
         self.assertNotIn("light.office_internal", response.text)
@@ -212,6 +217,18 @@ class HomeActionApiTests(unittest.TestCase):
         response = self.client.get(
             "/v1/devices/pilot-office/home?room_id=bedroom",
             headers=self.headers("pilot-office", self.fixed_token),
+        )
+        self.assertEqual(response.status_code, 403)
+
+    def test_fixed_room_home_control_device_cannot_mutate_another_room(self) -> None:
+        response = self.client.post(
+            "/v1/devices/pilot-office/home/actions",
+            headers=self.headers("pilot-office", self.fixed_token),
+            json={
+                "room_id": "bedroom",
+                "entity_id": "lock.bedroom_door",
+                "action": "unlock",
+            },
         )
         self.assertEqual(response.status_code, 403)
 
@@ -276,6 +293,71 @@ class HomeActionApiTests(unittest.TestCase):
             [event["event_type"] for event in audit],
             ["requested", "approved", "succeeded"],
         )
+
+    def test_light_color_action_is_typed_reconciled_and_audited(self) -> None:
+        with (
+            patch.object(
+                Integrations,
+                "home_assistant_typed_action",
+                new=AsyncMock(return_value={"changed_state_count": 1}),
+            ) as execute,
+            patch.object(
+                Integrations,
+                "home_assistant_state",
+                new=AsyncMock(
+                    return_value={
+                        "entity_id": "light.office_lamp",
+                        "state": "on",
+                        "attributes": {
+                            "brightness": 102,
+                            "rgb_color": [0, 90, 255],
+                        },
+                    }
+                ),
+            ),
+            patch("pilot_core.home_actions.asyncio.sleep", new=AsyncMock()),
+        ):
+            response = self.client.post(
+                "/v1/devices/pilot-phone/home/actions",
+                headers=self.headers(),
+                json={
+                    "room_id": "office",
+                    "entity_id": "light.office_lamp",
+                    "action": "set_color",
+                    "parameters": {"color": "blue", "brightness": 40},
+                },
+            )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        action = response.json()["action"]
+        self.assertEqual(action["status"], "succeeded")
+        self.assertFalse(action["confirmation_required"])
+        execute.assert_awaited_once_with(
+            "light",
+            "turn_on",
+            "light.office_lamp",
+            {"rgb_color": [0, 90, 255], "brightness_pct": 40},
+        )
+        self.assertEqual(
+            [
+                event["event_type"]
+                for event in self.store.home_action_audit(action["id"])
+            ],
+            ["requested", "approved", "succeeded"],
+        )
+
+    def test_light_color_is_rejected_for_non_color_light(self) -> None:
+        response = self.client.post(
+            "/v1/devices/pilot-phone/home/actions",
+            headers=self.headers(),
+            json={
+                "room_id": "office",
+                "entity_id": "light.office_lamp",
+                "action": "set_color",
+                "parameters": {"color": "ultraviolet"},
+            },
+        )
+        self.assertEqual(response.status_code, 409)
 
     def test_high_risk_action_requires_same_device_confirmation_once(self) -> None:
         with patch.object(

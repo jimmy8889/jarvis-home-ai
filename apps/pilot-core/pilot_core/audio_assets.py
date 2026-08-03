@@ -44,10 +44,13 @@ class AudioAssets:
         content_type: str,
         content: bytes,
         retention_seconds: int | None = None,
+        recipient_device_id: str | None = None,
     ) -> dict[str, Any]:
         self.cleanup()
         if kind not in {"assistant", "announcement"}:
             raise AudioAssetError("kind must be assistant or announcement")
+        if recipient_device_id is not None and kind != "assistant":
+            raise AudioAssetError("only assistant assets may have a private recipient")
         normalized_type = content_type.partition(";")[0].strip().lower()
         extension = CONTENT_TYPE_EXTENSIONS.get(normalized_type)
         if extension is None:
@@ -82,10 +85,22 @@ class AudioAssets:
                 len(content),
                 str(path),
                 expires_at,
+                recipient_device_id,
             )
+        except (KeyError, PermissionError) as error:
+            path.unlink(missing_ok=True)
+            raise AudioAssetError(str(error)) from None
         except Exception:
             path.unlink(missing_ok=True)
             raise
+
+    def bind_recipient(
+        self, asset_id: str, recipient_device_id: str
+    ) -> dict[str, Any]:
+        try:
+            return self.store.bind_audio_asset_recipient(asset_id, recipient_device_id)
+        except (KeyError, PermissionError, ValueError) as error:
+            raise AudioAssetError(str(error)) from None
 
     def get(self, asset_id: str) -> dict[str, Any] | None:
         self.cleanup()

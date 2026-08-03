@@ -135,6 +135,7 @@ class Store:
                     id TEXT PRIMARY KEY,
                     room_id TEXT NOT NULL REFERENCES rooms(id),
                     kind TEXT NOT NULL,
+                    recipient_device_id TEXT REFERENCES devices(id),
                     filename TEXT NOT NULL,
                     content_type TEXT NOT NULL,
                     sha256 TEXT NOT NULL,
@@ -489,6 +490,19 @@ class Store:
                 self._connection.execute(
                     "ALTER TABLE devices ADD COLUMN revoked_at TEXT"
                 )
+            audio_asset_columns = {
+                row["name"]
+                for row in self._connection.execute("PRAGMA table_info(audio_assets)")
+            }
+            if "recipient_device_id" not in audio_asset_columns:
+                self._connection.execute(
+                    """ALTER TABLE audio_assets ADD COLUMN recipient_device_id
+                       TEXT REFERENCES devices(id)"""
+                )
+            self._connection.execute(
+                """CREATE INDEX IF NOT EXISTS audio_assets_recipient_created
+                   ON audio_assets(recipient_device_id, created_at DESC)"""
+            )
             entity_columns = {
                 row["name"]
                 for row in self._connection.execute("PRAGMA table_info(home_entities)")
@@ -1079,6 +1093,7 @@ class Store:
         size_bytes: int,
         path: str,
         expires_at: str,
+        recipient_device_id: str | None = None,
     ) -> dict[str, Any]:
         now = _now()
         with self._lock, self._connection:
@@ -1086,15 +1101,34 @@ class Store:
                 "SELECT 1 FROM rooms WHERE id = ?", (room_id,)
             ).fetchone():
                 raise KeyError(room_id)
+            if recipient_device_id is not None:
+                recipient = self._connection.execute(
+                    """SELECT room_id, capabilities_json, revoked_at
+                       FROM devices WHERE id = ?""",
+                    (recipient_device_id,),
+                ).fetchone()
+                if recipient is None:
+                    raise KeyError(recipient_device_id)
+                if recipient["revoked_at"] is not None:
+                    raise PermissionError("audio recipient is revoked")
+                capabilities = set(json.loads(recipient["capabilities_json"]))
+                if "voice" not in capabilities and "audio" not in capabilities:
+                    raise PermissionError("audio recipient is not audio capable")
+                if recipient["room_id"] != room_id and not {
+                    "portable-client",
+                    "voice",
+                }.issubset(capabilities):
+                    raise PermissionError("audio recipient belongs to another room")
             self._connection.execute(
                 """INSERT INTO audio_assets
-                   (id, room_id, kind, filename, content_type, sha256,
-                    size_bytes, path, created_at, expires_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   (id, room_id, kind, recipient_device_id, filename, content_type,
+                    sha256, size_bytes, path, created_at, expires_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     asset_id,
                     room_id,
                     kind,
+                    recipient_device_id,
                     filename,
                     content_type,
                     digest,
@@ -1107,6 +1141,50 @@ class Store:
         asset = self.get_audio_asset(asset_id)
         assert asset is not None
         return asset
+
+    def bind_audio_asset_recipient(
+        self, asset_id: str, recipient_device_id: str
+    ) -> dict[str, Any]:
+        """Bind one unclaimed assistant asset to one active same-room endpoint."""
+
+        with self._lock, self._connection:
+            asset = self._connection.execute(
+                "SELECT * FROM audio_assets WHERE id = ?", (asset_id,)
+            ).fetchone()
+            if asset is None:
+                raise KeyError(asset_id)
+            if asset["kind"] != "assistant":
+                raise ValueError("only assistant assets have a private recipient")
+            if asset["recipient_device_id"] is not None:
+                if asset["recipient_device_id"] != recipient_device_id:
+                    raise PermissionError("assistant asset is already bound")
+                return self._audio_asset_view(asset)
+            recipient = self._connection.execute(
+                """SELECT room_id, capabilities_json, revoked_at
+                   FROM devices WHERE id = ?""",
+                (recipient_device_id,),
+            ).fetchone()
+            if recipient is None:
+                raise KeyError(recipient_device_id)
+            capabilities = set(json.loads(recipient["capabilities_json"]))
+            if recipient["revoked_at"] is not None:
+                raise PermissionError("audio recipient is revoked")
+            if recipient["room_id"] != asset["room_id"]:
+                raise PermissionError("audio recipient belongs to another room")
+            if "audio" not in capabilities:
+                raise PermissionError("audio recipient lacks audio capability")
+            cursor = self._connection.execute(
+                """UPDATE audio_assets SET recipient_device_id = ?
+                   WHERE id = ? AND recipient_device_id IS NULL""",
+                (recipient_device_id, asset_id),
+            )
+            if cursor.rowcount != 1:
+                raise PermissionError("assistant asset could not be bound")
+            bound = self._connection.execute(
+                "SELECT * FROM audio_assets WHERE id = ?", (asset_id,)
+            ).fetchone()
+        assert bound is not None
+        return self._audio_asset_view(bound)
 
     def get_audio_asset(self, asset_id: str) -> dict[str, Any] | None:
         with self._lock:
@@ -3316,6 +3394,7 @@ class Store:
             "id": row["id"],
             "room_id": row["room_id"],
             "kind": row["kind"],
+            "recipient_device_id": row["recipient_device_id"],
             "filename": row["filename"],
             "content_type": row["content_type"],
             "sha256": row["sha256"],

@@ -10,6 +10,7 @@
 		0766FAAC59F3AF4F6BB1A4C0 /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AEDFE53775C96B8F08B3A077 /* RootView.swift */; };
 		260C6B29B047979CE7181505 /* PilotAPI.swift in Sources */ = {isa = PBXBuildFile; fileRef = F5C5898A0D20AD0532CB74F5 /* PilotAPI.swift */; };
 		261B33A90351935B3E847324 /* SendspinKit in Frameworks */ = {isa = PBXBuildFile; productRef = 1415F6AAF3FCC263AA335360 /* SendspinKit */; };
+		73C38B51C88460671408B296 /* VoiceAudioController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 66F7D952FA44369FC4B0D574 /* VoiceAudioController.swift */; };
 		93570751D7B731E10026294F /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0403CF9AD9A373A5C4ECA2C /* Models.swift */; };
 		9778D75A4D000C2405F0F53E /* PilotTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5169EE5BCE182D7B1AFBC22B /* PilotTests.swift */; };
 		A2F6BD8D8D4A937B4D8CD6E3 /* PhonePlaybackController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B45F19FEC453C7C45B90BB83 /* PhonePlaybackController.swift */; };
@@ -33,6 +34,7 @@
 		033B7B0DFB321D06AF6959AE /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		5169EE5BCE182D7B1AFBC22B /* PilotTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PilotTests.swift; sourceTree = "<group>"; };
 		51E6679F15E94024CDFE97BC /* PilotClientKit */ = {isa = PBXFileReference; lastKnownFileType = folder; name = PilotClientKit; path = ../../packages/PilotClientKit; sourceTree = SOURCE_ROOT; };
+		66F7D952FA44369FC4B0D574 /* VoiceAudioController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceAudioController.swift; sourceTree = "<group>"; };
 		6A3D7B9A9354E56EC99B7E08 /* PilotModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PilotModel.swift; sourceTree = "<group>"; };
 		83A4E73A78886F255F2ED460 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		88E48CEE1B3F4DF8D6EDB216 /* PilotApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PilotApp.swift; sourceTree = "<group>"; };
@@ -103,6 +105,7 @@
 				88E48CEE1B3F4DF8D6EDB216 /* PilotApp.swift */,
 				6A3D7B9A9354E56EC99B7E08 /* PilotModel.swift */,
 				AEDFE53775C96B8F08B3A077 /* RootView.swift */,
+				66F7D952FA44369FC4B0D574 /* VoiceAudioController.swift */,
 			);
 			path = Pilot;
 			sourceTree = "<group>";
@@ -209,6 +212,7 @@
 				F1D9C21F86E27295DA5AA39F /* PilotApp.swift in Sources */,
 				DF4427ABDB61AE355381264B /* PilotModel.swift in Sources */,
 				0766FAAC59F3AF4F6BB1A4C0 /* RootView.swift in Sources */,
+				73C38B51C88460671408B296 /* VoiceAudioController.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

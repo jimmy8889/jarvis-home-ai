@@ -8,7 +8,7 @@ from pathlib import Path
 import tempfile
 import time
 import unittest
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, call, patch
 
 from fastapi.testclient import TestClient
 
@@ -25,6 +25,7 @@ from pilot_core.conversation import (
     ConversationEngine,
     OpenAICompatibleLLM,
 )
+from pilot_core.home_actions import HomeActions
 from pilot_core.home_intelligence import (
     HOME_READ_TOOL_NAMES,
     HomeIntelligence,
@@ -450,6 +451,418 @@ class HomeIntelligenceTests(unittest.IsolatedAsyncioTestCase):
             if item["function"]["name"] in HOME_READ_TOOL_NAMES
         }
         self.assertEqual(defined, HOME_READ_TOOL_NAMES)
+
+    async def test_assistant_light_tool_uses_curated_typed_action_and_audit(
+        self,
+    ) -> None:
+        self.seed(
+            [
+                state(
+                    "light.bedroom_main",
+                    "off",
+                    "Bedroom Main",
+                    brightness=0,
+                    supported_color_modes=["rgb"],
+                )
+            ],
+            {"light.bedroom_main": {"area_id": "bedroom"}},
+        )
+        self.store.register_device(
+            "pilot-phone",
+            "bedroom",
+            "Pilot Phone",
+            ["voice", "home-control", "portable-client"],
+        )
+        registry = Registry.from_settings(self.settings)
+        home_actions = HomeActions(
+            self.store,
+            self.home,
+            self.integrations,
+            self.settings.rooms,
+        )
+        tools = AssistantTools(
+            registry,
+            RoomOrchestrator(registry, self.store),
+            self.integrations,
+            MediaStateReader(registry, self.integrations),
+            self.store,
+            self.home,
+            home_actions,
+        )
+        self.integrations.home_assistant_typed_action = AsyncMock(
+            return_value={"changed_state_count": 1}
+        )
+        self.integrations.home_assistant_state = AsyncMock(
+            return_value={
+                "entity_id": "light.bedroom_main",
+                "state": "on",
+                "attributes": {"brightness": 89, "rgb_color": [255, 105, 180]},
+            }
+        )
+
+        with patch("pilot_core.home_actions.asyncio.sleep", new=AsyncMock()):
+            result = await tools.execute(
+                "control_light",
+                {
+                    "entity": "Bedroom Main",
+                    "action": "set_color",
+                    "color": "pink",
+                    "brightness": 35,
+                },
+                room_id="bedroom",
+                language="en",
+                provider_conversation_id=None,
+                device_id="pilot-phone",
+                user_text="Set Bedroom Main to pink at 35 percent",
+            )
+
+        self.assertTrue(result["success"])
+        self.assertEqual(result["status"], "succeeded")
+        self.integrations.home_assistant_typed_action.assert_awaited_once_with(
+            "light",
+            "turn_on",
+            "light.bedroom_main",
+            {"rgb_color": [255, 105, 180], "brightness_pct": 35},
+        )
+        self.assertEqual(
+            [
+                item["event_type"]
+                for item in self.store.home_action_audit(result["audit_id"])
+            ],
+            ["requested", "approved", "succeeded"],
+        )
+        definition = next(
+            item["function"]
+            for item in tools.definitions()
+            if item["function"]["name"] == "control_light"
+        )
+        self.assertIn(
+            "set_color",
+            definition["parameters"]["properties"]["action"]["enum"],
+        )
+        self.assertIn("pink", definition["parameters"]["properties"]["color"]["enum"])
+
+    async def test_assistant_light_tool_requires_home_control_capability(self) -> None:
+        self.seed(
+            [state("light.bedroom_main", "off", "Bedroom Main")],
+            {"light.bedroom_main": {"area_id": "bedroom"}},
+        )
+        self.store.register_device(
+            "pilot-read-only",
+            "bedroom",
+            "Read only",
+            ["voice", "home-read"],
+        )
+        registry = Registry.from_settings(self.settings)
+        tools = AssistantTools(
+            registry,
+            RoomOrchestrator(registry, self.store),
+            self.integrations,
+            MediaStateReader(registry, self.integrations),
+            self.store,
+            self.home,
+            HomeActions(
+                self.store,
+                self.home,
+                self.integrations,
+                self.settings.rooms,
+            ),
+        )
+        self.integrations.home_assistant_typed_action = AsyncMock()
+
+        with self.assertRaisesRegex(ValueError, "home-control"):
+            await tools.execute(
+                "control_light",
+                {"entity": "Bedroom Main", "action": "turn_on"},
+                room_id="bedroom",
+                language="en",
+                provider_conversation_id=None,
+                device_id="pilot-read-only",
+                user_text="Turn Bedroom Main on",
+            )
+        self.integrations.home_assistant_typed_action.assert_not_awaited()
+
+    async def test_assistant_light_tool_rejects_target_not_named_by_user(self) -> None:
+        self.seed(
+            [state("light.bedroom_main", "off", "Bedroom Main Light")],
+            {"light.bedroom_main": {"area_id": "bedroom"}},
+        )
+        self.store.register_device(
+            "pilot-phone",
+            "bedroom",
+            "Pilot Phone",
+            ["voice", "home-control"],
+        )
+        registry = Registry.from_settings(self.settings)
+        tools = AssistantTools(
+            registry,
+            RoomOrchestrator(registry, self.store),
+            self.integrations,
+            MediaStateReader(registry, self.integrations),
+            self.store,
+            self.home,
+            HomeActions(
+                self.store,
+                self.home,
+                self.integrations,
+                self.settings.rooms,
+            ),
+        )
+        self.integrations.home_assistant_typed_action = AsyncMock()
+
+        with self.assertRaisesRegex(HomeResolutionError, "not named"):
+            await tools.execute(
+                "control_light",
+                {"entity": "Bedroom Main Light", "action": "turn_off"},
+                room_id="bedroom",
+                language="en",
+                provider_conversation_id=None,
+                device_id="pilot-phone",
+                user_text="Turn the bedside lamp off",
+            )
+        self.integrations.home_assistant_typed_action.assert_not_awaited()
+
+    async def test_generic_lights_require_one_curated_room_group(self) -> None:
+        self.seed(
+            [
+                state("light.bedroom_lights", "on", "Master Bedroom"),
+                state(
+                    "light.bedroom_bedside_left",
+                    "on",
+                    "Bedroom Bedside Left",
+                ),
+                state(
+                    "light.bedroom_wled",
+                    "on",
+                    "WLED",
+                ),
+            ],
+            {
+                "light.bedroom_lights": {"area_id": "bedroom"},
+                "light.bedroom_wled": {"area_id": "bedroom"},
+            },
+        )
+        self.store.update_home_entity_presentation(
+            "light.bedroom_lights",
+            {
+                "exposure_policy": "include",
+                "room_id": "bedroom",
+                "display_name": "Bedroom lights",
+                "reason": "curated aggregate",
+            },
+        )
+        self.store.register_device(
+            "pilot-phone",
+            "bedroom",
+            "Pilot Phone",
+            ["voice", "home-control"],
+        )
+        registry = Registry.from_settings(self.settings)
+        tools = AssistantTools(
+            registry,
+            RoomOrchestrator(registry, self.store),
+            self.integrations,
+            MediaStateReader(registry, self.integrations),
+            self.store,
+            self.home,
+            HomeActions(
+                self.store,
+                self.home,
+                self.integrations,
+                self.settings.rooms,
+            ),
+        )
+        self.integrations.home_assistant_typed_action = AsyncMock(
+            return_value={"changed_state_count": 1}
+        )
+        self.integrations.home_assistant_state = AsyncMock(
+            return_value={
+                "entity_id": "light.bedroom_lights",
+                "state": "off",
+                "attributes": {},
+            }
+        )
+
+        with patch("pilot_core.home_actions.asyncio.sleep", new=AsyncMock()):
+            result = await tools.execute(
+                "control_light",
+                {"entity": "lights", "action": "turn_off"},
+                room_id="bedroom",
+                language="en",
+                provider_conversation_id=None,
+                device_id="pilot-phone",
+                user_text="Turn the lights off",
+            )
+        self.assertTrue(result["success"])
+        self.assertEqual(result["entity_id"], "light.bedroom_lights")
+        self.integrations.home_assistant_typed_action.assert_awaited_once_with(
+            "light", "turn_off", "light.bedroom_lights", {}
+        )
+
+    async def test_explicit_light_command_prefers_governed_tool_before_ha_assist(
+        self,
+    ) -> None:
+        llm_integrations = replace(
+            self.settings.integrations,
+            llm_provider="vllm",
+            llm_url="http://llm.local:8000/v1",
+            llm_model="pilot-local",
+        )
+        llm_settings = replace(self.settings, integrations=llm_integrations)
+        store = Store(":memory:", llm_settings)
+        integrations = Integrations(llm_integrations)
+        home = HomeIntelligence(
+            store,
+            integrations,
+            llm_integrations,
+            llm_settings.rooms,
+        )
+        sync_id = store.begin_home_catalog_sync()
+        store.replace_home_catalog(
+            sync_id,
+            home.normalize_snapshot(
+                [
+                    state(
+                        "light.bedroom_main",
+                        "off",
+                        "Bedroom Main Light",
+                        brightness=0,
+                        supported_color_modes=["rgb"],
+                    )
+                ],
+                registry_metadata={
+                    "light.bedroom_main": {"area_id": "bedroom"}
+                },
+            ),
+        )
+        store.register_device(
+            "pilot-phone",
+            "bedroom",
+            "Pilot Phone",
+            ["voice", "home-control", "portable-client"],
+        )
+        registry = Registry.from_settings(llm_settings)
+        tools = AssistantTools(
+            registry,
+            RoomOrchestrator(registry, store),
+            integrations,
+            MediaStateReader(registry, integrations),
+            store,
+            home,
+            HomeActions(store, home, integrations, llm_settings.rooms),
+        )
+        integrations.home_assistant_conversation = AsyncMock()
+        integrations.home_assistant_typed_action = AsyncMock(
+            return_value={"changed_state_count": 1}
+        )
+        integrations.home_assistant_state = AsyncMock(
+            return_value={
+                "entity_id": "light.bedroom_main",
+                "state": "on",
+                "attributes": {"brightness": 102, "rgb_color": [0, 90, 255]},
+            }
+        )
+        llm = OpenAICompatibleLLM(llm_integrations)
+        llm.chat = AsyncMock(
+            side_effect=[
+                {
+                    "tool_calls": [
+                        {
+                            "id": "light-1",
+                            "function": {
+                                "name": "control_light",
+                                "arguments": json.dumps(
+                                    {
+                                        "entity": "Bedroom Main Light",
+                                        "action": "set_color",
+                                        "color": "blue",
+                                        "brightness": 40,
+                                    }
+                                ),
+                            },
+                        }
+                    ]
+                },
+                {"content": "The bedroom light is blue at 40 percent."},
+                {
+                    "tool_calls": [
+                        {
+                            "id": "light-2",
+                            "function": {
+                                "name": "control_light",
+                                "arguments": json.dumps(
+                                    {
+                                        "entity": "light.bedroom_main",
+                                        "action": "set_brightness",
+                                        "brightness": 60,
+                                    }
+                                ),
+                            },
+                        }
+                    ]
+                },
+                {"content": "It is now at 60 percent."},
+            ]
+        )
+        engine = ConversationEngine(store, registry, tools, integrations, llm)
+
+        with patch("pilot_core.home_actions.asyncio.sleep", new=AsyncMock()):
+            result = await engine.respond(
+                "Set the bedroom main light to blue at 40 percent",
+                "bedroom",
+                device_id="pilot-phone",
+            )
+            integrations.home_assistant_state.return_value = {
+                "entity_id": "light.bedroom_main",
+                "state": "on",
+                "attributes": {"brightness": 153, "rgb_color": [0, 90, 255]},
+            }
+            follow_up = await engine.respond(
+                "Now make them brighter, about 60 percent",
+                "bedroom",
+                session_id=result.session_id,
+                device_id="pilot-phone",
+            )
+
+        self.assertEqual(result.provider, "pilot_llm")
+        self.assertTrue(result.tool_calls[0]["output"]["success"])
+        self.assertEqual(follow_up.provider, "pilot_llm")
+        self.assertTrue(follow_up.tool_calls[0]["output"]["success"])
+        self.assertEqual(follow_up.tool_calls[0]["output"]["entity_id"], "light.bedroom_main")
+        integrations.home_assistant_conversation.assert_not_awaited()
+        self.assertEqual(
+            integrations.home_assistant_typed_action.await_args_list,
+            [
+                call(
+                    "light",
+                    "turn_on",
+                    "light.bedroom_main",
+                    {"rgb_color": [0, 90, 255], "brightness_pct": 40},
+                ),
+                call(
+                    "light",
+                    "turn_on",
+                    "light.bedroom_main",
+                    {"brightness_pct": 60},
+                ),
+            ],
+        )
+        self.assertEqual(
+            llm.chat.await_args_list[0].kwargs["tool_choice"]["function"]["name"],
+            "control_light",
+        )
+        self.assertEqual(
+            llm.chat.await_args_list[2].kwargs["tool_choice"]["function"]["name"],
+            "control_light",
+        )
+        self.assertIn(
+            '"recent_referents":{"light":{"entity_id":"light.bedroom_main"',
+            llm.chat.await_args_list[2].args[0][0]["content"],
+        )
+        session = store.get_conversation_session(result.session_id)
+        assert session is not None
+        self.assertEqual(session["device_id"], "pilot-phone")
+        store.close()
 
     async def test_prompt_injection_in_entity_name_cannot_chain_to_action(
         self,

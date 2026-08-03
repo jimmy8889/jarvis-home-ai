@@ -279,6 +279,106 @@ struct PilotAPI: Sendable {
         return try JSONDecoder().decode(AssistantReply.self, from: data)
     }
 
+    func voice(
+        pcmData: Data,
+        roomID: String,
+        conversationID: String?
+    ) async throws -> VoiceAssistantReply {
+        guard !pcmData.isEmpty else { throw VoiceAudioError.recordingTooShort }
+        let voiceRequest = Self.voiceRequest(
+            coreURL: coreURL,
+            deviceID: deviceID,
+            token: token,
+            roomID: roomID,
+            conversationID: conversationID
+        )
+        let (data, response) = try await URLSession.shared.upload(
+            for: voiceRequest,
+            from: pcmData
+        )
+        try Self.validate(response, data: data)
+        return try JSONDecoder().decode(VoiceAssistantReply.self, from: data)
+    }
+
+    func voiceResponseAudio(at downloadPath: String) async throws -> Data {
+        let url = try Self.resolvedVoiceAudioURL(
+            downloadPath,
+            relativeTo: coreURL
+        )
+        let audioRequest = Self.voiceAudioRequest(
+            url: url,
+            deviceID: deviceID,
+            token: token
+        )
+        let (data, response) = try await URLSession.shared.data(for: audioRequest)
+        try Self.validate(response, data: data)
+        guard !data.isEmpty, data.count <= 20_000_000 else {
+            throw PilotAPIError.invalidResponse
+        }
+        if let contentType = (response as? HTTPURLResponse)?.value(
+            forHTTPHeaderField: "Content-Type"
+        ), !contentType.lowercased().hasPrefix("audio/") {
+            throw PilotAPIError.invalidResponse
+        }
+        return data
+    }
+
+    static func voiceRequest(
+        coreURL: URL,
+        deviceID: String,
+        token: String,
+        roomID: String,
+        conversationID: String?
+    ) -> URLRequest {
+        let url = coreURL.appending(path: "v1/devices/\(deviceID)/voice")
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 120
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue(deviceID, forHTTPHeaderField: "X-Pilot-Device-ID")
+        request.setValue(roomID, forHTTPHeaderField: "X-Pilot-Room-ID")
+        request.setValue("16000", forHTTPHeaderField: "X-Pilot-Sample-Rate")
+        request.setValue("en-AU", forHTTPHeaderField: "X-Pilot-Language")
+        request.setValue("audio/l16", forHTTPHeaderField: "Content-Type")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        if let conversationID, !conversationID.isEmpty {
+            request.setValue(
+                conversationID,
+                forHTTPHeaderField: "X-Pilot-Conversation-ID"
+            )
+        }
+        return request
+    }
+
+    static func voiceAudioRequest(
+        url: URL,
+        deviceID: String,
+        token: String
+    ) -> URLRequest {
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.timeoutInterval = 45
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue(deviceID, forHTTPHeaderField: "X-Pilot-Device-ID")
+        request.setValue("audio/*", forHTTPHeaderField: "Accept")
+        return request
+    }
+
+    static func resolvedVoiceAudioURL(
+        _ downloadPath: String,
+        relativeTo coreURL: URL
+    ) throws -> URL {
+        guard let candidate = URL(string: downloadPath, relativeTo: coreURL)?.absoluteURL,
+              let coreScheme = coreURL.scheme?.lowercased(),
+              let candidateScheme = candidate.scheme?.lowercased(),
+              candidateScheme == coreScheme,
+              candidate.host?.lowercased() == coreURL.host?.lowercased(),
+              candidate.port == coreURL.port,
+              ["http", "https"].contains(candidateScheme)
+        else { throw PilotAPIError.invalidResponse }
+        return candidate
+    }
+
     func meetings() async throws -> [PilotMeeting] {
         let data = try await request(path: "v1/devices/\(deviceID)/meetings")
         return try JSONDecoder().decode(MeetingEnvelope.self, from: data).meetings

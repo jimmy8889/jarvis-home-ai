@@ -3,7 +3,7 @@ set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "${script_dir}/../.." && pwd)"
-remote_host="root@10.0.1.64"
+remote_host="root@10.0.1.204"
 remote_path="/opt/jarvis-home-ai"
 dry_run=false
 

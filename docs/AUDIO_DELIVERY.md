@@ -22,10 +22,17 @@ TTS/client ── admin upload ──► Pilot Core audio asset
 
 ## Security and room boundaries
 
-- Audio assets belong to exactly one configured room.
+- Audio assets belong to exactly one configured room. Assistant assets also
+  belong to exactly one recipient device; voice-created replies are bound to
+  the authenticated device that submitted the recording.
 - Upload and playback requests require the Pilot Core administrator token.
-- Downloads require a valid per-device bearer credential and the device must
-  be registered to the asset's room.
+- Downloads require the current active bearer credential for the stated
+  device. Assistant audio requires an exact recipient-device match, including
+  when a portable client selected another room for context. Announcements are
+  available only to audio-capable devices registered in the announcement room.
+- Legacy or newly uploaded assistant assets without a recipient fail closed.
+  Dispatch binds an administrator-uploaded assistant asset atomically to the
+  selected room endpoint; it cannot later be rebound to another device.
 - The room-agent command contains an asset ID, content type, byte count, and
   SHA-256 digest. It never contains a caller-controlled download URL.
 - The room agent accepts WAV, FLAC, MP3, OGG, and AAC only, downloads into a
@@ -66,9 +73,10 @@ Content-Type: application/json
 ```
 
 Pilot Core resolves a registered audio-capable endpoint and the room's response
-player. The room agent reports command success after it has downloaded,
-verified, and started the local playback process. Current source state remains
-visible through room-agent reporting for the duration of playback.
+player, then binds an assistant asset to that endpoint before queueing it. The
+room agent reports command success after it has downloaded, verified, and
+started the local playback process. Current source state remains visible through
+room-agent reporting for the duration of playback.
 
 Room agents use this authenticated endpoint internally:
 

@@ -423,6 +423,7 @@ class Integrations:
         permitted_keys = {
             "brightness_pct",
             "color_temp_kelvin",
+            "rgb_color",
             "percentage",
             "temperature",
             "hvac_mode",
@@ -431,6 +432,18 @@ class Integrations:
         }
         if set(service_data) - permitted_keys:
             raise IntegrationRequestFailed("Home Assistant action data is invalid")
+        rgb_color = service_data.get("rgb_color")
+        if rgb_color is not None and not (
+            isinstance(rgb_color, (list, tuple))
+            and len(rgb_color) == 3
+            and all(
+                isinstance(value, int)
+                and not isinstance(value, bool)
+                and 0 <= value <= 255
+                for value in rgb_color
+            )
+        ):
+            raise IntegrationRequestFailed("Home Assistant RGB color is invalid")
         if not self.settings.home_assistant_url:
             raise IntegrationUnavailable("Home Assistant URL is not configured")
         token = read_secret(self.settings.home_assistant_token_env)

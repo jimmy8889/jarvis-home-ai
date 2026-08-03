@@ -187,6 +187,7 @@ class DeviceHomeActionRequest(BaseModel):
         "lock",
         "open",
         "set_brightness",
+        "set_color",
         "set_hvac_mode",
         "set_percentage",
         "set_position",
@@ -637,6 +638,7 @@ def create_app(
         media_states,
         database,
         home_intelligence,
+        home_actions,
     )
     conversation_engine = ConversationEngine(
         database,
@@ -1245,6 +1247,7 @@ def create_app(
                 synthesized.content_type,
                 synthesized.content,
                 retention_seconds,
+                target.id if kind == "assistant" else None,
             )
         except AudioAssetError as error:
             raise HTTPException(status_code=422, detail=str(error)) from None
@@ -2303,6 +2306,11 @@ def create_app(
                 detail="only announcement assets may be critical",
             )
         target, response_player = await audio_targets(room_id, request.device_id)
+        if asset["kind"] == "assistant":
+            try:
+                asset = audio_assets.bind_recipient(asset["id"], target.id)
+            except AudioAssetError as error:
+                raise HTTPException(status_code=409, detail=str(error)) from None
         return await dispatch_audio_asset(
             room_id,
             asset,
@@ -2364,23 +2372,28 @@ def create_app(
         x_pilot_device_id: str = Header(),
         authorization: str | None = Header(default=None),
     ) -> FileResponse:
-        token = _bearer(authorization)
-        if not database.authenticate_device(x_pilot_device_id, token):
+        device = authenticated_device(
+            x_pilot_device_id,
+            x_pilot_device_id,
+            authorization,
+        )
+        if device.get("credential_status") != "active":
             raise HTTPException(status_code=401, detail="invalid device credentials")
         asset = audio_assets.get(asset_id)
         if asset is None:
             raise HTTPException(status_code=404, detail="audio asset not found")
-        device = next(
-            (
-                item
-                for item in database.list_devices()
-                if item["id"] == x_pilot_device_id
-            ),
-            None,
-        )
-        if device is None or device["room_id"] != asset["room_id"]:
+        if asset["kind"] == "assistant":
+            authorized = asset["recipient_device_id"] == device["id"]
+        elif asset["kind"] == "announcement":
+            authorized = (
+                device["room_id"] == asset["room_id"]
+                and "audio" in device["capabilities"]
+            )
+        else:
+            authorized = False
+        if not authorized:
             raise HTTPException(
-                status_code=403, detail="device cannot access this room's audio"
+                status_code=403, detail="device cannot access this audio asset"
             )
         return FileResponse(
             asset["path"],
@@ -3988,12 +4001,23 @@ def create_app(
         x_pilot_sample_rate: int = Header(default=16000, ge=8000, le=48000),
         x_pilot_language: str | None = Header(default=None),
         x_pilot_conversation_id: str | None = Header(default=None),
+        x_pilot_room_id: str | None = Header(default=None),
     ) -> dict[str, Any]:
         device = authenticated_device(device_id, x_pilot_device_id, authorization)
         if "voice" not in device["capabilities"]:
             raise HTTPException(
                 status_code=403, detail="device does not have voice capability"
             )
+        room_id = device["room_id"]
+        if x_pilot_room_id and x_pilot_room_id != room_id:
+            if "portable-client" not in device["capabilities"]:
+                raise HTTPException(
+                    status_code=403,
+                    detail="fixed-room device cannot change conversation room",
+                )
+            if x_pilot_room_id not in registry.rooms:
+                raise HTTPException(status_code=404, detail="room not found")
+            room_id = x_pilot_room_id
         normalized_type = request.headers.get("content-type", "").partition(";")[0]
         if normalized_type.lower() not in {"audio/l16", "application/octet-stream"}:
             raise HTTPException(
@@ -4039,7 +4063,7 @@ def create_app(
         try:
             assistant_result = await conversation_engine.respond(
                 transcript,
-                device["room_id"],
+                room_id,
                 language=x_pilot_language
                 or settings.integrations.home_assistant_assist_language,
                 session_id=x_pilot_conversation_id,
@@ -4059,12 +4083,13 @@ def create_app(
             raise HTTPException(status_code=502, detail=str(error)) from None
         try:
             asset = audio_assets.create(
-                device["room_id"],
+                room_id,
                 "assistant",
                 synthesized.filename,
                 synthesized.content_type,
                 synthesized.content,
                 300,
+                device_id,
             )
         except AudioAssetError as error:
             raise HTTPException(status_code=422, detail=str(error)) from None
@@ -4073,14 +4098,14 @@ def create_app(
         event = database.record_client_event(
             "pilot.assistant.completed.v1",
             assistant_client_payload(structured),
-            room_id=device["room_id"],
+            room_id=room_id,
             device_id=device_id,
             required_capability="voice",
         )
         response.headers["Cache-Control"] = "no-store"
         return {
             "device_id": device_id,
-            "room_id": device["room_id"],
+            "room_id": room_id,
             "transcript": transcript,
             **structured,
             "audio": {

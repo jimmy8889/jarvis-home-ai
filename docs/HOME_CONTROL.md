@@ -45,6 +45,23 @@ four bounded scalar parameters:
 }
 ```
 
+Colour-capable lights advertise `set_color`. Pilot accepts either a bounded
+named colour or an RGB triplet, with an optional brightness percentage:
+
+```json
+{
+  "room_id": "office",
+  "entity_id": "light.office_lamp",
+  "action": "set_color",
+  "parameters": {"color": "blue", "brightness": 40}
+}
+```
+
+Named colours are normalized by Pilot to fixed RGB values. Custom shades use
+`red`, `green`, and `blue` integer parameters from 0 through 255. Home
+Assistant service names and arbitrary service data are never accepted from a
+client or model.
+
 Pilot independently resolves the entity from its normalized catalogue and
 does not trust client-supplied domain or service names.
 
@@ -52,6 +69,12 @@ does not trust client-supplied domain or service names.
 
 Lights, switches, fans and climate are low-risk. Covers and scenes are
 medium-risk. Locks, alarm panels and garage covers are high-risk.
+
+Assistant light commands use the same governed action service. They require a
+registered device with `home-control`, resolve only a curated light with
+authoritative room metadata, and create the same reconciliation and audit
+records as a direct client action. An ambiguous, excluded, stale, unavailable,
+inferred-room, or colour-incompatible light fails closed.
 
 A high-risk request returns HTTP 202 and a pending action. The same device
 must confirm the action within 120 seconds. Confirmation claims the request

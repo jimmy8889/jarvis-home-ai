@@ -1,0 +1,35 @@
+{
+  "schema_version": "pilot.home-presentation-overrides.v1",
+  "overrides": [
+    {
+      "entity_id": "light.james_office",
+      "exposure_policy": "include",
+      "room_id": "office",
+      "display_name": "Office lights",
+      "category": "control",
+      "section": "Lighting",
+      "control": "light",
+      "reason": "Curated room-level light group for deterministic Pilot control"
+    },
+    {
+      "entity_id": "light.master_bedroom",
+      "exposure_policy": "include",
+      "room_id": "bedroom",
+      "display_name": "Bedroom lights",
+      "category": "control",
+      "section": "Lighting",
+      "control": "light",
+      "reason": "Curated room-level light group for deterministic Pilot control"
+    },
+    {
+      "entity_id": "light.media_room",
+      "exposure_policy": "include",
+      "room_id": "media-room",
+      "display_name": "Media room lights",
+      "category": "control",
+      "section": "Lighting",
+      "control": "light",
+      "reason": "Curated room-level light group for deterministic Pilot control"
+    }
+  ]
+}

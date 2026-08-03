@@ -73,6 +73,33 @@ class StorageTests(unittest.TestCase):
         with self.assertRaises(KeyError):
             self.store.update_device_capabilities("missing", ["display"])
 
+    def test_assistant_audio_recipient_binding_is_private_and_idempotent(self) -> None:
+        asset = self.store.create_audio_asset(
+            "asset-1",
+            "office",
+            "assistant",
+            "reply.wav",
+            "audio/wav",
+            "0" * 64,
+            16,
+            "/tmp/reply.wav",
+            "2099-01-01T00:00:00+00:00",
+        )
+        self.assertIsNone(asset["recipient_device_id"])
+
+        bound = self.store.bind_audio_asset_recipient("asset-1", "office-n150")
+        self.assertEqual(bound["recipient_device_id"], "office-n150")
+        self.assertEqual(
+            self.store.bind_audio_asset_recipient("asset-1", "office-n150"),
+            bound,
+        )
+
+        self.store.register_device(
+            "office-peer", "office", "Office peer", ["audio"]
+        )
+        with self.assertRaises(PermissionError):
+            self.store.bind_audio_asset_recipient("asset-1", "office-peer")
+
     def test_bootstrap_grant_is_bound_and_single_use(self) -> None:
         grant = self.store.create_bootstrap_grant(
             "new-office", "office", "New Office", ["voice", "audio"], 600
@@ -333,6 +360,64 @@ class StorageTests(unittest.TestCase):
         self.assertIn("area_source", entity_columns)
         self.assertIn("client_events", tables)
         self.assertIn("home_entity_presentations", tables)
+
+    def test_legacy_audio_assets_gain_private_recipient_column(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "pilot.db"
+            connection = sqlite3.connect(path)
+            connection.executescript(
+                """
+                CREATE TABLE rooms (
+                    id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    response_player_id TEXT NOT NULL,
+                    default_music_player_id TEXT NOT NULL,
+                    default_device_id TEXT NOT NULL DEFAULT '',
+                    agent_url TEXT NOT NULL DEFAULT ''
+                );
+                CREATE TABLE devices (
+                    id TEXT PRIMARY KEY,
+                    room_id TEXT NOT NULL REFERENCES rooms(id),
+                    name TEXT NOT NULL,
+                    token_hash TEXT NOT NULL,
+                    capabilities_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    last_seen_at TEXT NOT NULL,
+                    credential_revision INTEGER NOT NULL DEFAULT 1,
+                    revoked_at TEXT
+                );
+                CREATE TABLE audio_assets (
+                    id TEXT PRIMARY KEY,
+                    room_id TEXT NOT NULL REFERENCES rooms(id),
+                    kind TEXT NOT NULL,
+                    filename TEXT NOT NULL,
+                    content_type TEXT NOT NULL,
+                    sha256 TEXT NOT NULL,
+                    size_bytes INTEGER NOT NULL,
+                    path TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    expires_at TEXT NOT NULL
+                );
+                """
+            )
+            connection.commit()
+            connection.close()
+
+            migrated = Store(str(path), settings())
+            migrated.close()
+            connection = sqlite3.connect(path)
+            columns = {
+                row[1]
+                for row in connection.execute("PRAGMA table_info(audio_assets)")
+            }
+            indexes = {
+                row[1]
+                for row in connection.execute("PRAGMA index_list(audio_assets)")
+            }
+            connection.close()
+
+        self.assertIn("recipient_device_id", columns)
+        self.assertIn("audio_assets_recipient_created", indexes)
 
 
 if __name__ == "__main__":

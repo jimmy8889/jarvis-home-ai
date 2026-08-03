@@ -39,6 +39,7 @@ final class DriveModel {
     var activeAction: VehicleAction?
     var isLoading = false
     var isOffline = false
+    var historyUnavailable = false
     var pairingText = ""
     var errorMessage: String?
     var lastRefresh: Date?
@@ -184,27 +185,29 @@ final class DriveModel {
             guard let vehicleID = selectedVehicleID else {
                 throw PilotClientError.invalidResponse
             }
-            async let overviewRequest = api.overview(vehicleID)
-            async let drivesRequest = api.drives(vehicleID)
-            async let chargesRequest = api.charges(vehicleID)
-            async let healthRequest = api.batteryHealth(vehicleID)
-            async let destinationRequest = api.destinations(vehicleID)
-            let results = try await (
-                overviewRequest,
-                drivesRequest,
-                chargesRequest,
-                healthRequest,
-                destinationRequest
-            )
-            overview = results.0
-            drives = results.1.items
-            charges = results.2.items
-            batteryHealth = results.3
-            destinations = results.4.items
-            maintenance = try await api.maintenance(
+            // Live Home Assistant state is the primary Car experience. The
+            // TeslaMate history adapter is deliberately optional: an outage
+            // must not make an otherwise healthy vehicle appear unavailable.
+            let loadedOverview = try await api.overview(vehicleID)
+            overview = loadedOverview
+            if let loadedDestinations = try? await api.destinations(vehicleID) {
+                destinations = loadedDestinations.items
+            }
+            if let loadedMaintenance = try? await api.maintenance(
                 vehicleID,
-                odometerKM: results.0.number("odometer_km")
-            ).items
+                odometerKM: loadedOverview.number("odometer_km")
+            ) {
+                maintenance = loadedMaintenance.items
+            }
+            let loadedDrives = try? await api.drives(vehicleID)
+            let loadedCharges = try? await api.charges(vehicleID)
+            let loadedHealth = try? await api.batteryHealth(vehicleID)
+            if let loadedDrives { drives = loadedDrives.items }
+            if let loadedCharges { charges = loadedCharges.items }
+            if let loadedHealth { batteryHealth = loadedHealth }
+            historyUnavailable = loadedDrives == nil
+                || loadedCharges == nil
+                || loadedHealth == nil
             isOffline = false
             lastRefresh = Date()
             saveCache()

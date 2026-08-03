@@ -84,7 +84,9 @@ struct ChargingView: View {
         VStack(alignment: .leading, spacing: 12) {
             Text("History").font(.headline)
             if model.charges.isEmpty {
-                Text("No charging history is currently available from TeslaMate.")
+                Text(model.historyUnavailable
+                    ? "Live charging state is connected. TeslaMate charging history is temporarily offline."
+                    : "No TeslaMate charging sessions have been recorded yet.")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             } else {

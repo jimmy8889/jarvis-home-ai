@@ -23,7 +23,9 @@ struct DrivesView: View {
                         symbol: "road.lanes",
                         title: search.isEmpty ? "No drives yet" : "No matching drives",
                         detail: search.isEmpty
-                            ? "TeslaMate history will appear when the read-only adapter is available."
+                            ? (model.historyUnavailable
+                                ? "Live vehicle data is connected. TeslaMate drive history is temporarily offline."
+                                : "TeslaMate history will appear after the first recorded drive.")
                             : "Try a different place or address."
                     )
                 } else {

@@ -6,6 +6,8 @@
   credential bundles for Pilot Drive and other managed Pilot clients.
 - Routed Pilot Drive through the public Pilot Core HTTPS endpoint and added
   automatic migration from legacy apps01 LAN addresses.
+- Kept Pilot Drive live vehicle state available when the optional TeslaMate
+  drive, charging, or battery-history service is offline.
 
 ## 0.30.0 — 2026-08-03
 

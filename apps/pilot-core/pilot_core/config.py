@@ -91,6 +91,8 @@ class IntegrationSettings:
     proxmox_url: str = ""
     proxmox_token_id: str = ""
     proxmox_token_secret_env: str = "PROXMOX_TOKEN_SECRET"
+    proxmox_migration_token_id: str = ""
+    proxmox_migration_token_secret_env: str = "PROXMOX_MIGRATION_TOKEN_SECRET"
     proxmox_verify_tls: bool = True
     truenas_url: str = ""
     truenas_token_env: str = "TRUENAS_API_KEY"
@@ -730,6 +732,14 @@ def load_settings(path: str | Path) -> Settings:
         proxmox_token_secret_env=str(
             integration_values.get(
                 "proxmox_token_secret_env", "PROXMOX_TOKEN_SECRET"
+            )
+        ).strip(),
+        proxmox_migration_token_id=str(
+            integration_values.get("proxmox_migration_token_id", "")
+        ).strip(),
+        proxmox_migration_token_secret_env=str(
+            integration_values.get(
+                "proxmox_migration_token_secret_env", "PROXMOX_MIGRATION_TOKEN_SECRET"
             )
         ).strip(),
         proxmox_verify_tls=bool(

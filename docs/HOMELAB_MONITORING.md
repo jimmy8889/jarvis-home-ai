@@ -1,5 +1,22 @@
 # Pilot Home Lab Monitoring
 
+## Drill-down and guarded migration
+
+Pilot clients can drill into each Proxmox node and workload. The workload view
+includes CPU, memory, uptime, cumulative disk and network I/O, tags, and its
+owning node. Host agents add CPU/package temperatures that Proxmox does not
+expose consistently.
+
+Migration is separate from monitoring. The existing monitoring token remains
+read-only. Enabling it requires a second token through
+`proxmox_migration_token_id` and `PROXMOX_MIGRATION_TOKEN_SECRET`. Pilot rejects
+offline destinations, locked guests, and node-local storage, then requires a
+single-use 120-second confirmation before submitting the operation.
+
+TrueNAS uses a dedicated API key and reports system identity, pool health,
+allocated/free capacity, disks, SMART state, disk temperature and active
+alerts. Store the key only in the `TRUENAS_API_KEY_FILE` deployment secret.
+
 Pilot Core 0.32 introduces one normalized, read-only contract for home-lab
 health. Clients consume Pilot rather than retaining Proxmox or TrueNAS secrets.
 

@@ -27,6 +27,14 @@ struct PilotAPI: Sendable {
         return try JSONDecoder().decode(DeviceMediaEnvelope.self, from: data)
     }
 
+    func phoneStreamTicket() async throws -> PhoneStreamTicket {
+        let data = try await request(
+            path: "v1/devices/\(deviceID)/media/stream-ticket",
+            method: "POST"
+        )
+        return try JSONDecoder().decode(PhoneStreamTicket.self, from: data)
+    }
+
     func manifest() async throws -> PilotClientManifest {
         let data = try await request(path: "v1/devices/\(deviceID)/manifest")
         return try JSONDecoder().decode(PilotClientManifest.self, from: data)
@@ -61,6 +69,25 @@ struct PilotAPI: Sendable {
             queryItems: force ? [URLQueryItem(name: "force", value: "true")] : []
         )
         return try JSONDecoder().decode(HomeLabSnapshot.self, from: data)
+    }
+
+    func prepareMigration(_ workload: ProxmoxWorkload, to targetNode: String) async throws -> HomeLabMigrationPlan {
+        guard let vmid = workload.vmid else { throw PilotAPIError.invalidResponse }
+        let body = try JSONSerialization.data(withJSONObject: [
+            "source_node": workload.node, "target_node": targetNode,
+            "kind": workload.kind, "vmid": vmid,
+            "online": workload.status == "running",
+        ])
+        let data = try await request(
+            path: "v1/devices/\(deviceID)/homelab/migrations", method: "POST", body: body
+        )
+        return try JSONDecoder().decode(HomeLabMigrationPlan.self, from: data)
+    }
+
+    func confirmMigration(_ id: String) async throws {
+        _ = try await request(
+            path: "v1/devices/\(deviceID)/homelab/migrations/\(id)/confirm", method: "POST"
+        )
     }
 
     func dashboardAction(_ action: String, value: String) async throws {

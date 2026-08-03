@@ -1,5 +1,17 @@
 import Foundation
 
+struct PhoneStreamTicket: Codable, Sendable {
+    let schemaVersion: String
+    let url: String
+    let expiresAt: String
+
+    enum CodingKeys: String, CodingKey {
+        case url
+        case schemaVersion = "schema_version"
+        case expiresAt = "expires_at"
+    }
+}
+
 struct HomeLabSnapshot: Codable, Sendable {
     let schemaVersion: String
     let generatedAt: String
@@ -147,6 +159,11 @@ struct ProxmoxWorkload: Codable, Identifiable, Sendable {
     let memoryUsedBytes: Int64?
     let memoryTotalBytes: Int64?
     let uptimeSeconds: Int?
+    let diskReadBytes: Int64?
+    let diskWriteBytes: Int64?
+    let networkInBytes: Int64?
+    let networkOutBytes: Int64?
+    let tags: [String]?
 
     enum CodingKeys: String, CodingKey {
         case id, vmid, name, kind, node, status
@@ -155,6 +172,27 @@ struct ProxmoxWorkload: Codable, Identifiable, Sendable {
         case memoryUsedBytes = "memory_used_bytes"
         case memoryTotalBytes = "memory_total_bytes"
         case uptimeSeconds = "uptime_seconds"
+        case diskReadBytes = "disk_read_bytes"
+        case diskWriteBytes = "disk_write_bytes"
+        case networkInBytes = "network_in_bytes"
+        case networkOutBytes = "network_out_bytes"
+        case tags
+    }
+}
+
+struct HomeLabMigrationPlan: Codable, Sendable {
+    let id: String
+    let status: String
+    let sourceNode: String
+    let targetNode: String
+    let online: Bool
+    let expiresInSeconds: Int
+
+    enum CodingKeys: String, CodingKey {
+        case id, status, online
+        case sourceNode = "source_node"
+        case targetNode = "target_node"
+        case expiresInSeconds = "expires_in_seconds"
     }
 }
 

@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 import json
 import math
 import ssl
+import secrets
 import time
 from typing import Any
 from urllib.parse import urlparse, urlunparse
@@ -88,6 +89,46 @@ class ProxmoxMonitor:
         except (httpx.HTTPError, ValueError) as error:
             raise HomeLabProviderError("Proxmox is unavailable") from error
 
+    async def _post(self, path: str, data: dict[str, Any]) -> Any:
+        token = read_secret(self.settings.proxmox_migration_token_secret_env)
+        if not self.settings.proxmox_url or not self.settings.proxmox_migration_token_id or not token:
+            raise HomeLabProviderError("Proxmox migration is not configured")
+        try:
+            async with httpx.AsyncClient(timeout=30, verify=self.settings.proxmox_verify_tls) as client:
+                response = await client.post(
+                    f"{self.settings.proxmox_url}/api2/json{path}", data=data,
+                    headers={"Authorization": f"PVEAPIToken={self.settings.proxmox_migration_token_id}={token}"},
+                )
+                response.raise_for_status()
+                return response.json().get("data")
+        except (httpx.HTTPError, ValueError) as error:
+            raise HomeLabProviderError("Proxmox migration request failed") from error
+
+    async def node_detail(self, node: str) -> dict[str, Any]:
+        status = await self._get(f"/nodes/{node}/status")
+        if not isinstance(status, dict):
+            raise HomeLabProviderError("Proxmox returned invalid node detail")
+        return {"node": node, "status": status}
+
+    async def workload_detail(self, node: str, kind: str, vmid: int) -> dict[str, Any]:
+        if kind not in {"qemu", "lxc"}:
+            raise HomeLabProviderError("Unsupported workload kind")
+        current, config = await asyncio.gather(
+            self._get(f"/nodes/{node}/{kind}/{vmid}/status/current"),
+            self._get(f"/nodes/{node}/{kind}/{vmid}/config"),
+        )
+        return {"node": node, "kind": kind, "vmid": vmid, "status": current, "config": config}
+
+    async def migrate(self, node: str, kind: str, vmid: int, target: str, online: bool) -> Any:
+        if kind not in {"qemu", "lxc"}:
+            raise HomeLabProviderError("Unsupported workload kind")
+        data: dict[str, Any] = {"target": target}
+        if kind == "qemu":
+            data["online"] = 1 if online else 0
+        elif online:
+            data["restart"] = 1
+        return await self._post(f"/nodes/{node}/{kind}/{vmid}/migrate", data)
+
     async def snapshot(self) -> dict[str, Any]:
         cluster, resources = await asyncio.gather(
             self._get("/cluster/status"),
@@ -121,6 +162,11 @@ class ProxmoxMonitor:
                         "disk_total_bytes": item.get("maxdisk"),
                         "disk_ratio": _ratio(item.get("disk"), item.get("maxdisk")),
                         "uptime_seconds": item.get("uptime"),
+                        "disk_read_bytes": item.get("diskread"),
+                        "disk_write_bytes": item.get("diskwrite"),
+                        "network_in_bytes": item.get("netin"),
+                        "network_out_bytes": item.get("netout"),
+                        "tags": str(item.get("tags") or "").split(";") if item.get("tags") else [],
                     }
                 )
             elif kind in {"qemu", "lxc"}:
@@ -350,6 +396,60 @@ class HomeLabService:
         self._cached_monotonic = 0.0
         self._lock = asyncio.Lock()
         self._agents: dict[str, dict[str, Any]] = {}
+        self._migrations: dict[str, dict[str, Any]] = {}
+
+    async def node_detail(self, node: str) -> dict[str, Any]:
+        detail = await self.proxmox.node_detail(node)
+        detail["agent"] = next(
+            (agent for agent in self._agents.values() if agent.get("hostname") == node), None
+        )
+        return detail
+
+    async def workload_detail(self, node: str, kind: str, vmid: int) -> dict[str, Any]:
+        return await self.proxmox.workload_detail(node, kind, vmid)
+
+    async def prepare_migration(
+        self, *, device_id: str, node: str, kind: str, vmid: int, target: str, online: bool
+    ) -> dict[str, Any]:
+        snapshot = await self.snapshot(force=True)
+        nodes = {item["name"]: item for item in snapshot["providers"]["proxmox"]["nodes"]}
+        workload = next(
+            (item for item in snapshot["providers"]["proxmox"]["workloads"] if item.get("vmid") == vmid and item.get("kind") == kind and item.get("node") == node), None
+        )
+        if workload is None or target not in nodes or nodes[target].get("status") != "online" or target == node:
+            raise HomeLabProviderError("Migration source or target is not eligible")
+        detail = await self.proxmox.workload_detail(node, kind, vmid)
+        config = detail.get("config") or {}
+        locked = config.get("lock")
+        local_disks = [
+            key for key, value in config.items()
+            if key.startswith(("scsi", "sata", "virtio", "ide", "rootfs", "mp"))
+            and isinstance(value, str) and value.startswith(("local:", "local-lvm:"))
+        ]
+        if locked or local_disks:
+            reason = "workload is locked" if locked else "workload uses node-local storage"
+            raise HomeLabProviderError(f"Migration is not safe: {reason}")
+        migration_id = secrets.token_urlsafe(18)
+        expires_at = time.monotonic() + 120
+        self._migrations[migration_id] = {
+            "device_id": device_id, "node": node, "kind": kind, "vmid": vmid,
+            "target": target, "online": online, "expires": expires_at,
+        }
+        return {
+            "id": migration_id, "status": "confirmation_required", "workload": workload,
+            "source_node": node, "target_node": target, "online": online,
+            "expires_in_seconds": 120,
+        }
+
+    async def confirm_migration(self, migration_id: str, device_id: str) -> dict[str, Any]:
+        request = self._migrations.pop(migration_id, None)
+        if request is None or request["device_id"] != device_id or request["expires"] < time.monotonic():
+            raise HomeLabProviderError("Migration confirmation is invalid or expired")
+        upid = await self.proxmox.migrate(
+            request["node"], request["kind"], request["vmid"], request["target"], request["online"]
+        )
+        self._cached = None
+        return {"id": migration_id, "status": "accepted", "task": upid, **{k: v for k, v in request.items() if k != "expires"}}
 
     @property
     def configured(self) -> bool:

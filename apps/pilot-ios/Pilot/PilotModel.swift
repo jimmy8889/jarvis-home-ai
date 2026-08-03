@@ -208,6 +208,10 @@ final class PilotModel {
     @discardableResult
     func preparePhonePlaybackIfNeeded() async -> Bool {
         guard musicPlaysOnThisIPhone else { return true }
+        if let ticket = try? await api().phoneStreamTicket(),
+           await phonePlayback.connect(serverURL: ticket.url, deviceID: deviceID) {
+            return true
+        }
         let defaults = UserDefaults.standard
         let sendspinURL: String
         if let configured = defaults.string(forKey: "pilot.sendspinURL"),
@@ -220,7 +224,18 @@ final class PilotModel {
                 .absoluteString ?? "ws://10.0.2.72:8927/sendspin"
             defaults.set(sendspinURL, forKey: "pilot.sendspinURL")
         }
+        guard Self.isPrivateCoreURL(activeCoreURL) else {
+            return false
+        }
         return await phonePlayback.connect(serverURL: sendspinURL, deviceID: deviceID)
+    }
+
+    private static func isPrivateCoreURL(_ value: String) -> Bool {
+        guard let host = URL(string: value)?.host else { return false }
+        return host == "localhost" || host.hasPrefix("10.") || host.hasPrefix("192.168.")
+            || host.hasPrefix("172.16.") || host.hasPrefix("172.17.")
+            || host.hasPrefix("172.18.") || host.hasPrefix("172.19.")
+            || host.hasPrefix("172.2") || host.hasPrefix("172.3")
     }
 
     var musicDestinationTitle: String {
@@ -376,6 +391,13 @@ final class PilotModel {
         } catch {
             homelabError = Self.friendlyMessage(for: error)
         }
+    }
+
+    func migrate(_ workload: ProxmoxWorkload, to targetNode: String) async throws {
+        let plan = try await api().prepareMigration(workload, to: targetNode)
+        try await api().confirmMigration(plan.id)
+        try? await Task.sleep(for: .seconds(1))
+        await refreshHomeLab(force: true)
     }
 
     func refreshDashboard(silent: Bool = false) async {

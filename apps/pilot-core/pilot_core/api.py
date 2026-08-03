@@ -9,6 +9,7 @@ from pathlib import Path
 import secrets
 import time
 from typing import Any, Literal
+from urllib.parse import urlencode, urlparse, urlunparse
 
 import segno
 from fastapi import (
@@ -25,6 +26,7 @@ from fastapi import (
 )
 from fastapi.responses import FileResponse, PlainTextResponse, RedirectResponse
 from pydantic import BaseModel, Field, model_validator
+from websockets.asyncio.client import connect as websocket_connect
 
 from . import __version__
 from .assist_focus import AssistFocusBridge
@@ -46,7 +48,7 @@ from .home_actions import (
     HomeActions,
 )
 from .home_intelligence import HomeIntelligence, HomeResolutionError
-from .homelab import HomeLabService
+from .homelab import HomeLabProviderError, HomeLabService
 from .integrations import IntegrationRequestFailed, IntegrationUnavailable, Integrations
 from .media_state import MediaStateReader
 from .meetings import (
@@ -120,6 +122,14 @@ class HomeLabTelemetryInput(BaseModel):
         default_factory=list, max_length=128
     )
     gpus: list[HomeLabGPUInput] = Field(default_factory=list, max_length=16)
+
+
+class HomeLabMigrationInput(BaseModel):
+    source_node: str = Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9._-]+$")
+    target_node: str = Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9._-]+$")
+    kind: Literal["qemu", "lxc"]
+    vmid: int = Field(ge=100, le=9_999_999)
+    online: bool = True
 
 
 class HomeEntityPresentationUpdate(BaseModel):
@@ -705,6 +715,8 @@ def create_app(
     hub = EventHub()
     device_hub = DeviceHub()
     vehicle_action_tasks: set[asyncio.Task[Any]] = set()
+    media_stream_tickets: dict[str, dict[str, Any]] = {}
+    media_stream_ticket_lock = asyncio.Lock()
     dashboard_directory = Path(__file__).with_name("dashboard")
     focus_bridge: AssistFocusBridge | None = None
 
@@ -861,6 +873,7 @@ def create_app(
                 {"home-read", "display", "portable-client", "homelab-read"}
                 & capabilities
             ),
+            "homelab_control": "homelab-control" in capabilities,
         }
 
     def device_manifest_payload(device: dict[str, Any]) -> dict[str, Any]:
@@ -2549,6 +2562,69 @@ def create_app(
         )
         return {"status": "accepted"}
 
+    @app.get("/v1/devices/{device_id}/homelab/nodes/{node}")
+    async def device_homelab_node(
+        device_id: str, node: str,
+        x_pilot_device_id: str = Header(), authorization: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        device = authenticated_device(device_id, x_pilot_device_id, authorization)
+        if not device_features(device)["homelab"]:
+            raise HTTPException(status_code=403, detail="homelab-read capability required")
+        try:
+            return await homelab.node_detail(node)
+        except HomeLabProviderError as error:
+            raise HTTPException(status_code=502, detail=str(error)) from None
+
+    @app.get("/v1/devices/{device_id}/homelab/workloads/{node}/{kind}/{vmid}")
+    async def device_homelab_workload(
+        device_id: str, node: str, kind: str, vmid: int,
+        x_pilot_device_id: str = Header(), authorization: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        device = authenticated_device(device_id, x_pilot_device_id, authorization)
+        if not device_features(device)["homelab"]:
+            raise HTTPException(status_code=403, detail="homelab-read capability required")
+        try:
+            return await homelab.workload_detail(node, kind, vmid)
+        except HomeLabProviderError as error:
+            raise HTTPException(status_code=502, detail=str(error)) from None
+
+    @app.post("/v1/devices/{device_id}/homelab/migrations", status_code=202)
+    async def prepare_device_homelab_migration(
+        device_id: str, request: HomeLabMigrationInput,
+        x_pilot_device_id: str = Header(), authorization: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        device = authenticated_device(device_id, x_pilot_device_id, authorization)
+        require_device_capability(device, "homelab-control")
+        try:
+            result = await homelab.prepare_migration(
+                device_id=device_id, node=request.source_node, target=request.target_node,
+                kind=request.kind, vmid=request.vmid, online=request.online,
+            )
+        except HomeLabProviderError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from None
+        database.record_client_event(
+            "pilot.homelab.migration.requested.v1", result,
+            device_id=device_id, required_capability="homelab-control",
+        )
+        return result
+
+    @app.post("/v1/devices/{device_id}/homelab/migrations/{migration_id}/confirm", status_code=202)
+    async def confirm_device_homelab_migration(
+        device_id: str, migration_id: str,
+        x_pilot_device_id: str = Header(), authorization: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        device = authenticated_device(device_id, x_pilot_device_id, authorization)
+        require_device_capability(device, "homelab-control")
+        try:
+            result = await homelab.confirm_migration(migration_id, device_id)
+        except HomeLabProviderError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from None
+        database.record_client_event(
+            "pilot.homelab.migration.accepted.v1", result,
+            device_id=device_id, required_capability="homelab-control",
+        )
+        return result
+
     @app.get("/v1/devices/{device_id}/vehicles/{vehicle_id}")
     async def device_vehicle(
         device_id: str,
@@ -3856,6 +3932,97 @@ def create_app(
             "rooms": registry.list_rooms(),
             "media": await media_states.snapshot(),
         }
+
+    @app.post("/v1/devices/{device_id}/media/stream-ticket", status_code=201)
+    async def device_media_stream_ticket(
+        device_id: str,
+        response: Response,
+        x_pilot_device_id: str = Header(),
+        authorization: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        device = authenticated_device(device_id, x_pilot_device_id, authorization)
+        require_device_capability(device, "media-control")
+        target = next(
+            (
+                player.endpoint
+                for player in registry.players.values()
+                if player.enabled and player.protocol == "sendspin" and player.endpoint
+            ),
+            "",
+        )
+        if not target:
+            raise HTTPException(status_code=503, detail="Sendspin is not configured")
+        ticket = secrets.token_urlsafe(32)
+        expires_at = datetime.now(UTC) + timedelta(seconds=90)
+        async with media_stream_ticket_lock:
+            now = time.monotonic()
+            media_stream_tickets.clear() if len(media_stream_tickets) > 1_000 else None
+            media_stream_tickets[ticket] = {
+                "device_id": device_id,
+                "target": target,
+                "expires": now + 90,
+            }
+        public = settings.server.public_client_base_url.rstrip("/")
+        if not public:
+            public = str(response.headers.get("host") or "").rstrip("/")
+        parsed = urlparse(public)
+        scheme = "wss" if parsed.scheme == "https" else "ws"
+        stream_url = urlunparse(
+            (scheme, parsed.netloc, "/v1/media/sendspin", "", urlencode({"ticket": ticket}), "")
+        )
+        response.headers["Cache-Control"] = "private, no-store"
+        return {
+            "schema_version": "pilot.media-stream.v1",
+            "url": stream_url,
+            "expires_at": expires_at.isoformat(),
+        }
+
+    @app.websocket("/v1/media/sendspin")
+    async def sendspin_stream(socket: WebSocket, ticket: str = Query()) -> None:
+        async with media_stream_ticket_lock:
+            grant = media_stream_tickets.pop(ticket, None)
+        if grant is None or float(grant["expires"]) < time.monotonic():
+            await socket.close(code=1008, reason="invalid or expired stream ticket")
+            return
+        await socket.accept()
+        try:
+            async with websocket_connect(
+                str(grant["target"]), open_timeout=10, close_timeout=3,
+                max_size=8_000_000, ping_interval=20, ping_timeout=20,
+            ) as upstream:
+                async def client_to_upstream() -> None:
+                    while True:
+                        message = await socket.receive()
+                        if message["type"] == "websocket.disconnect":
+                            return
+                        if message.get("text") is not None:
+                            await upstream.send(message["text"])
+                        elif message.get("bytes") is not None:
+                            await upstream.send(message["bytes"])
+
+                async def upstream_to_client() -> None:
+                    async for message in upstream:
+                        if isinstance(message, bytes):
+                            await socket.send_bytes(message)
+                        else:
+                            await socket.send_text(message)
+
+                async with asyncio.timeout(12 * 60 * 60):
+                    tasks = {
+                        asyncio.create_task(client_to_upstream()),
+                        asyncio.create_task(upstream_to_client()),
+                    }
+                    done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+                    for task in pending:
+                        task.cancel()
+                    await asyncio.gather(*done, *pending, return_exceptions=True)
+        except (OSError, TimeoutError, WebSocketDisconnect):
+            pass
+        finally:
+            try:
+                await socket.close()
+            except RuntimeError:
+                pass
 
     @app.post("/v1/devices/{device_id}/media")
     async def device_media_control(

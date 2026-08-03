@@ -1,5 +1,13 @@
 # Pilot Drive
 
+## Sleeping and offline vehicles
+
+Core persists the last normalized vehicle snapshot and merges it only into
+missing live fields. Pilot Drive caches the vehicle list, selected vehicle,
+overview and history atomically. A sleeping Tesla or provider outage therefore
+retains the last SOC, stored energy and charge-limit requirement, clearly
+marked stale rather than being presented as live telemetry.
+
 Pilot Drive is a separate native SwiftUI application for iPhone and iPad on
 iOS/iPadOS 17 or later. Its bundle identifier is
 `com.jameshazell.pilotdrive`. The app has four surfaces: Car, Drives,

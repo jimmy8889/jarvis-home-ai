@@ -437,6 +437,12 @@ class Store:
                 );
                 CREATE INDEX IF NOT EXISTS vehicle_action_audit_request
                     ON vehicle_action_audit(request_id, id);
+                CREATE TABLE IF NOT EXISTS vehicle_snapshots (
+                    vehicle_id TEXT PRIMARY KEY,
+                    payload_json TEXT NOT NULL,
+                    observed_at TEXT,
+                    saved_at TEXT NOT NULL
+                );
                 """
             )
             room_columns = {
@@ -2943,6 +2949,37 @@ class Store:
             "completed_at": row["completed_at"],
             "expires_at": row["expires_at"],
         }
+
+    def save_vehicle_snapshot(self, vehicle_id: str, payload: dict[str, Any]) -> None:
+        now = datetime.now(UTC).isoformat()
+        with self._lock, self._connection:
+            self._connection.execute(
+                """INSERT INTO vehicle_snapshots
+                   (vehicle_id, payload_json, observed_at, saved_at)
+                   VALUES (?, ?, ?, ?)
+                   ON CONFLICT(vehicle_id) DO UPDATE SET
+                     payload_json = excluded.payload_json,
+                     observed_at = excluded.observed_at,
+                     saved_at = excluded.saved_at""",
+                (
+                    vehicle_id,
+                    json.dumps(payload, separators=(",", ":"), sort_keys=True),
+                    payload.get("observed_at"),
+                    now,
+                ),
+            )
+
+    def get_vehicle_snapshot(self, vehicle_id: str) -> dict[str, Any] | None:
+        with self._lock:
+            row = self._connection.execute(
+                "SELECT payload_json, saved_at FROM vehicle_snapshots WHERE vehicle_id = ?",
+                (vehicle_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        payload = json.loads(row["payload_json"])
+        payload["cached_at"] = row["saved_at"]
+        return payload
 
     def save_vehicle_destination(
         self,

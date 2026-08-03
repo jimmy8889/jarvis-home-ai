@@ -413,6 +413,8 @@ struct VehicleAction: Codable, Identifiable, Sendable {
 }
 
 struct DriveCache: Codable, Sendable {
+    let vehicles: [VehicleSummary]
+    let selectedVehicleID: String?
     let overview: VehicleOverview?
     let drives: [VehicleDrive]
     let charges: [VehicleCharge]
@@ -420,6 +422,41 @@ struct DriveCache: Codable, Sendable {
     let destinations: [SavedDestination]
     let maintenance: [MaintenanceRecord]
     let savedAt: Date
+
+    init(
+        vehicles: [VehicleSummary] = [], selectedVehicleID: String? = nil,
+        overview: VehicleOverview?, drives: [VehicleDrive], charges: [VehicleCharge],
+        batteryHealth: BatteryHealth?, destinations: [SavedDestination],
+        maintenance: [MaintenanceRecord], savedAt: Date
+    ) {
+        self.vehicles = vehicles
+        self.selectedVehicleID = selectedVehicleID
+        self.overview = overview
+        self.drives = drives
+        self.charges = charges
+        self.batteryHealth = batteryHealth
+        self.destinations = destinations
+        self.maintenance = maintenance
+        self.savedAt = savedAt
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case vehicles, selectedVehicleID, overview, drives, charges, batteryHealth
+        case destinations, maintenance, savedAt
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        vehicles = try values.decodeIfPresent([VehicleSummary].self, forKey: .vehicles) ?? []
+        selectedVehicleID = try values.decodeIfPresent(String.self, forKey: .selectedVehicleID)
+        overview = try values.decodeIfPresent(VehicleOverview.self, forKey: .overview)
+        drives = try values.decodeIfPresent([VehicleDrive].self, forKey: .drives) ?? []
+        charges = try values.decodeIfPresent([VehicleCharge].self, forKey: .charges) ?? []
+        batteryHealth = try values.decodeIfPresent(BatteryHealth.self, forKey: .batteryHealth)
+        destinations = try values.decodeIfPresent([SavedDestination].self, forKey: .destinations) ?? []
+        maintenance = try values.decodeIfPresent([MaintenanceRecord].self, forKey: .maintenance) ?? []
+        savedAt = try values.decodeIfPresent(Date.self, forKey: .savedAt) ?? .distantPast
+    }
 }
 
 enum Formatters {

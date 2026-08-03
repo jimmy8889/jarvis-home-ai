@@ -115,12 +115,12 @@ def gpus() -> list[dict[str, Any]]:
     return readings
 
 
-def snapshot(hostname: str | None = None) -> dict[str, Any]:
+def snapshot(hostname: str | None = None, role: str = "compute") -> dict[str, Any]:
     memory_used, memory_total = memory()
     disk = shutil.disk_usage("/")
     return {
         "hostname": hostname or socket.gethostname(),
-        "role": "compute",
+        "role": role,
         "cpu_ratio": cpu_ratio(),
         "load_average": list(os.getloadavg()),
         "memory_used_bytes": memory_used,
@@ -155,6 +155,7 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--device-id", required=True)
     result.add_argument("--token-file", required=True)
     result.add_argument("--hostname")
+    result.add_argument("--role", default="compute")
     result.add_argument("--interval", type=max_interval, default=15)
     result.add_argument("--once", action="store_true")
     return result
@@ -179,7 +180,7 @@ def main() -> None:
                 arguments.core_url,
                 arguments.device_id,
                 token,
-                snapshot(arguments.hostname),
+                snapshot(arguments.hostname, arguments.role),
             )
         except (HTTPError, URLError, OSError, RuntimeError) as error:
             print(f"telemetry publish failed: {error}", flush=True)

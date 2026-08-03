@@ -6,7 +6,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 WorkingDirectory=%h/.local/share/pilot-homelab-agent/source
-ExecStart=%h/.local/share/pilot-homelab-agent/venv/bin/python -m pilot_homelab_agent.main --core-url ${PILOT_CORE_URL} --device-id ${PILOT_DEVICE_ID} --token-file %h/.config/pilot-homelab-agent/device-token --interval 15
+ExecStart=%h/.local/share/pilot-homelab-agent/venv/bin/python -m pilot_homelab_agent.main --core-url ${PILOT_CORE_URL} --device-id ${PILOT_DEVICE_ID} --token-file %h/.config/pilot-homelab-agent/device-token --role ${PILOT_ROLE} --interval 15
 EnvironmentFile=%h/.config/pilot-homelab-agent/agent.env
 NoNewPrivileges=true
 PrivateTmp=true

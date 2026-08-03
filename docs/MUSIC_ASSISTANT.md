@@ -1,5 +1,14 @@
 # Music Assistant player
 
+## Remote iPhone playback
+
+`This iPhone` does not expose Music Assistant publicly. A paired client with
+`media-control` requests a 90-second, single-use ticket from Pilot Core. Core
+relays the public authenticated WebSocket to the private Sendspin endpoint;
+the phone never receives provider credentials or a routable Music Assistant
+API. Direct Sendspin fallback is limited to clients configured against a
+private Core address.
+
 The office endpoint uses the official Sendspin headless client as its native
 Music Assistant player.
 

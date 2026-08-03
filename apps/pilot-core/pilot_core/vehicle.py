@@ -271,6 +271,7 @@ class VehicleService:
 
     async def overview(self, vehicle_id: str) -> dict[str, Any]:
         vehicle = self.vehicle(vehicle_id)
+        saved_snapshot = self.store.get_vehicle_snapshot(vehicle_id)
         telemetry = vehicle.telemetry_map()
         states = {
             key: self._state_cache[(vehicle_id, key)]
@@ -292,6 +293,12 @@ class VehicleService:
                 else:
                     errors += 1
         values = {key: self._state_value(key, state) for key, state in states.items()}
+        saved_values = (saved_snapshot or {}).get("state") or {}
+        cached_fields: list[str] = []
+        for key, value in saved_values.items():
+            if values.get(key) is None and value is not None:
+                values[key] = value
+                cached_fields.append(key)
         capacity = vehicle.manual_battery_baseline_kwh
         soc = _finite(values.get("battery_percent"))
         charge_limit = _finite(values.get("charge_limit_percent"))
@@ -328,7 +335,7 @@ class VehicleService:
                 freshness = "fresh" if age <= timedelta(minutes=15) else "stale"
             except ValueError:
                 freshness = "unverified"
-        return {
+        result = {
             "schema_version": "pilot.vehicle.v1",
             "id": vehicle.id,
             "name": vehicle.name,
@@ -342,6 +349,7 @@ class VehicleService:
                     "status": "ok" if errors == 0 else "partial",
                     "configured_entity_count": len(tasks),
                     "available_entity_count": len(states),
+                    "cached_field_count": len(cached_fields),
                 },
                 "teslamate": {
                     "status": "configured"
@@ -350,6 +358,13 @@ class VehicleService:
                 },
             },
         }
+        if states:
+            self.store.save_vehicle_snapshot(vehicle_id, result)
+        elif saved_snapshot:
+            result["freshness"] = "stale"
+            result["observed_at"] = saved_snapshot.get("observed_at")
+            result["providers"]["home_assistant"]["status"] = "cached"
+        return result
 
     async def run_state_updates(self) -> None:
         """Maintain a bounded HA cache without ever issuing a wake command."""

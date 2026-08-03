@@ -2,6 +2,10 @@ import SwiftUI
 
 struct HomeLabView: View {
     @Environment(PilotModel.self) private var model
+    @State private var selectedNode: ProxmoxNode?
+    @State private var selectedWorkload: ProxmoxWorkload?
+    @State private var pendingMigration: ProxmoxWorkload?
+    @State private var pendingTargetNode = ""
 
     private let columns = [GridItem(.adaptive(minimum: 260), spacing: 14)]
 
@@ -24,6 +28,25 @@ struct HomeLabView: View {
         .navigationTitle("Home Lab")
         .refreshable { await model.refreshHomeLab(force: true) }
         .task { await model.refreshHomeLab(silent: true) }
+        .sheet(item: $selectedNode) { node in nodeDetail(node) }
+        .sheet(item: $selectedWorkload) { workload in workloadDetail(workload) }
+        .alert("Migrate workload?", isPresented: Binding(
+            get: { pendingMigration != nil },
+            set: { if !$0 { pendingMigration = nil } }
+        )) {
+            Button("Cancel", role: .cancel) { pendingMigration = nil }
+            Button("Migrate", role: .destructive) {
+                guard let workload = pendingMigration else { return }
+                let target = pendingTargetNode
+                pendingMigration = nil
+                Task {
+                    do { try await model.migrate(workload, to: target) }
+                    catch { model.homelabError = error.localizedDescription }
+                }
+            }
+        } message: {
+            Text("Pilot will validate storage and locks, then move this workload to \(pendingTargetNode). Running services may briefly pause.")
+        }
     }
 
     private var header: some View {
@@ -105,7 +128,8 @@ struct HomeLabView: View {
         } else {
             LazyVGrid(columns: columns, spacing: 14) {
                 ForEach(proxmox.nodes) { node in
-                    nodeCard(node)
+                    Button { selectedNode = node } label: { nodeCard(node) }
+                        .buttonStyle(.plain)
                 }
             }
         }
@@ -195,9 +219,12 @@ struct HomeLabView: View {
         let workloads = model.homelab.providers.proxmox.workloads
         if !workloads.isEmpty {
             sectionHeader("Virtual Estate", detail: "VMs and containers", symbol: "cube.transparent.fill")
-            VStack(spacing: 0) {
-                ForEach(workloads) { workload in
-                    HStack(spacing: 12) {
+            ForEach(Dictionary(grouping: workloads, by: \.node).keys.sorted(), id: \.self) { node in
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(node).font(.headline).padding(.top, 14).padding(.bottom, 6)
+                    ForEach(workloads.filter { $0.node == node }) { workload in
+                      Button { selectedWorkload = workload } label: {
+                       HStack(spacing: 12) {
                         statusDot(workload.status == "running" ? PilotTheme.mint : .secondary)
                         VStack(alignment: .leading, spacing: 2) {
                             Text(workload.name).font(.subheadline.weight(.semibold))
@@ -212,14 +239,81 @@ struct HomeLabView: View {
                                 .font(.caption2)
                                 .foregroundStyle(.secondary)
                         }
+                       }
+                       .padding(.vertical, 11)
+                      }
+                      .buttonStyle(.plain)
+                      Divider().opacity(0.35)
                     }
-                    .padding(.vertical, 11)
-                    if workload.id != workloads.last?.id { Divider().opacity(0.35) }
                 }
             }
             .padding(.horizontal, 16)
             .background(PilotTheme.card, in: RoundedRectangle(cornerRadius: 20))
             .overlay(RoundedRectangle(cornerRadius: 20).stroke(PilotTheme.border))
+        }
+    }
+
+    private func nodeDetail(_ node: ProxmoxNode) -> some View {
+        let agent = model.homelab.agents.first { $0.hostname == node.name }
+        return NavigationStack {
+            List {
+                Section("Capacity") {
+                    LabeledContent("CPU threads", value: "\(node.cpuThreads ?? 0)")
+                    LabeledContent("CPU usage", value: percent(node.cpuRatio))
+                    LabeledContent("Memory", value: "\(bytes(node.memoryUsedBytes)) of \(bytes(node.memoryTotalBytes))")
+                    LabeledContent("Root", value: "\(bytes(node.diskUsedBytes)) of \(bytes(node.diskTotalBytes))")
+                    LabeledContent("Uptime", value: uptime(node.uptimeSeconds))
+                }
+                Section("Thermals") {
+                    if let readings = agent?.temperatures, !readings.isEmpty {
+                        ForEach(readings) { reading in
+                            LabeledContent(reading.label, value: temperature(reading.temperatureC))
+                        }
+                    } else { Text("Host temperature agent has not reported yet.") }
+                }
+                Section("Workloads") {
+                    ForEach(model.homelab.providers.proxmox.workloads.filter { $0.node == node.name }) {
+                        Text($0.name)
+                    }
+                }
+            }
+            .navigationTitle(node.name)
+        }
+    }
+
+    private func workloadDetail(_ workload: ProxmoxWorkload) -> some View {
+        NavigationStack {
+            List {
+                Section("Runtime") {
+                    LabeledContent("Type", value: workload.kind.uppercased())
+                    LabeledContent("VM ID", value: workload.vmid.map(String.init) ?? "—")
+                    LabeledContent("Node", value: workload.node)
+                    LabeledContent("Status", value: workload.status.capitalized)
+                    LabeledContent("CPU", value: percent(workload.cpuRatio))
+                    LabeledContent("Memory", value: "\(bytes(workload.memoryUsedBytes)) of \(bytes(workload.memoryTotalBytes))")
+                    LabeledContent("Uptime", value: uptime(workload.uptimeSeconds))
+                }
+                Section("Lifetime I/O") {
+                    LabeledContent("Disk read", value: bytes(workload.diskReadBytes))
+                    LabeledContent("Disk written", value: bytes(workload.diskWriteBytes))
+                    LabeledContent("Network in", value: bytes(workload.networkInBytes))
+                    LabeledContent("Network out", value: bytes(workload.networkOutBytes))
+                }
+                if model.clientManifest?.features["homelab_control"] == true {
+                    Section("Migrate") {
+                        ForEach(model.homelab.providers.proxmox.nodes.filter { $0.name != workload.node && $0.status == "online" }) { node in
+                            Button("Move to \(node.name)…") {
+                                selectedWorkload = nil
+                                pendingTargetNode = node.name
+                                pendingMigration = workload
+                            }
+                        }
+                        Text("Pilot checks locks and node-local storage before issuing a one-use migration confirmation.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .navigationTitle(workload.name)
         }
     }
 

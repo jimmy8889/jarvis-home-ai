@@ -492,6 +492,10 @@ final class PhonePlaybackController {
         default: throw URLError(.unsupportedURL)
         }
         guard components.host?.isEmpty == false else { throw URLError(.badURL) }
+        if components.path == "/v1/media/sendspin", components.queryItems?.isEmpty == false {
+            guard let url = components.url else { throw URLError(.badURL) }
+            return url
+        }
         // Music Assistant's UI/API commonly runs on 8095 while native
         // Sendspin clients connect to 8927. Migrate the former automatically
         // so existing Pilot installs start working without manual repair.

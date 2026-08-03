@@ -90,6 +90,13 @@ final class DriveModel {
 
     var canMaintain: Bool { manifest?.features["vehicle_maintenance"] == true }
 
+    var isShowingCachedOverview: Bool { isOffline && overview != nil }
+
+    var cachedOverviewAge: TimeInterval? {
+        guard isShowingCachedOverview, let lastRefresh else { return nil }
+        return max(0, Date().timeIntervalSince(lastRefresh))
+    }
+
     func run() async {
         guard credentials != nil else { return }
         await refreshAll()
@@ -178,7 +185,7 @@ final class DriveModel {
                 throw PilotClientError.authentication("Vehicle access has been revoked.")
             }
             manifest = loadedManifest
-            vehicles = envelope.items
+            if !envelope.items.isEmpty { vehicles = envelope.items }
             if selectedVehicleID == nil || !vehicles.contains(where: { $0.id == selectedVehicleID }) {
                 selectedVehicleID = vehicles.first?.id
             }
@@ -188,8 +195,18 @@ final class DriveModel {
             // Live Home Assistant state is the primary Car experience. The
             // TeslaMate history adapter is deliberately optional: an outage
             // must not make an otherwise healthy vehicle appear unavailable.
-            let loadedOverview = try await api.overview(vehicleID)
-            overview = loadedOverview
+            let loadedOverview: VehicleOverview
+            do {
+                loadedOverview = try await api.overview(vehicleID)
+                overview = loadedOverview
+                isOffline = false
+                lastRefresh = Date()
+            } catch {
+                guard let cached = overview, cached.id == vehicleID else { throw error }
+                loadedOverview = cached
+                isOffline = true
+                errorMessage = "Showing the last known vehicle state. Live telemetry is currently unavailable."
+            }
             if let loadedDestinations = try? await api.destinations(vehicleID) {
                 destinations = loadedDestinations.items
             }
@@ -208,12 +225,11 @@ final class DriveModel {
             historyUnavailable = loadedDrives == nil
                 || loadedCharges == nil
                 || loadedHealth == nil
-            isOffline = false
-            lastRefresh = Date()
             saveCache()
         } catch {
             isOffline = true
             errorMessage = error.localizedDescription
+            saveCache()
         }
     }
 
@@ -451,6 +467,8 @@ final class DriveModel {
 
     private func saveCache() {
         let cache = DriveCache(
+            vehicles: vehicles,
+            selectedVehicleID: selectedVehicleID,
             overview: overview,
             drives: drives,
             charges: charges,
@@ -476,6 +494,8 @@ final class DriveModel {
               let cache = try? JSONDecoder().decode(DriveCache.self, from: data)
         else { return }
         overview = cache.overview
+        vehicles = cache.vehicles
+        selectedVehicleID = cache.selectedVehicleID ?? cache.overview?.id
         drives = cache.drives
         charges = cache.charges
         batteryHealth = cache.batteryHealth

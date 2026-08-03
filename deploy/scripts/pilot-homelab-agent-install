@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ $# -ne 5 ]]; then
+  printf 'Usage: %s CORE_URL DEVICE_ID TOKEN_FILE ROLE SOURCE_DIR\n' "$0" >&2
+  exit 2
+fi
+core_url="$1"
+device_id="$2"
+token_file="$3"
+role="$4"
+source_dir="$5"
+
+[[ "$core_url" =~ ^https?:// ]] || { printf 'invalid Core URL\n' >&2; exit 2; }
+[[ "$device_id" =~ ^[a-z0-9-]+$ ]] || { printf 'invalid device id\n' >&2; exit 2; }
+[[ -s "$token_file" ]] || { printf 'device token is missing\n' >&2; exit 2; }
+[[ -f "$source_dir/pilot_homelab_agent/main.py" ]] || { printf 'agent source is missing\n' >&2; exit 2; }
+[[ -f "$source_dir/pilot-homelab-agent.service" ]] || { printf 'service template is missing\n' >&2; exit 2; }
+
+install -d -m 0755 /opt/pilot-homelab-agent/pilot_homelab_agent
+install -m 0644 "$source_dir/pilot_homelab_agent/main.py" \
+  /opt/pilot-homelab-agent/pilot_homelab_agent/main.py
+install -m 0644 "$source_dir/pilot_homelab_agent/__init__.py" \
+  /opt/pilot-homelab-agent/pilot_homelab_agent/__init__.py
+install -d -m 0700 /etc/pilot-homelab-agent
+install -m 0600 "$token_file" /etc/pilot-homelab-agent/device-token
+
+unit_tmp="$(mktemp)"
+trap 'rm -f "$unit_tmp"' EXIT
+sed \
+  -e 's|User=pilot-homelab|User=root|' \
+  -e 's|Group=pilot-homelab|Group=root|' \
+  -e 's|/opt/pilot-homelab-agent/venv/bin/pilot-homelab-agent|/usr/bin/python3 -m pilot_homelab_agent.main|' \
+  "$source_dir/pilot-homelab-agent.service" >"$unit_tmp"
+install -m 0644 "$unit_tmp" /etc/systemd/system/pilot-homelab-agent.service
+
+env_tmp="$(mktemp)"
+trap 'rm -f "$unit_tmp" "$env_tmp"' EXIT
+printf 'PILOT_CORE_URL=%s\nPILOT_DEVICE_ID=%s\nPILOT_ROLE=%s\nPYTHONPATH=/opt/pilot-homelab-agent\n' \
+  "$core_url" "$device_id" "$role" >"$env_tmp"
+install -m 0600 "$env_tmp" /etc/pilot-homelab-agent/agent.env
+systemctl daemon-reload
+systemctl enable --now pilot-homelab-agent.service
+systemctl is-active --quiet pilot-homelab-agent.service
+printf 'Pilot Home Lab agent installed for %s\n' "$device_id"

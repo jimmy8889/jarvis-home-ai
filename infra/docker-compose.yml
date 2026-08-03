@@ -30,6 +30,7 @@ services:
       PILOT_TESLAMATE_ADAPTER_TOKEN_FILE: /run/secrets/teslamate_adapter_token
       PILOT_TESLA_VEHICLE_ID_FILE: /run/secrets/tesla_vehicle_id
       PROXMOX_TOKEN_SECRET_FILE: /run/secrets/proxmox_token_secret
+      PROXMOX_MIGRATION_TOKEN_SECRET_FILE: /run/secrets/proxmox_migration_token_secret
       TRUENAS_API_KEY_FILE: /run/secrets/truenas_api_key
     secrets:
       - pilot_core_admin_token
@@ -43,6 +44,7 @@ services:
       - teslamate_adapter_token
       - tesla_vehicle_id
       - proxmox_token_secret
+      - proxmox_migration_token_secret
       - truenas_api_key
     volumes:
       - ../config/core.container.toml:/config/core.toml:ro
@@ -91,5 +93,7 @@ secrets:
     file: ./secrets/tesla_vehicle_id
   proxmox_token_secret:
     file: ./secrets/proxmox_token_secret
+  proxmox_migration_token_secret:
+    file: ./secrets/proxmox_migration_token_secret
   truenas_api_key:
     file: ./secrets/truenas_api_key

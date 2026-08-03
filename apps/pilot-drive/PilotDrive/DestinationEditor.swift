@@ -67,7 +67,7 @@ struct DestinationEditor: View {
                                 .font(.footnote)
                                 .foregroundStyle(.secondary)
                         }
-                        Picker("Front passenger seat", selection: $draft.seatClimateMode) {
+                        Picker("Front right seat", selection: $draft.seatClimateMode) {
                             Text("No change").tag(SeatClimateMode?.none)
                             ForEach(SeatClimateMode.allCases) { mode in
                                 Text(mode.label).tag(SeatClimateMode?.some(mode))
@@ -76,7 +76,7 @@ struct DestinationEditor: View {
                     }
                 }
                 Section {
-                    Text("Sending this destination may wake the car, waits up to 60 seconds, starts climate, applies the optional front passenger seat setting, and sends coordinates to the touchscreen. Each step is reported independently.")
+                    Text("Sending this destination may wake the car, waits up to 60 seconds, starts climate, applies the optional front right seat setting, and sends coordinates to the touchscreen. Each step is reported independently.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }

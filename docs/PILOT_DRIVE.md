@@ -136,10 +136,10 @@ next due date/odometer, warning leads, and bounded JPEG/HEIC/PDF receipts in
 Pilot Core. Defaults are 30 days and 1,000 km. Reminders are in-app only.
 
 Saved destinations include a name, address, coordinates, icon, climate flag,
-optional temperature override, and optional front-passenger seat climate mode.
+optional temperature override, and optional front-right seat climate mode.
 The supported seat modes are off; heat low, medium, and high; and cool low,
 medium, and high. A one-tap request is idempotent on the server and reports
-wake, climate, temperature, front-passenger seat, and route independently. A
+wake, climate, temperature, front-right seat, and route independently. A
 climate or seat failure does not block the route and Pilot Core never issues an
 automatic compensating command. The result sheet offers explicit retry and
 Stop Climate actions.

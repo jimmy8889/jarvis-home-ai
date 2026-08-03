@@ -596,7 +596,7 @@ class VehicleService:
                 raise VehicleError("seat heating position is unsupported")
         elif action in {"set_seat_climate", "set_seat_climate_front_right"}:
             if "set_seat_climate_front_right" not in vehicle.controls_map():
-                raise VehicleError("front passenger seat climate is unsupported")
+                raise VehicleError("front right seat climate is unsupported")
         elif action not in vehicle.controls_map():
             raise VehicleError("vehicle action is unsupported")
         self._validate_action_parameters(action, parameters)
@@ -755,7 +755,7 @@ class VehicleService:
             seat_mode = destination.get("seat_climate_mode")
             if seat_mode:
                 await run_step(
-                    "front_passenger_seat",
+                    "front_right_seat",
                     controls.get("set_seat_climate_front_right"),
                     {"mode": seat_mode},
                 )

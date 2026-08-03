@@ -381,7 +381,7 @@ class VehicleApiTests(unittest.TestCase):
         steps = {item["step"]: item["status"] for item in completed["steps"]}
         self.assertEqual(steps["climate"], "failed")
         self.assertEqual(steps["temperature"], "failed")
-        self.assertEqual(steps["front_passenger_seat"], "accepted")
+        self.assertEqual(steps["front_right_seat"], "accepted")
         self.assertEqual(steps["route"], "accepted")
         self.assertEqual(completed["status"], "unverified")
         self.assertTrue(

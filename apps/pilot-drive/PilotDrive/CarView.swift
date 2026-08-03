@@ -165,7 +165,7 @@ struct CarView: View {
                                 .frame(width: 132, height: 112)
                             }
                             .buttonStyle(.bordered)
-                            .accessibilityHint("Wakes the car if required, applies climate and passenger seat settings, and sends this route")
+                            .accessibilityHint("Wakes the car if required, applies climate and front right seat settings, and sends this route")
                             .contextMenu {
                                 Button {
                                     editingDestination = destination
@@ -324,7 +324,7 @@ struct CarView: View {
                 }
             }
             if car.availableControls.contains("set_seat_climate") {
-                Menu("Front passenger seat") {
+                Menu("Front right seat") {
                     ForEach(SeatClimateMode.allCases) { mode in
                         Button(mode.label) {
                             Task {

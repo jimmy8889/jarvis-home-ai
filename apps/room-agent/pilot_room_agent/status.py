@@ -1,16 +1,16 @@
 from __future__ import annotations
 
 import os
-from pathlib import Path
 import shlex
 import shutil
 import subprocess
 import time
+from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 from .activation import ActivationGate
 from .config import Settings
-
 
 STARTED_AT = time.monotonic()
 
@@ -175,7 +175,10 @@ def _airplay_bus_name() -> str | None:
     return None
 
 
-def collect_status(settings: Settings) -> dict[str, Any]:
+def collect_status(
+    settings: Settings,
+    bluetooth_status: Callable[[], dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     pipewire = _command_status(["wpctl", "status", "--name"])
     capture = _command_status(["arecord", "-l"])
     playback = _command_status(["aplay", "-l"])
@@ -187,7 +190,24 @@ def collect_status(settings: Settings) -> dict[str, Any]:
         playback["detail"] = "no ALSA playback hardware detected"
     bluetooth: dict[str, Any]
     if settings.bluetooth_enabled:
-        bluetooth = _command_status(["bluetoothctl", "show"])
+        controller = _command_status(["bluetoothctl", "show"])
+        bridge = (
+            bluetooth_status()
+            if bluetooth_status
+            else {
+                "available": False,
+                "ok": False,
+                "active": False,
+                "connected": False,
+                "detail": "Bluetooth bridge is not running",
+            }
+        )
+        bluetooth = {
+            "enabled": True,
+            "ok": controller["ok"] and bridge.get("ok", False),
+            "controller": controller,
+            "bridge": bridge,
+        }
     else:
         bluetooth = {"enabled": False, "ok": True, "detail": "disabled by room config"}
 

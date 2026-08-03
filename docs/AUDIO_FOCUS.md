@@ -47,14 +47,15 @@ permanently ducked. `GET /v1/status` includes the current control state and its
 monotonic revision.
 
 The core reporter publishes all five source states: critical, assistant,
-Bluetooth, AirPlay, and music. Bluetooth remains false until the A2DP sink is
-implemented.
+Bluetooth, AirPlay, and music. Room Agent 0.7 derives Bluetooth activity from
+the real WirePlumber `bluez_input` source and the Pilot-owned loopback instead
+of reporting a placeholder state.
 
-The gain enforcer is disabled by default with `audio_focus_enabled = false`.
-This is intentional: source detection and gain restoration are implemented and
-tested, but live activation requires the audible switching acceptance test.
-Enabling it before that test could leave a source unexpectedly quiet if an
-upstream player changes its PipeWire node behavior.
+The gain enforcer remains disabled by default for new rooms. It is enabled in
+the Office inventory because its Sendspin and AirPlay switching path has passed
+the supervised gain-restoration test. Bluetooth joins the same live priority
+model, while phone pairing and audible Bluetooth duck/restoration remain a
+separate physical acceptance gate.
 
 Before enabling in a room:
 

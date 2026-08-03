@@ -48,6 +48,13 @@ class ReporterTests(unittest.TestCase):
             },
         )
 
+    def test_bluetooth_bridge_activity_is_reported(self) -> None:
+        self.assertTrue(
+            EventReporter.source_states(
+                {"bluetooth": {"bridge": {"active": True}}}
+            )["bluetooth"]
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

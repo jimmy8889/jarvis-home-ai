@@ -1,16 +1,16 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 import json
 import re
 import subprocess
+from collections.abc import Callable
+from dataclasses import dataclass
 from threading import Event, Thread
-from typing import Callable
+from typing import Any
 
 from .config import Settings
 from .controls import ControlState
 from .status import collect_status
-
 
 PRIORITY = {
     "critical": 100,
@@ -29,6 +29,7 @@ STREAM_NAMES = {
     "PipeWire ALSA [python": "music",
     "ALSA Playback [python": "music",
     "linux_voice_assistant": "assistant",
+    "PilotBluetooth": "bluetooth",
 }
 
 
@@ -146,12 +147,18 @@ class FocusEnforcer:
 
 
 class AudioFocusLoop:
-    def __init__(self, settings: Settings, control_state: ControlState | None = None) -> None:
+    def __init__(
+        self,
+        settings: Settings,
+        control_state: ControlState | None = None,
+        bluetooth_status: Callable[[], dict[str, Any]] | None = None,
+    ) -> None:
         self.settings = settings
         self.control_state = control_state or ControlState()
         self.stop_event = Event()
         self.thread = Thread(target=self._run, name="pilot-audio-focus", daemon=True)
         self.enforcer = FocusEnforcer()
+        self.bluetooth_status = bluetooth_status
 
     def start(self) -> None:
         self.thread.start()
@@ -175,7 +182,10 @@ class AudioFocusLoop:
                 active = {
                     "critical": transient["critical"],
                     "assistant": transient["assistant"],
-                    "bluetooth": False,
+                    "bluetooth": bool(
+                        self.bluetooth_status
+                        and self.bluetooth_status().get("active", False)
+                    ),
                     "airplay": status.get("airplay", {})
                     .get("playback", {})
                     .get("state")

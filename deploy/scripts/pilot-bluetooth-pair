@@ -1,0 +1,74 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+timeout_seconds="${PILOT_BLUETOOTH_PAIRING_TIMEOUT_SECONDS:-}"
+if [[ -z "$timeout_seconds" && -r /etc/pilot/bluetooth-pairing-timeout ]]; then
+  timeout_seconds="$(</etc/pilot/bluetooth-pairing-timeout)"
+fi
+timeout_seconds="${timeout_seconds:-180}"
+
+usage() {
+  printf '%s\n' \
+    'Usage: pilot-bluetooth-pair open|close|status|paired|trust MAC|remove MAC' \
+    '' \
+    "open creates a ${timeout_seconds}-second discoverable and pairable window." \
+    'New devices are not trusted automatically. Use trust MAC after confirming it.'
+}
+
+require_root() {
+  if [[ "${EUID}" -ne 0 ]]; then
+    printf 'Run this command as root.\n' >&2
+    exit 1
+  fi
+}
+
+valid_mac() {
+  [[ "$1" =~ ^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$ ]]
+}
+
+action="${1:-}"
+case "$action" in
+  open)
+    require_root
+    systemctl stop pilot-bluetooth-pairing-window.timer \
+      pilot-bluetooth-pairing-window.service 2>/dev/null || true
+    systemctl start bluetooth.service pilot-bluetooth-agent.service
+    rfkill unblock bluetooth || true
+    bluetoothctl power on
+    bluetoothctl pairable on
+    bluetoothctl discoverable on
+    systemd-run \
+      --quiet \
+      --collect \
+      --unit=pilot-bluetooth-pairing-window \
+      --on-active="${timeout_seconds}s" \
+      /usr/local/sbin/pilot-bluetooth-pair close
+    printf 'Pilot Bluetooth pairing is open for at most %s seconds.\n' "$timeout_seconds"
+    ;;
+  close)
+    require_root
+    bluetoothctl discoverable off || true
+    bluetoothctl pairable off || true
+    systemctl stop pilot-bluetooth-agent.service || true
+    printf 'Pilot Bluetooth pairing is closed. Existing trusted devices may reconnect.\n'
+    ;;
+  status)
+    timeout 5 bluetoothctl show
+    ;;
+  paired)
+    bluetoothctl devices Paired 2>/dev/null || bluetoothctl paired-devices
+    ;;
+  trust|remove)
+    require_root
+    mac="${2:-}"
+    if ! valid_mac "$mac"; then
+      printf 'A valid Bluetooth MAC address is required.\n' >&2
+      exit 2
+    fi
+    bluetoothctl "$action" "${mac^^}"
+    ;;
+  *)
+    usage >&2
+    exit 2
+    ;;
+esac

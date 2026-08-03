@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+
 import tomllib
 
 
@@ -11,6 +12,7 @@ class Settings:
     listen_host: str = "127.0.0.1"
     listen_port: int = 8765
     bluetooth_enabled: bool = False
+    bluetooth_loopback_latency_ms: int = 120
     microphone_description: str = ""
     speaker_description: str = ""
     microphone_node: str = ""
@@ -68,4 +70,7 @@ def load_settings(path: str | Path) -> Settings:
     ):
         raise ValueError("video_media_roots must be an array of non-empty paths")
     selected["video_media_roots"] = tuple(item.strip() for item in media_roots)
+    latency = selected.get("bluetooth_loopback_latency_ms", 120)
+    if not isinstance(latency, int) or not 40 <= latency <= 1000:
+        raise ValueError("bluetooth_loopback_latency_ms must be between 40 and 1000")
     return Settings(**selected)

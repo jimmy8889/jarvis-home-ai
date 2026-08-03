@@ -2,6 +2,7 @@ room_id = "{{ room_endpoint_room_id }}"
 listen_host = "{{ room_endpoint_listen_host }}"
 listen_port = {{ room_endpoint_listen_port }}
 bluetooth_enabled = {{ room_endpoint_bluetooth_enabled | bool | lower }}
+bluetooth_loopback_latency_ms = {{ room_endpoint_bluetooth_loopback_latency_ms }}
 microphone_description = "{{ room_endpoint_microphone_description }}"
 speaker_description = "{{ room_endpoint_speaker_description }}"
 microphone_node = "{{ room_endpoint_microphone_node }}"

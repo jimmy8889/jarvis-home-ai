@@ -1,0 +1,15 @@
+[Unit]
+Description=Pilot transient Bluetooth pairing agent
+After=bluetooth.service
+Requires=bluetooth.service
+
+[Service]
+Type=simple
+ExecStart=/bin/sh -c 'exec /usr/bin/tail -f /dev/null | /usr/bin/bluetoothctl --agent NoInputNoOutput'
+Restart=on-failure
+RestartSec=2
+KillMode=mixed
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict

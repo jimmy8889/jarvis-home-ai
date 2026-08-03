@@ -6,6 +6,19 @@
       - ansible_facts.distribution_major_version == "13"
     fail_msg: "This role is intentionally limited to Debian 13 endpoints."
 
+- name: Validate bounded Bluetooth policy
+  ansible.builtin.assert:
+    that:
+      - not (room_endpoint_bluetooth_enabled | bool) or room_endpoint_bluetooth_name | length > 0
+      - not (room_endpoint_bluetooth_enabled | bool) or room_endpoint_bluetooth_name | length <= 64
+      - not (room_endpoint_bluetooth_enabled | bool) or room_endpoint_bluetooth_pairing_timeout_seconds | int >= 30
+      - not (room_endpoint_bluetooth_enabled | bool) or room_endpoint_bluetooth_pairing_timeout_seconds | int <= 600
+      - not (room_endpoint_bluetooth_enabled | bool) or room_endpoint_bluetooth_loopback_latency_ms | int >= 40
+      - not (room_endpoint_bluetooth_enabled | bool) or room_endpoint_bluetooth_loopback_latency_ms | int <= 1000
+    fail_msg: >-
+      Bluetooth requires a 1-64 character name, a 30-600 second pairing window,
+      and a 40-1000 millisecond loopback latency.
+
 - name: Install room endpoint packages
   ansible.builtin.apt:
     name: "{{ room_endpoint_packages }}"
@@ -113,6 +126,10 @@
       owner: "{{ room_endpoint_user }}"
       group: "{{ room_endpoint_user }}"
       mode: "0750"
+    - path: "{{ room_endpoint_home }}/.config/wireplumber/wireplumber.conf.d"
+      owner: "{{ room_endpoint_user }}"
+      group: "{{ room_endpoint_user }}"
+      mode: "0750"
     - { path: /var/backups/pilot, mode: "0700" }
     - { path: "/opt/pilot/releases/{{ room_endpoint_release_id }}", mode: "0755" }
 
@@ -191,10 +208,64 @@
 - name: Back up current Pilot configuration  # noqa command-instead-of-module
   ansible.builtin.command:
     cmd: >-
-      tar -C /etc -czf /var/backups/pilot/pre-{{ room_endpoint_release_id }}.tar.gz
-      pilot
+      tar --ignore-failed-read -C / -czf
+      /var/backups/pilot/pre-{{ room_endpoint_release_id }}.tar.gz
+      etc/pilot
+      etc/bluetooth/main.conf
+      {{ room_endpoint_home | regex_replace('^/', '') }}/.config/wireplumber/wireplumber.conf.d/51-pilot-bluetooth.conf
+      etc/systemd/system/pilot-bluetooth-agent.service
+      usr/local/sbin/pilot-bluetooth-pair
   args:
     creates: "/var/backups/pilot/pre-{{ room_endpoint_release_id }}.tar.gz"
+
+- name: Install bounded Bluetooth controller policy
+  ansible.builtin.template:
+    src: bluetooth-main.conf.j2
+    dest: /etc/bluetooth/main.conf
+    owner: root
+    group: root
+    mode: "0644"
+  when: room_endpoint_bluetooth_enabled | bool
+  notify: Restart Bluetooth
+
+- name: Install Bluetooth-only WirePlumber role policy
+  ansible.builtin.template:
+    src: wireplumber-bluetooth.conf.j2
+    dest: >-
+      {{ room_endpoint_home }}/.config/wireplumber/wireplumber.conf.d/51-pilot-bluetooth.conf
+    owner: "{{ room_endpoint_user }}"
+    group: "{{ room_endpoint_user }}"
+    mode: "0640"
+  when: room_endpoint_bluetooth_enabled | bool
+  notify: Restart Pilot WirePlumber
+
+- name: Remove Bluetooth WirePlumber policy when disabled
+  ansible.builtin.file:
+    path: >-
+      {{ room_endpoint_home }}/.config/wireplumber/wireplumber.conf.d/51-pilot-bluetooth.conf
+    state: absent
+  when: not room_endpoint_bluetooth_enabled | bool
+  notify: Restart Pilot WirePlumber
+
+- name: Record the bounded Bluetooth pairing timeout
+  ansible.builtin.copy:
+    content: "{{ room_endpoint_bluetooth_pairing_timeout_seconds }}\n"
+    dest: /etc/pilot/bluetooth-pairing-timeout
+    owner: root
+    group: root
+    mode: "0644"
+  when: room_endpoint_bluetooth_enabled | bool
+
+- name: Install Pilot Bluetooth agent service
+  ansible.builtin.template:
+    src: "{{ room_endpoint_project_root }}/systemd/pilot-bluetooth-agent.service.j2"
+    dest: /etc/systemd/system/pilot-bluetooth-agent.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify:
+    - Reload systemd
+    - Stop Pilot Bluetooth agent
 
 - name: Install room-agent source into release
   ansible.builtin.copy:
@@ -413,6 +484,8 @@
     group: root
     mode: "0755"
   loop:
+    - pilot-bluetooth-pair
+    - pilot-endpoint-restore
     - pilot-hardware-inventory
     - pilot-activate
     - pilot-rollback
@@ -436,6 +509,44 @@
     name: bluetooth.service
     enabled: "{{ room_endpoint_bluetooth_enabled | bool }}"
     state: "{{ 'started' if room_endpoint_bluetooth_enabled | bool else 'stopped' }}"
+
+- name: Unblock the Bluetooth controller
+  ansible.builtin.command: rfkill unblock bluetooth
+  changed_when: false
+  when: room_endpoint_bluetooth_enabled | bool
+
+- name: Power the Bluetooth controller
+  ansible.builtin.command: bluetoothctl power on
+  changed_when: false
+  when: room_endpoint_bluetooth_enabled | bool
+
+- name: Configure the advertised Pilot Bluetooth name
+  ansible.builtin.command:
+    argv:
+      - bluetoothctl
+      - system-alias
+      - "{{ room_endpoint_bluetooth_name }}"
+  changed_when: false
+  when: room_endpoint_bluetooth_enabled | bool
+
+- name: Keep the Pilot Bluetooth agent transient
+  ansible.builtin.systemd_service:
+    name: pilot-bluetooth-agent.service
+    enabled: false
+    state: stopped
+    daemon_reload: true
+
+- name: Keep Bluetooth closed outside an operator pairing window
+  ansible.builtin.command:
+    argv:
+      - bluetoothctl
+      - "{{ item }}"
+      - "off"
+  loop:
+    - discoverable
+    - pairable
+  changed_when: false
+  when: room_endpoint_bluetooth_enabled | bool
 
 - name: Enable Avahi
   ansible.builtin.systemd_service:

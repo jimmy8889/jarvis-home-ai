@@ -1,0 +1,68 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ "${EUID}" -ne 0 ]]; then
+  printf 'Run this command as root.\n' >&2
+  exit 1
+fi
+
+archive="${1:-}"
+if [[ -z "$archive" ]]; then
+  printf 'Usage: pilot-endpoint-restore /var/backups/pilot/ARCHIVE.tar.gz\n' >&2
+  exit 2
+fi
+
+archive="$(realpath -e "$archive")"
+case "$archive" in
+  /var/backups/pilot/*.tar.gz) ;;
+  *) printf 'Refusing archive outside /var/backups/pilot.\n' >&2; exit 2 ;;
+esac
+
+if tar -tzf "$archive" | grep -Eq '(^/|(^|/)\.\.(/|$))'; then
+  printf 'Refusing unsafe archive paths.\n' >&2
+  exit 2
+fi
+
+timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
+emergency="/var/backups/pilot/pre-restore-${timestamp}.tar.gz"
+tar --ignore-failed-read -C / -czf "$emergency" \
+  etc/pilot \
+  etc/bluetooth/main.conf \
+  home/pilot/.config/wireplumber/wireplumber.conf.d/51-pilot-bluetooth.conf \
+  etc/systemd/system/pilot-bluetooth-agent.service \
+  usr/local/sbin/pilot-bluetooth-pair
+
+for path in \
+  etc/bluetooth/main.conf \
+  home/pilot/.config/wireplumber/wireplumber.conf.d/51-pilot-bluetooth.conf \
+  etc/systemd/system/pilot-bluetooth-agent.service \
+  usr/local/sbin/pilot-bluetooth-pair; do
+  if ! tar -tzf "$archive" | grep -Fxq "$path"; then
+    rm -f "/$path"
+  fi
+done
+
+tar -C / -xzf "$archive"
+systemctl daemon-reload
+pilot_uid="$(id -u pilot)"
+runuser -u pilot -- env \
+  "XDG_RUNTIME_DIR=/run/user/${pilot_uid}" \
+  "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/${pilot_uid}/bus" \
+  systemctl --user restart wireplumber.service
+bluetooth_enabled="$(python3 -c 'import tomllib; print(tomllib.load(open("/etc/pilot/room.toml", "rb")).get("bluetooth_enabled", False))')"
+if [[ "$bluetooth_enabled" == "True" ]]; then
+  systemctl enable --now bluetooth.service
+  systemctl disable --now pilot-bluetooth-agent.service || true
+  rfkill unblock bluetooth || true
+  bluetoothctl power on
+  bluetoothctl discoverable off || true
+  bluetoothctl pairable off || true
+else
+  systemctl disable --now pilot-bluetooth-agent.service bluetooth.service || true
+fi
+systemctl restart pilot-room-agent.service
+systemctl try-restart pilot-audio-defaults.service
+systemctl try-restart pilot-linux-voice-assistant.service
+systemctl try-restart pilot-airplay.service
+systemctl try-restart pilot-sendspin.service
+printf 'Restored %s. Emergency pre-restore backup: %s\n' "$archive" "$emergency"

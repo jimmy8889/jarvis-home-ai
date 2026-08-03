@@ -5,6 +5,9 @@ room_endpoint_room_id: unconfigured
 room_endpoint_listen_host: 127.0.0.1
 room_endpoint_listen_port: 8765
 room_endpoint_bluetooth_enabled: false
+room_endpoint_bluetooth_name: "Pilot {{ room_endpoint_room_id | title }}"
+room_endpoint_bluetooth_pairing_timeout_seconds: 180
+room_endpoint_bluetooth_loopback_latency_ms: 120
 room_endpoint_microphone_description: "Set after USB passthrough validation"
 room_endpoint_speaker_description: "Set after USB passthrough validation"
 room_endpoint_microphone_node: ""
@@ -88,6 +91,7 @@ room_endpoint_packages:
   - pipewire-pulse
   - python3
   - python3-venv
+  - rfkill
   - usbutils
   - wireplumber
 room_endpoint_lva_packages:

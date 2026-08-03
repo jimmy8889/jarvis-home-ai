@@ -5,12 +5,14 @@ audio outside a virtualization path:
 
 ```text
 Office N150
-├── Stadium USB microphone
-├── FiiO K3 USB DAC
+├── K3 combined USB Audio/HID microphone
+├── K3 combined USB Audio/HID stereo output
 ├── PipeWire + WirePlumber user session
 ├── Linux Voice Assistant → Home Assistant Assist
 ├── Shairport Sync → PipeWire → K3
 ├── Sendspin → Music Assistant → PipeWire → K3
+├── BlueZ A2DP sink → PilotBluetooth loopback → K3
+├── Pilot Display 0.7.2 media-console shell
 └── Pilot room-agent
     ├── loopback health and control API
     ├── outbound health/source reporting
@@ -25,8 +27,9 @@ login. Room audio services share that user and one audio graph.
 
 ```text
 Home Assistant response ─┐
-AirPlay stream ──────────┼─→ PipeWire default sink ─→ FiiO K3
+AirPlay stream ──────────┼─→ PipeWire default sink ─→ K3 USB Audio/HID
 Sendspin music ──────────┘
+Bluetooth A2DP ──────────┘
 ```
 
 The room-agent binds only to loopback. Pilot Core does not connect inbound to
@@ -60,8 +63,15 @@ identifiers.
 ## Current safety boundaries
 
 - No Intel GPU, HDMI, VFIO, or IOMMU work in the office baseline.
-- Bluetooth A2DP input remains disabled.
-- Live PipeWire gain enforcement remains disabled pending audible acceptance.
+- Bluetooth A2DP input is enabled through the internal Intel controller. The
+  endpoint is not discoverable or pairable outside an operator-opened bounded
+  window, and newly paired devices require explicit trust.
+- Live PipeWire gain enforcement is enabled for the accepted Office Sendspin
+  and AirPlay paths. Bluetooth uses the same priority model, but its physical
+  pairing, playback, duck and restoration acceptance remains pending.
+- Core-delivered room audio remains guarded by a configuration-specific
+  supervised activation receipt. Correcting the K3 node identity invalidated
+  the previous fingerprint, so re-arming requires a new audible receipt.
 - Endpoint controls are loopback-only or delivered over authenticated outbound
   command transport.
 - Music actions pass through Music Assistant; home actions pass through Home

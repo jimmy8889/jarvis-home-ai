@@ -2,6 +2,7 @@ room_id = "office"
 listen_host = "127.0.0.1"
 listen_port = 8765
 bluetooth_enabled = false
+bluetooth_loopback_latency_ms = 120
 microphone_description = "Set after USB audio enumeration"
 speaker_description = "FiiO K3"
 microphone_node = ""

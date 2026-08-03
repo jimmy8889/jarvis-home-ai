@@ -1,6 +1,6 @@
-from pathlib import Path
 import tempfile
 import unittest
+from pathlib import Path
 
 from pilot_room_agent.config import Settings, load_settings
 
@@ -31,6 +31,21 @@ class ConfigTests(unittest.TestCase):
             self.assertEqual(settings.video_media_roots, ("/srv/media", "/mnt/nas"))
             path.write_text('video_media_roots = "unsafe"\n', encoding="utf-8")
             with self.assertRaisesRegex(ValueError, "array"):
+                load_settings(path)
+
+    def test_bluetooth_loopback_latency_is_bounded(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "room.toml"
+            path.write_text(
+                "bluetooth_loopback_latency_ms = 90\n",
+                encoding="utf-8",
+            )
+            self.assertEqual(load_settings(path).bluetooth_loopback_latency_ms, 90)
+            path.write_text(
+                "bluetooth_loopback_latency_ms = 5\n",
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(ValueError, "between 40 and 1000"):
                 load_settings(path)
 
 

@@ -1,25 +1,24 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
-from http import HTTPStatus
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import hashlib
 import json
 import os
-from pathlib import Path
 import shutil
 import socket
 import stat
 import tempfile
-from threading import Lock
 import time
+from datetime import UTC, datetime
+from http import HTTPStatus
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+from threading import Lock
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, urlencode, urlsplit
 from urllib.request import Request, urlopen
 
 from . import __version__
-
 
 STATIC_ROOT = Path(__file__).with_name("static")
 MAX_CORE_RESPONSE_BYTES = 256_000
@@ -79,12 +78,13 @@ def _local_ip(core_url: str) -> str | None:
 def _core_status(core_url: str) -> dict[str, Any]:
     if urlsplit(core_url).scheme not in {"http", "https"}:
         return {"connected": False, "error": "invalid Pilot Core URL"}
-    request = Request(
-        f"{core_url.rstrip('/')}/readyz",
-        headers={"Accept": "application/json", "User-Agent": "pilot-display-node"},
-    )
-    try:
-        with urlopen(request, timeout=3) as response:  # noqa: S310
+
+    def fetch(path: str) -> dict[str, Any]:
+        request = Request(
+            f"{core_url.rstrip('/')}{path}",
+            headers={"Accept": "application/json", "User-Agent": "pilot-display-node"},
+        )
+        with urlopen(request, timeout=3) as response:
             if response.status != HTTPStatus.OK:
                 raise HTTPError(
                     request.full_url,
@@ -94,20 +94,35 @@ def _core_status(core_url: str) -> dict[str, Any]:
                     None,
                 )
             body = response.read(MAX_CORE_RESPONSE_BYTES + 1)
-            if len(body) > MAX_CORE_RESPONSE_BYTES:
-                raise ValueError("Pilot Core response is too large")
-            payload = json.loads(body)
-            if not isinstance(payload, dict):
-                raise ValueError("Pilot Core response is not an object")
+        if len(body) > MAX_CORE_RESPONSE_BYTES:
+            raise ValueError("Pilot Core response is too large")
+        payload = json.loads(body)
+        if not isinstance(payload, dict):
+            raise TypeError("Pilot Core response is not an object")
+        return payload
+
+    try:
+        payload = fetch("/readyz")
+        return {
+            "connected": bool(payload.get("ready")),
+            "registry_revision": payload.get("registry_revision"),
+            "room_count": payload.get("room_count"),
+            "player_count": payload.get("player_count"),
+            "tts_configured": payload.get("tts_configured"),
+            "assistant": payload.get("assistant"),
+        }
+    except HTTPError as error:
+        if error.code != HTTPStatus.NOT_FOUND:
+            return {"connected": False, "error": str(error)[:240]}
+        try:
+            payload = fetch("/healthz")
             return {
-                "connected": bool(payload.get("ready")),
-                "registry_revision": payload.get("registry_revision"),
-                "room_count": payload.get("room_count"),
-                "player_count": payload.get("player_count"),
-                "tts_configured": payload.get("tts_configured"),
-                "assistant": payload.get("assistant"),
+                "connected": payload.get("status") == "ok",
+                "readiness_scope": "liveness",
             }
-    except (HTTPError, URLError, TimeoutError, ValueError, json.JSONDecodeError) as error:
+        except (URLError, TimeoutError, ValueError, TypeError) as fallback_error:
+            return {"connected": False, "error": str(fallback_error)[:240]}
+    except (URLError, TimeoutError, ValueError, TypeError) as error:
         return {"connected": False, "error": str(error)[:240]}
 
 
@@ -131,7 +146,7 @@ def _core_surface(
         },
     )
     try:
-        with urlopen(request, timeout=5) as response:  # noqa: S310
+        with urlopen(request, timeout=5) as response:
             if response.status != HTTPStatus.OK:
                 raise HTTPError(
                     request.full_url,
@@ -145,9 +160,9 @@ def _core_surface(
                 raise ValueError("Pilot Core response is too large")
             payload = json.loads(body)
             if not isinstance(payload, dict):
-                raise ValueError("Pilot Core surface response is not an object")
+                raise TypeError("Pilot Core surface response is not an object")
             return payload
-    except (HTTPError, URLError, TimeoutError, ValueError, json.JSONDecodeError) as error:
+    except (URLError, TimeoutError, ValueError, TypeError) as error:
         return {"status": "unavailable", "error": str(error)[:240]}
 
 
@@ -185,13 +200,13 @@ def _core_device_request(
         },
     )
     try:
-        with urlopen(request, timeout=12) as response:  # noqa: S310
+        with urlopen(request, timeout=12) as response:
             content = response.read(MAX_CORE_RESPONSE_BYTES + 1)
             if len(content) > MAX_CORE_RESPONSE_BYTES:
                 raise ValueError("Pilot Core response is too large")
             result = json.loads(content)
             if not isinstance(result, (dict, list)):
-                raise ValueError("Pilot Core response is not JSON data")
+                raise TypeError("Pilot Core response is not JSON data")
             return response.status, result
     except HTTPError as error:
         try:
@@ -199,10 +214,10 @@ def _core_device_request(
             result = json.loads(content)
             if isinstance(result, dict):
                 return error.code, result
-        except (OSError, ValueError, json.JSONDecodeError):
+        except (OSError, ValueError, TypeError):
             pass
         return error.code, {"detail": f"Pilot Core returned HTTP {error.code}"}
-    except (URLError, TimeoutError, ValueError, json.JSONDecodeError) as error:
+    except (URLError, TimeoutError, ValueError, TypeError) as error:
         return HTTPStatus.BAD_GATEWAY, {"detail": str(error)[:240]}
 
 
@@ -313,7 +328,7 @@ def _cached_artwork(
             "User-Agent": "pilot-display-node",
         },
     )
-    with urlopen(request, timeout=8) as response:  # noqa: S310
+    with urlopen(request, timeout=8) as response:
         final_url = response.geturl()
         if not _artwork_url_allowed(final_url, allowed_hosts):
             raise ValueError("artwork redirect host is not allowed")
@@ -451,7 +466,7 @@ class DisplayHandler(BaseHTTPRequestHandler):
             status,
         )
 
-    def do_GET(self) -> None:  # noqa: N802
+    def do_GET(self) -> None:
         parsed_path = urlsplit(self.path)
         path = parsed_path.path
         if path == "/healthz":
@@ -570,7 +585,7 @@ class DisplayHandler(BaseHTTPRequestHandler):
             return
         self._send(content, content_type, cache_control=_static_cache_control(path))
 
-    def do_POST(self) -> None:  # noqa: N802
+    def do_POST(self) -> None:
         path = self.path.partition("?")[0]
         endpoints = {
             "/api/media": "media",

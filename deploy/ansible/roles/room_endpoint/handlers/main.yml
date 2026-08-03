@@ -13,6 +13,26 @@
     name: pilot-audio-defaults.service
     state: restarted
 
+- name: Restart Bluetooth
+  ansible.builtin.systemd_service:
+    name: bluetooth.service
+    state: restarted
+  when: room_endpoint_bluetooth_enabled | bool
+
+- name: Stop Pilot Bluetooth agent
+  ansible.builtin.systemd_service:
+    name: pilot-bluetooth-agent.service
+    state: stopped
+  when: room_endpoint_bluetooth_enabled | bool
+
+- name: Restart Pilot WirePlumber
+  ansible.builtin.command: >-
+    runuser -u {{ room_endpoint_user }} -- env
+    XDG_RUNTIME_DIR=/run/user/{{ room_endpoint_uid.stdout }}
+    DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{{ room_endpoint_uid.stdout }}/bus
+    systemctl --user restart wireplumber.service
+  changed_when: true
+
 - name: Restart Pilot Linux Voice Assistant
   ansible.builtin.systemd_service:
     name: pilot-linux-voice-assistant.service

@@ -1,16 +1,17 @@
 from __future__ import annotations
 
 import argparse
-from http import HTTPStatus
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
+from http import HTTPStatus
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from .config import Settings, load_settings
-from .audio_focus import AudioFocusLoop
-from .audio_delivery import AudioFetcher, AudioPlayback
 from .activation import ActivationGate
+from .audio_delivery import AudioFetcher, AudioPlayback
+from .audio_focus import AudioFocusLoop
+from .bluetooth import BluetoothBridge
 from .command_client import CommandClient
+from .config import Settings, load_settings
 from .controls import ControlError, ControlState, RoomController
 from .reporter import EventReporter
 from .status import collect_status
@@ -24,6 +25,7 @@ class Handler(BaseHTTPRequestHandler):
     command_client: CommandClient | None = None
     audio_playback: AudioPlayback | None = None
     video_playback: MpvPlayback | None = None
+    bluetooth_bridge: BluetoothBridge | None = None
 
     def _respond(self, status: HTTPStatus, payload: dict) -> None:
         body = json.dumps(payload, separators=(",", ":")).encode()
@@ -33,12 +35,15 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def do_GET(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler API
+    def do_GET(self) -> None:
         if self.path == "/healthz":
             self._respond(HTTPStatus.OK, {"status": "ok", "room_id": self.settings.room_id})
             return
         if self.path in {"/readyz", "/v1/status"}:
-            payload = collect_status(self.settings)
+            payload = collect_status(
+                self.settings,
+                self.bluetooth_bridge.snapshot if self.bluetooth_bridge else None,
+            )
             payload["controls"] = self.control_state.snapshot()
             payload["audio_delivery"] = (
                 self.audio_playback.status()
@@ -60,7 +65,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         self._respond(HTTPStatus.NOT_FOUND, {"error": "not found"})
 
-    def do_POST(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler API
+    def do_POST(self) -> None:
         if self.path != "/v1/control":
             self._respond(HTTPStatus.NOT_FOUND, {"error": "not found"})
             return
@@ -106,6 +111,11 @@ def main() -> None:
     if settings.video_enabled:
         video_playback = MpvPlayback(settings)
     Handler.video_playback = video_playback
+    bluetooth_bridge: BluetoothBridge | None = None
+    if settings.bluetooth_enabled:
+        bluetooth_bridge = BluetoothBridge(settings)
+        bluetooth_bridge.start()
+    Handler.bluetooth_bridge = bluetooth_bridge
     Handler.controller = RoomController(
         control_state,
         audio_player=audio_playback,
@@ -116,10 +126,18 @@ def main() -> None:
     focus_loop: AudioFocusLoop | None = None
     command_client: CommandClient | None = None
     if settings.core_reporting_enabled:
-        reporter = EventReporter(settings, control_state)
+        reporter = EventReporter(
+            settings,
+            control_state,
+            bluetooth_bridge.snapshot if bluetooth_bridge else None,
+        )
         reporter.start()
     if settings.audio_focus_enabled:
-        focus_loop = AudioFocusLoop(settings, control_state)
+        focus_loop = AudioFocusLoop(
+            settings,
+            control_state,
+            bluetooth_bridge.snapshot if bluetooth_bridge else None,
+        )
         focus_loop.start()
     if settings.core_commands_enabled:
         command_client = CommandClient(settings, Handler.controller)
@@ -144,6 +162,8 @@ def main() -> None:
             reporter.stop()
         if focus_loop:
             focus_loop.stop()
+        if bluetooth_bridge:
+            bluetooth_bridge.stop()
 
 
 if __name__ == "__main__":

@@ -2,19 +2,20 @@ from __future__ import annotations
 
 import json
 import os
-from pathlib import Path
 import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import MagicMock, patch
+from urllib.error import HTTPError
 
 from pilot_display_node.server import (
+    _artwork_url_allowed,
+    _cached_artwork,
     _core_device_request,
     _core_status,
     _core_surface,
-    _cached_artwork,
-    _artwork_url_allowed,
-    _prune_artwork_cache,
     _performance_profile,
+    _prune_artwork_cache,
     _static_cache_control,
     status_payload,
 )
@@ -156,6 +157,32 @@ class CoreStatusTests(unittest.TestCase):
                 "assistant": {"session_owner": "pilot_core"},
             },
         )
+
+    @patch("pilot_display_node.server.urlopen")
+    def test_falls_back_to_public_liveness_when_readiness_is_not_exposed(
+        self, urlopen: MagicMock
+    ) -> None:
+        response = MagicMock()
+        response.__enter__.return_value = response
+        response.status = 200
+        response.read.return_value = b'{"status":"ok"}'
+        urlopen.side_effect = [
+            HTTPError(
+                "https://pilot.example/readyz",
+                404,
+                "Not Found",
+                None,
+                None,
+            ),
+            response,
+        ]
+
+        self.assertEqual(
+            _core_status("https://pilot.example"),
+            {"connected": True, "readiness_scope": "liveness"},
+        )
+        self.assertEqual(urlopen.call_count, 2)
+        self.assertTrue(urlopen.call_args_list[1].args[0].full_url.endswith("/healthz"))
 
     def test_surface_fails_closed_without_device_credentials(self) -> None:
         self.assertEqual(

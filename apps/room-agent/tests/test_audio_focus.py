@@ -23,6 +23,10 @@ class AudioFocusTests(unittest.TestCase):
         )
         self.assertEqual(nodes, {"airplay": 56, "assistant": 62, "music": 70})
 
+    def test_parses_managed_bluetooth_loopback(self) -> None:
+        nodes = parse_stream_nodes("        75. PilotBluetooth\n")
+        self.assertEqual(nodes, {"bluetooth": 75})
+
     def test_parses_sendspin_generic_python_alsa_stream(self) -> None:
         nodes = parse_stream_nodes("        44. PipeWire ALSA [python3.13]\n")
         self.assertEqual(nodes, {"music": 44})

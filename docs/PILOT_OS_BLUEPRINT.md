@@ -1,8 +1,8 @@
 # Pilot OS Blueprint
 
-Version 4.12
+Version 4.13
 
-Last updated: 2026-08-03
+Last updated: 2026-08-04
 
 Status: Canonical architecture reference
 
@@ -204,11 +204,11 @@ existing room/player control gate remains in place.
 ### Office room endpoint
 
 ```text
-Host: officen150 / 10.0.1.53
+Host: officen150 / 10.0.2.53
 Platform: native Intel N150 appliance
 OS: Debian 13
-Input: Stadium USB microphone
-Output: FiiO K3 USB DAC
+Input: K3 combined USB Audio/HID mono source
+Output: K3 combined USB Audio/HID stereo sink
 ```
 
 Active room services:
@@ -219,20 +219,29 @@ Active room services:
 - Home Assistant ESPHome API on TCP 6053
 - Shairport Sync AirPlay receiver on TCP 5000
 - Sendspin 7.5.0 client connected to Music Assistant on TCP 8927
-- Boot-time restoration of stable Stadium/K3 PipeWire defaults
+- Boot-time restoration of the observed K3 PipeWire defaults
 - Authenticated health and source-state reporting to Pilot Core
 - Authenticated outbound command WebSocket with reconnect-safe results
+- Room Agent 0.7 secure Bluetooth A2DP bridge and real source events
+- Pilot Display 0.7.2 media-console surface on loopback TCP 8780
 
-Bluetooth support is installed but disabled until Bluetooth source arbitration
-is implemented and accepted. The native host exposes its Intel Bluetooth
-controller, so a dedicated adapter is no longer a prerequisite for discovery.
+Bluetooth A2DP support is installed and enabled on the native Intel controller.
+The endpoint advertises as `Pilot Office Bluetooth`, remains non-discoverable
+and non-pairable by default, and starts its `NoInputNoOutput` agent only during
+an operator-opened timed pairing window. Room Agent owns only its labelled
+PipeWire loopbacks and reports live Bluetooth source state to Pilot Core. Phone
+pairing, explicit trust, audible playback and duck/restoration still require an
+in-person acceptance run.
 
 The permanent native deployment replaced the original Proxmox VM after music
 playback on the VM exhibited skipping. Native Debian removes USB scheduling and
-audio virtualization from the room playback path. The current release passes
-all 19 silent endpoint checks, including Pilot Core command connectivity, while
-the K3 audio activation gate remains explicitly unarmed until an in-person
-acceptance test.
+audio virtualization from the room playback path. The 2026-08-04 immutable
+release passed all 24 silent endpoint checks and a controlled reboot, including
+K3 source/sink recovery, Home Assistant voice, AirPlay, Sendspin, Bluetooth
+bridge readiness, closed pairing state, Pilot Core commands and the display
+surface. Correcting the K3 node identity invalidated the previous audio
+fingerprint, so Core-delivered speech remains explicitly unarmed until a fresh
+supervised audible receipt is recorded.
 
 ### Bedroom display node
 
@@ -342,9 +351,10 @@ visible but do not animate. It also adds artwork-led artist/album/playlist drill
 reproducible Sendspin player for the future Pi USB DAC. The runtime is installed
 but disabled until that DAC and its stable PipeWire sink are physically
 accepted. The immutable 0.7.1 release is active with healthy web and kiosk
-services and the preceding release retained as its rollback target. The N150
-media-console build is tested but its deployment remains pending while
-`10.0.1.53` is offline.
+services and the preceding release retained as its rollback target. The Office
+N150 now runs the 0.7.2 media-console release at `10.0.2.53`; Core liveness,
+energy and now-playing projections survive reboot. Local video and HDMI remain
+disabled because the separate Media Room N150 does not yet exist.
 
 ## 5. Hardware plan
 
@@ -598,8 +608,9 @@ audio-capable authorization path.
 
 ```text
 Assistant response ─┐
-AirPlay ────────────┼── PipeWire default sink ── FiiO K3
-Music Assistant ────┘
+AirPlay ────────────┼── PipeWire default sink ── K3 USB Audio/HID
+Music Assistant ────┤
+Bluetooth A2DP ─────┘
 ```
 
 Music Assistant uses its native Sendspin protocol. AirPlay uses Shairport Sync
@@ -769,8 +780,8 @@ deployed integration, hardware boundary, or milestone status changes.
 ### Phase 1 — Office voice endpoint: operational
 
 - [x] Native Debian 13 appliance
-- [x] Stadium USB microphone
-- [x] FiiO K3 output
+- [x] K3 USB Audio/HID mono microphone source
+- [x] K3 USB Audio/HID stereo output
 - [x] Stable PipeWire defaults
 - [x] Local wake word
 - [x] Home Assistant connection
@@ -786,10 +797,14 @@ deployed integration, hardware boundary, or milestone status changes.
 - [x] Sendspin reboot persistence and automatic reconnection
 - [x] Audible Music Assistant playback acceptance test
 - [x] TIDAL provider and playback acceptance test
-- [ ] Local lossless-library acceptance test
+- [x] Local SMB FLAC transport and metadata acceptance using uniquely indexed
+      `Toto — Africa` at bounded volume
+- [ ] Physical audible local-lossless acceptance on the current K3 fingerprint
 - [x] Source-priority policy and local control/event foundation
 - [x] Audible assistant ducking and gain-restoration acceptance test
-- [ ] Bluetooth A2DP sink
+- [x] Bluetooth A2DP sink, secure pairing window, arbitration source and reboot
+      recovery deployed
+- [ ] Physical Bluetooth phone pairing, playback, duck and restoration acceptance
 
 ### Embedded nodes
 
@@ -947,15 +962,17 @@ deployed integration, hardware boundary, or milestone status changes.
    to the model.
 5. Physically accept the deployed Pilot Linux Display touch dashboard and its
    rollback, then attach and accept the Pi USB DAC and staged Sendspin player.
-6. Deploy and accept the N150 Media Console shell, mpv, HDMI audio, Denon source
-   recovery and HDR10 boundary while retaining Shield for Dolby Vision/DRM.
+6. The Office N150 Media Console shell is deployed. Defer mpv, HDMI audio,
+   Denon source recovery and the HDR10 boundary until the separate Media Room
+   N150 hardware exists; retain Shield for Dolby Vision/DRM.
 7. Install and validate the dedicated production meeting Whisper service when
    the RTX 3080 speech mode is ready, then run one long meeting from recording
    through evidence-linked review. Do not enable a speculative transcription
    fallback.
-8. Complete Bluetooth A2DP arbitration, source-switch recovery and custom
-   **Hey Pilot** wake-word acceptance. Calibrate the real 3D house only after
-   these physical audio and control milestones are stable.
+8. Pair and explicitly trust one phone, then physically accept Bluetooth
+   playback, source-switch recovery and custom **Hey Pilot** wake-word behavior.
+   Calibrate the real 3D house only after these physical audio and control
+   milestones are stable.
 
 ## 15. Decision log
 
@@ -1250,3 +1267,16 @@ deployed integration, hardware boundary, or milestone status changes.
   `pilot-core-20260803T133955Z-pre-deploy-core-0.31.1-ios-voice-20260803.1.tar.gz`
   with SHA-256
   `bb670eb7aa06b69574af23ec79e2bad9ecda5cd7fc40fa78118870172e44f7df`.
+- **4.13** — Recovered the permanent Office N150 at `10.0.2.53`, replaced
+  stale Stadium/FiiO PipeWire identities with its observed K3 combined USB
+  Audio/HID nodes, and deployed Room Agent 0.7. The endpoint now provides a
+  secure Bluetooth A2DP sink with a transient timed pairing agent, explicit
+  trust, managed loopbacks and live Core source events. Pilot Display 0.7.2
+  correctly recognizes the public Core liveness boundary. All 24 silent checks,
+  the bounded pairing-window test, local `Toto — Africa` SMB FLAC transport and
+  a controlled reboot passed with zero service restart failures. Timestamped
+  configuration archives and both previous immutable releases remain available
+  for rollback. Physical Bluetooth playback and refreshed K3 audio activation
+  remain explicit in-person gates. The test also identified third-party FLAC
+  files carrying placeholder `PMEDIA` ISRCs that Music Assistant merges; those
+  tags require library cleanup and rescan rather than endpoint work.

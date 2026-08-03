@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from pathlib import Path
 from threading import Event, Thread
 from typing import Any
@@ -14,13 +15,17 @@ from .status import collect_status
 
 class EventReporter:
     def __init__(
-        self, settings: Settings, control_state: ControlState | None = None
+        self,
+        settings: Settings,
+        control_state: ControlState | None = None,
+        bluetooth_status: Callable[[], dict[str, Any]] | None = None,
     ) -> None:
         self.settings = settings
         self.control_state = control_state or ControlState()
         self.stop_event = Event()
         self.thread = Thread(target=self._run, name="pilot-core-reporter", daemon=True)
         self.previous_sources: dict[str, bool] = {}
+        self.bluetooth_status = bluetooth_status
 
     def start(self) -> None:
         self.thread.start()
@@ -70,13 +75,15 @@ class EventReporter:
         return {
             "critical": transient.get("critical", False),
             "assistant": transient.get("assistant", False),
-            "bluetooth": False,
+            "bluetooth": status.get("bluetooth", {})
+            .get("bridge", {})
+            .get("active", False),
             "airplay": airplay_state == "Playing",
             "music": music_state == "Playing",
         }
 
     def report_once(self) -> None:
-        status = collect_status(self.settings)
+        status = collect_status(self.settings, self.bluetooth_status)
         self._post(
             "health",
             {

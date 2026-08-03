@@ -45,6 +45,8 @@ The role installs:
 - the compatible WebSocket runtime used for outbound Pilot Core commands
 - optional Open Home Foundation Linux Voice Assistant runtime
 - optional Shairport Sync AirPlay receiver routed through PipeWire
+- optional bounded Bluetooth A2DP receiver with a transient pairing agent,
+  explicit trust and Room Agent-managed PipeWire loopback
 - endpoint inventory, validation, and rollback commands
 
 The room-agent is installed into its release-specific virtual environment. The
@@ -53,6 +55,9 @@ The active release and its dependencies remain self-contained for rollback.
 
 BlueZ packages are installed in every case, but `bluetooth.service` is stopped
 and disabled unless `room_endpoint_bluetooth_enabled: true` is set for the host.
+When enabled, the controller is powered but closed to discovery and pairing.
+`pilot-bluetooth-pair open` creates the configured bounded window; its transient
+agent and pairing state are automatically stopped when the window expires.
 
 ## Configuration ownership
 
@@ -70,6 +75,7 @@ Pilot Core deployment and device registration are documented in
 ```bash
 sudo pilot-hardware-inventory
 sudo pilot-validate
+sudo pilot-bluetooth-pair status
 systemctl status pilot-room-agent --no-pager
 journalctl -u pilot-room-agent -b --no-pager
 ```

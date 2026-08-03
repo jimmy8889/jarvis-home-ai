@@ -354,12 +354,15 @@ struct HomeLabView: View {
             }
             metricBar("Used", pool.usageRatio, PilotTheme.blue)
             HStack {
-                Text(bytes(pool.allocatedBytes))
+                Text("Used \(bytes(pool.allocatedBytes))")
                 Spacer()
-                Text("of \(bytes(pool.sizeBytes))")
+                Text("Free \(bytes(pool.freeBytes))")
             }
             .font(.caption)
             .foregroundStyle(.secondary)
+            Text("\(bytes(pool.sizeBytes)) total")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
         }
         .labCard()
     }

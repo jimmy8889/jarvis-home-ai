@@ -1,0 +1,26 @@
+[Unit]
+Description=Pilot Home Lab read-only telemetry agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/.local/share/pilot-homelab-agent/source
+ExecStart=%h/.local/share/pilot-homelab-agent/venv/bin/python -m pilot_homelab_agent.main --core-url ${PILOT_CORE_URL} --device-id ${PILOT_DEVICE_ID} --token-file %h/.config/pilot-homelab-agent/device-token --interval 15
+EnvironmentFile=%h/.config/pilot-homelab-agent/agent.env
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+CapabilityBoundingSet=
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

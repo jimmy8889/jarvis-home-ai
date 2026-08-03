@@ -284,6 +284,52 @@
           <div id="room-list" class="room-list"></div>
         </section>
 
+        <section class="section-block" aria-labelledby="homelab-title">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Infrastructure</p>
+              <h2 id="homelab-title">Home Lab</h2>
+            </div>
+            <span id="homelab-status" class="status-pill status-neutral">
+              <span class="status-dot"></span>
+              Checking
+            </span>
+          </div>
+          <div id="homelab-summary" class="catalogue-metrics"></div>
+          <div class="activity-grid">
+            <article class="panel">
+              <div class="panel-heading">
+                <div><p class="eyebrow">Compute</p><h2>Proxmox nodes</h2></div>
+                <span id="homelab-node-total" class="counter">0</span>
+              </div>
+              <div id="homelab-nodes" class="timeline"></div>
+            </article>
+            <article class="panel">
+              <div class="panel-heading">
+                <div><p class="eyebrow">Storage</p><h2>TrueNAS and drives</h2></div>
+                <span id="homelab-disk-total" class="counter">0</span>
+              </div>
+              <div id="homelab-storage" class="timeline"></div>
+            </article>
+          </div>
+          <div class="activity-grid">
+            <article class="panel">
+              <div class="panel-heading">
+                <div><p class="eyebrow">Accelerators</p><h2>GPU telemetry</h2></div>
+                <span id="homelab-gpu-total" class="counter">0</span>
+              </div>
+              <div id="homelab-gpus" class="timeline"></div>
+            </article>
+            <article class="panel">
+              <div class="panel-heading">
+                <div><p class="eyebrow">Virtual estate</p><h2>Running workloads</h2></div>
+                <span id="homelab-workload-total" class="counter">0</span>
+              </div>
+              <div id="homelab-workloads" class="timeline"></div>
+            </article>
+          </div>
+        </section>
+
         <section class="split-grid">
           <article class="panel" aria-labelledby="integrations-title">
             <div class="panel-heading">

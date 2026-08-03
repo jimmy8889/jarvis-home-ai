@@ -138,7 +138,11 @@ def post(core_url: str, device_id: str, token: str, payload: dict[str, Any]) -> 
         f"{core_url.rstrip('/')}/v1/devices/{device_id}/homelab/telemetry",
         data=json.dumps(payload, separators=(",", ":")).encode(),
         method="POST",
-        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+            "X-Pilot-Device-ID": device_id,
+        },
     )
     with urlopen(request, timeout=10) as response:
         if response.status != 202:

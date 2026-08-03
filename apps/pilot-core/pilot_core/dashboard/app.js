@@ -129,6 +129,22 @@ const formatDuration = (seconds) => {
   return `${minutes}m`;
 };
 
+const formatBytes = (value) => {
+  const bytes = Number(value);
+  if (!Number.isFinite(bytes)) return "—";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let amount = Math.max(0, bytes);
+  let unit = 0;
+  while (amount >= 1024 && unit < units.length - 1) {
+    amount /= 1024;
+    unit += 1;
+  }
+  return `${amount.toFixed(unit > 2 ? 1 : 0)} ${units[unit]}`;
+};
+
+const formatPercent = (ratio) =>
+  ratio == null ? "—" : `${Math.round(Number(ratio) * 100)}%`;
+
 const setConnection = (kind, label) => {
   elements.connectionPill.className = `status-pill status-${kind}`;
   clear(elements.connectionPill);
@@ -836,6 +852,103 @@ const loadHomeIntelligence = async () => {
   renderEnergy(energy);
 };
 
+const renderHomeLabRows = (target, rows, emptyCopy, renderRow) => {
+  const list = document.querySelector(target);
+  clear(list);
+  if (!rows.length) {
+    list.append(node("p", "panel-copy", emptyCopy));
+    return;
+  }
+  rows.forEach((item) => list.append(renderRow(item)));
+};
+
+const homeLabRow = (title, detail, status, kind = "neutral") => {
+  const row = node("div", "timeline-row");
+  const copy = node("div");
+  copy.append(node("strong", "", title));
+  copy.append(node("small", "", detail));
+  row.append(copy);
+  row.append(badge(status, kind));
+  return row;
+};
+
+const renderHomeLab = (payload) => {
+  const summary = payload.summary || {};
+  const proxmox = payload.providers?.proxmox || {};
+  const truenas = payload.providers?.truenas || {};
+  const statusKind = payload.status === "healthy" ? "good" : payload.status === "stale" ? "warning" : "bad";
+  const status = document.querySelector("#homelab-status");
+  status.className = `status-pill status-${statusKind}`;
+  clear(status);
+  status.append(node("span", "status-dot"));
+  status.append(document.createTextNode(titleCase(payload.status)));
+
+  const metrics = document.querySelector("#homelab-summary");
+  clear(metrics);
+  [
+    ["Nodes", `${summary.online_node_count || 0}/${summary.node_count || 0}`],
+    ["Workloads", `${summary.running_workload_count || 0}/${summary.workload_count || 0}`],
+    ["Drives", summary.disk_count || 0],
+    ["Hottest", summary.hottest_temperature_c == null ? "—" : `${Math.round(summary.hottest_temperature_c)}°C`],
+  ].forEach(([label, value]) => {
+    const metric = node("div");
+    metric.append(node("span", "", label));
+    metric.append(node("strong", "", value));
+    metrics.append(metric);
+  });
+
+  const nodes = proxmox.nodes || [];
+  text("#homelab-node-total", nodes.length);
+  renderHomeLabRows("#homelab-nodes", nodes, "No Proxmox node data.", (item) =>
+    homeLabRow(
+      item.name,
+      `CPU ${formatPercent(item.cpu_ratio)} · RAM ${formatPercent(item.memory_ratio)} · ${formatDuration(item.uptime_seconds)}`,
+      titleCase(item.status),
+      item.status === "online" ? "good" : "bad",
+    ),
+  );
+
+  const disks = truenas.disks || [];
+  text("#homelab-disk-total", disks.length);
+  renderHomeLabRows(
+    "#homelab-storage",
+    disks,
+    truenas.configured ? "No TrueNAS drive data." : "TrueNAS API key required.",
+    (item) => homeLabRow(
+      item.name,
+      `${item.model || "Disk"} · ${formatBytes(item.size_bytes)} · SMART ${item.smart_enabled ? "on" : "unknown"}`,
+      item.temperature_c == null ? "—" : `${Math.round(item.temperature_c)}°C`,
+      item.temperature_c >= 55 ? "bad" : "good",
+    ),
+  );
+
+  const gpus = (payload.agents || []).flatMap((agent) =>
+    (agent.gpus || []).map((gpu) => ({ ...gpu, hostname: agent.hostname, stale: agent.stale })),
+  );
+  text("#homelab-gpu-total", gpus.length);
+  renderHomeLabRows("#homelab-gpus", gpus, "No GPU agents reporting.", (item) =>
+    homeLabRow(
+      item.name,
+      `${item.hostname} · GPU ${formatPercent(item.utilization_ratio)} · VRAM ${formatBytes(item.memory_used_bytes)}`,
+      item.temperature_c == null ? "—" : `${Math.round(item.temperature_c)}°C`,
+      item.stale ? "warning" : "good",
+    ),
+  );
+
+  const workloads = proxmox.workloads || [];
+  text("#homelab-workload-total", `${summary.running_workload_count || 0}/${workloads.length}`);
+  renderHomeLabRows("#homelab-workloads", workloads.slice(0, 16), "No workload data.", (item) =>
+    homeLabRow(
+      item.name,
+      `${String(item.kind || "vm").toUpperCase()} · ${item.node} · RAM ${formatPercent(item.memory_ratio)}`,
+      titleCase(item.status),
+      item.status === "running" ? "good" : "neutral",
+    ),
+  );
+};
+
+const loadHomeLab = async () => renderHomeLab(await api("/v1/homelab"));
+
 const render = (payload) => {
   renderSummary(payload);
   renderRooms(payload);
@@ -857,9 +970,10 @@ const loadDashboard = async ({ announce = false } = {}) => {
   elements.refreshButton.disabled = true;
   setConnection("neutral", "Refreshing");
   try {
-    const [payload, homeResult] = await Promise.all([
+    const [payload, homeResult, homelabResult] = await Promise.all([
       api("/v1/operations"),
       loadHomeIntelligence().then(() => null).catch((error) => error),
+      loadHomeLab().then(() => null).catch((error) => error),
     ]);
     render(payload);
     elements.accessPanel.hidden = true;
@@ -869,6 +983,9 @@ const loadDashboard = async ({ announce = false } = {}) => {
     setConnection("good", "Live");
     if (homeResult instanceof Error && homeResult.message !== "unauthorized") {
       renderHomeSync({ status: "unavailable" });
+    }
+    if (homelabResult instanceof Error && homelabResult.message !== "unauthorized") {
+      showToast(`Home Lab: ${homelabResult.message}`);
     }
     if (announce) {
       showToast("Pilot Core state refreshed.");

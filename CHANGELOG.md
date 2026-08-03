@@ -15,6 +15,8 @@
 - Added a dependency-light, outbound-only `pilot-homelab-agent` and hardened
   systemd unit for hosts whose detailed thermal or GPU state is not available
   through the management APIs.
+- Extended the administrator dashboard with live node, workload, GPU and
+  TrueNAS drive sections backed by the same normalized client contract.
 
 ## 0.31.1 — 2026-08-03
 

@@ -234,30 +234,40 @@ class TrueNASMonitor:
         token = read_secret(self.settings.truenas_token_env)
         if not self.settings.truenas_url or not token:
             raise HomeLabProviderError("TrueNAS monitoring is not configured")
+        if not self._websocket_url().startswith("wss://"):
+            raise HomeLabProviderError(
+                "TrueNAS API keys require encrypted WSS transport"
+            )
         ssl_context: ssl.SSLContext | bool | None = None
         if self._websocket_url().startswith("wss://") and not self.settings.truenas_verify_tls:
             ssl_context = ssl._create_unverified_context()
         try:
             async with self.websocket_factory(
                 self._websocket_url(),
-                additional_headers={"Authorization": f"Bearer {token}"},
                 open_timeout=10,
                 close_timeout=2,
                 max_size=8_000_000,
                 ssl=ssl_context,
             ) as socket:
-                system = await self._call(socket, 1, "system.info", [])
-                pools = await self._call(socket, 2, "pool.query", [[], {}])
-                disks = await self._call(socket, 3, "disk.query", [[], {}])
+                authenticated = await self._call(
+                    socket, 1, "auth.login_with_api_key", [token]
+                )
+                if authenticated is not True:
+                    raise HomeLabProviderError(
+                        "TrueNAS rejected the configured API key"
+                    )
+                system = await self._call(socket, 2, "system.info", [])
+                pools = await self._call(socket, 3, "pool.query", [[], {}])
+                disks = await self._call(socket, 4, "disk.query", [[], {}])
                 names = [
                     str(item.get("name"))
                     for item in disks
                     if isinstance(item, dict) and item.get("name")
                 ]
                 temperatures = await self._optional_call(
-                    socket, 4, "disk.temperatures", [names, True], {}
+                    socket, 5, "disk.temperatures", [names, True], {}
                 )
-                alerts = await self._optional_call(socket, 5, "alert.list", [], [])
+                alerts = await self._optional_call(socket, 6, "alert.list", [], [])
         except (OSError, TimeoutError, ValueError, TypeError) as error:
             raise HomeLabProviderError("TrueNAS is unavailable") from error
         return self._normalize(system, pools, disks, temperatures, alerts)
@@ -334,6 +344,9 @@ class TrueNASMonitor:
                 critical_c = _number(
                     temperature.get("critical") or temperature.get("critical_temperature")
                 )
+            elif isinstance(temperature, (list, tuple)):
+                temperature_c = _number(temperature[0]) if temperature else None
+                critical_c = _number(temperature[1]) if len(temperature) > 1 else None
             else:
                 temperature_c = _number(temperature)
                 critical_c = None

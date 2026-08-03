@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import unittest
 
@@ -21,6 +22,96 @@ class FakeProvider:
 
 
 class HomeLabTests(unittest.IsolatedAsyncioTestCase):
+    async def test_truenas_authenticates_before_requesting_inventory(self) -> None:
+        os.environ["TEST_TRUENAS_KEY"] = "test-api-key"
+        requests: list[dict] = []
+
+        class FakeSocket:
+            async def send(self, payload: str) -> None:
+                requests.append(json.loads(payload))
+
+            async def recv(self) -> str:
+                request = requests[-1]
+                results = {
+                    "auth.login_with_api_key": True,
+                    "system.info": {"hostname": "nas"},
+                    "pool.query": [],
+                    "disk.query": [],
+                    "disk.temperatures": {},
+                    "alert.list": [],
+                }
+                return json.dumps(
+                    {"jsonrpc": "2.0", "id": request["id"], "result": results[request["method"]]}
+                )
+
+        class FakeConnection:
+            async def __aenter__(self) -> FakeSocket:
+                return FakeSocket()
+
+            async def __aexit__(self, *_args: object) -> None:
+                return None
+
+        def websocket_factory(*_args: object, **_kwargs: object) -> FakeConnection:
+            return FakeConnection()
+
+        monitor = TrueNASMonitor(
+            IntegrationSettings(
+                truenas_url="https://nas.example.test",
+                truenas_token_env="TEST_TRUENAS_KEY",
+            ),
+            websocket_factory=websocket_factory,
+        )
+        snapshot = await monitor.snapshot()
+        self.assertEqual(snapshot["system"]["hostname"], "nas")
+        self.assertEqual(requests[0]["method"], "auth.login_with_api_key")
+        self.assertEqual(requests[0]["params"], ["test-api-key"])
+        os.environ.pop("TEST_TRUENAS_KEY", None)
+
+    async def test_truenas_reports_rejected_key_without_inventory_calls(self) -> None:
+        os.environ["TEST_TRUENAS_KEY"] = "rejected-api-key"
+        requests: list[dict] = []
+
+        class FakeSocket:
+            async def send(self, payload: str) -> None:
+                requests.append(json.loads(payload))
+
+            async def recv(self) -> str:
+                return json.dumps({"jsonrpc": "2.0", "id": 1, "result": False})
+
+        class FakeConnection:
+            async def __aenter__(self) -> FakeSocket:
+                return FakeSocket()
+
+            async def __aexit__(self, *_args: object) -> None:
+                return None
+
+        monitor = TrueNASMonitor(
+            IntegrationSettings(
+                truenas_url="https://nas.example.test",
+                truenas_token_env="TEST_TRUENAS_KEY",
+            ),
+            websocket_factory=lambda *_args, **_kwargs: FakeConnection(),
+        )
+        with self.assertRaisesRegex(HomeLabProviderError, "rejected"):
+            await monitor.snapshot()
+        self.assertEqual([request["method"] for request in requests], ["auth.login_with_api_key"])
+        os.environ.pop("TEST_TRUENAS_KEY", None)
+
+    async def test_truenas_refuses_to_send_key_over_plain_websocket(self) -> None:
+        os.environ["TEST_TRUENAS_KEY"] = "must-not-be-sent"
+        monitor = TrueNASMonitor(
+            IntegrationSettings(
+                truenas_url="http://nas.example.test",
+                truenas_token_env="TEST_TRUENAS_KEY",
+            ),
+            websocket_factory=lambda *_args, **_kwargs: self.fail(
+                "insecure connection must not be opened"
+            ),
+        )
+        with self.assertRaisesRegex(HomeLabProviderError, "encrypted WSS"):
+            await monitor.snapshot()
+        os.environ.pop("TEST_TRUENAS_KEY", None)
+
     async def test_proxmox_snapshot_normalizes_cluster_resources(self) -> None:
         os.environ["TEST_PVE_SECRET"] = "secret"
 
@@ -92,11 +183,12 @@ class HomeLabTests(unittest.IsolatedAsyncioTestCase):
             {"hostname": "truenas", "version": "25.10", "physmem": 64},
             [{"id": 1, "name": "tank", "status": "ONLINE", "healthy": True, "size": 100, "allocated": 40, "free": 60}],
             [{"name": "sda", "model": "Disk", "serial": "ABC", "size": 100, "togglesmart": True}],
-            {"sda": 38},
+            {"sda": [38, 70]},
             [{"uuid": "alert-1", "level": "WARNING", "formatted": "Test alert", "dismissed": False}],
         )
         self.assertEqual(snapshot["pools"][0]["usage_ratio"], 0.4)
         self.assertEqual(snapshot["disks"][0]["temperature_c"], 38)
+        self.assertEqual(snapshot["disks"][0]["critical_temperature_c"], 70)
         self.assertTrue(snapshot["disks"][0]["smart_enabled"])
         self.assertEqual(snapshot["alerts"][0]["title"], "Test alert")
 

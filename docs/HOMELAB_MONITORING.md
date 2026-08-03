@@ -16,6 +16,11 @@ single-use 120-second confirmation before submitting the operation.
 TrueNAS uses a dedicated API key and reports system identity, pool health,
 allocated/free capacity, disks, SMART state, disk temperature and active
 alerts. Store the key only in the `TRUENAS_API_KEY_FILE` deployment secret.
+Pilot authenticates explicitly with `auth.login_with_api_key` before issuing
+inventory calls; a bearer header on the WebSocket upgrade does not create an
+authenticated middleware session on current TrueNAS SCALE releases.
+Core refuses to transmit an API key unless the configured transport resolves
+to `wss://`.
 
 Pilot Core 0.32 introduces one normalized, read-only contract for home-lab
 health. Clients consume Pilot rather than retaining Proxmox or TrueNAS secrets.
@@ -61,5 +66,6 @@ privileges and makes the host filesystem read-only to the process.
 5. Revoking any provider or device token affects only that provider.
 6. Restart Pilot Core and verify the dashboard recovers without client repair.
 
-TrueNAS remains intentionally marked “API key required” until its dedicated
-key is installed. Do not substitute root SSH credentials for the API key.
+If TrueNAS reports `Invalid API key`, create a new dedicated key and replace
+only the file-backed secret. Do not substitute root SSH credentials for the
+API key.

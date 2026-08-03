@@ -65,9 +65,12 @@ proxmox_token_secret_env = "PROXMOX_TOKEN_SECRET"
 proxmox_migration_token_id = "pilot-migrate@pve!pilot-core"
 proxmox_migration_token_secret_env = "PROXMOX_MIGRATION_TOKEN_SECRET"
 proxmox_verify_tls = false
-truenas_url = "http://10.0.1.102"
+truenas_url = "https://10.0.1.102"
 truenas_token_env = "TRUENAS_API_KEY"
-truenas_verify_tls = true
+# TrueNAS currently presents its factory self-signed localhost certificate.
+# Transport remains encrypted, but hostname/CA verification must stay disabled
+# until a LAN-valid certificate is installed on the appliance.
+truenas_verify_tls = false
 homelab_cache_seconds = 15
 tts_provider = "home_assistant"
 tts_url = ""

@@ -1287,3 +1287,8 @@ deployed integration, hardware boundary, or milestone status changes.
   Pilot iOS adds a cached Home Lab tab for node, accelerator, storage, thermal,
   alert and virtual-estate state. Upstream credentials remain server-side and
   provider failures degrade independently instead of hiding the rest of the lab.
+  Commit `6a99a81` was promoted on apps01 as immutable image
+  `core-0.32.0-homelab-20260804.2`. Production reports all three Proxmox nodes
+  online plus live RTX 3080 and RTX 3090 agents. TrueNAS remains explicitly
+  pending its dedicated API key. The signed Pilot app was installed and
+  launch-verified on the paired iPhone.

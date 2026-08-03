@@ -421,13 +421,31 @@ class HomeLabService:
         detail = await self.proxmox.workload_detail(node, kind, vmid)
         config = detail.get("config") or {}
         locked = config.get("lock")
-        local_disks = [
-            key for key, value in config.items()
+        disk_values = [
+            value for key, value in config.items()
             if key.startswith(("scsi", "sata", "virtio", "ide", "rootfs", "mp"))
-            and isinstance(value, str) and value.startswith(("local:", "local-lvm:"))
+            and isinstance(value, str) and ":" in value
         ]
-        if locked or local_disks:
-            reason = "workload is locked" if locked else "workload uses node-local storage"
+        storage_names = {value.split(":", 1)[0] for value in disk_values}
+        storage_rows = await self.proxmox._get("/storage")
+        definitions = {
+            str(item.get("storage")): item
+            for item in storage_rows if isinstance(item, dict) and item.get("storage")
+        }
+        unsafe_storage = []
+        for name in sorted(storage_names):
+            definition = definitions.get(name) or {}
+            allowed_nodes = {
+                value.strip() for value in str(definition.get("nodes") or "").split(",")
+                if value.strip()
+            }
+            if not bool(definition.get("shared")) or (allowed_nodes and target not in allowed_nodes):
+                unsafe_storage.append(name)
+        if locked or unsafe_storage:
+            reason = (
+                "workload is locked" if locked
+                else f"storage is not shared with {target}: {', '.join(unsafe_storage)}"
+            )
             raise HomeLabProviderError(f"Migration is not safe: {reason}")
         migration_id = secrets.token_urlsafe(18)
         expires_at = time.monotonic() + 120

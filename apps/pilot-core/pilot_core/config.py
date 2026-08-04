@@ -63,6 +63,7 @@ class IntegrationSettings:
     indoor_temperature_entity_id: str = ""
     temperature_history_hours: int = 24
     home_timezone: str = "Australia/Brisbane"
+    vehicle_home_geofence_entity_id: str = ""
     energy_solar_power_entity_id: str = ""
     energy_grid_power_entity_id: str = ""
     energy_battery_power_entity_id: str = ""
@@ -131,6 +132,15 @@ class IntegrationSettings:
     llm_max_output_tokens: int = 1024
     llm_max_tool_rounds: int = 4
     llm_context_turns: int = 12
+    llm_fast_context_tokens: int = 8_192
+    llm_standard_context_tokens: int = 16_384
+    llm_deep_context_tokens: int = 65_536
+    llm_hermes_context_tokens: int = 65_536
+    llm_experimental_context_tokens: int = 131_072
+    llm_fast_output_tokens: int = 512
+    llm_standard_output_tokens: int = 1_024
+    llm_deep_output_tokens: int = 2_048
+    llm_hermes_output_tokens: int = 4_096
     llm_backends: tuple[LLMBackend, ...] = ()
     meeting_stt_url: str = ""
     meeting_stt_token_env: str = "PILOT_MEETING_STT_TOKEN"
@@ -220,6 +230,10 @@ VEHICLE_TELEMETRY_KEYS = frozenset(
         "charge_rate_kw",
         "time_to_full_hours",
         "energy_added_kwh",
+        "navigation_destination",
+        "distance_to_destination_km",
+        "time_to_destination_hours",
+        "state_of_charge_at_arrival_percent",
         "tyre_front_left_bar",
         "tyre_front_right_bar",
         "tyre_rear_left_bar",
@@ -274,7 +288,11 @@ class VehicleControl:
     entity_id: str = ""
     device_id: str = ""
     observable_entity_id: str = ""
-    provider_vehicle_id_env: str = ""
+    home_domain: str = ""
+    home_service: str = ""
+    home_entity_id: str = ""
+    home_device_id: str = ""
+    home_observable_entity_id: str = ""
 
 
 @dataclass(frozen=True)
@@ -417,6 +435,21 @@ def _parse_vehicle(value: dict[str, object]) -> Vehicle:
         service = _require_nonempty(
             raw_control.get("service"), f"vehicle[{vehicle_id}].controls.{action}.service"
         )
+        if action == "send_route" and (domain, service) != (
+            "pilot_vehicle",
+            "send_navigation",
+        ):
+            raise ValueError(
+                f"vehicle[{vehicle_id}].controls.send_route must use "
+                "pilot_vehicle.send_navigation"
+            )
+        if action == "send_route" and (
+            not str(raw_control.get("device_id", "")).strip()
+            or str(raw_control.get("entity_id", "")).strip()
+        ):
+            raise ValueError(
+                f"vehicle[{vehicle_id}].controls.send_route requires a device_id only"
+            )
         controls.append(
             VehicleControl(
                 action=action,
@@ -427,8 +460,30 @@ def _parse_vehicle(value: dict[str, object]) -> Vehicle:
                 observable_entity_id=str(
                     raw_control.get("observable_entity_id", "")
                 ).strip(),
-                provider_vehicle_id_env=str(
-                    raw_control.get("provider_vehicle_id_env", "")
+                home_domain=str(
+                    raw_control.get("home", {}).get("domain", "")
+                    if isinstance(raw_control.get("home", {}), dict)
+                    else ""
+                ).strip(),
+                home_service=str(
+                    raw_control.get("home", {}).get("service", "")
+                    if isinstance(raw_control.get("home", {}), dict)
+                    else ""
+                ).strip(),
+                home_entity_id=str(
+                    raw_control.get("home", {}).get("entity_id", "")
+                    if isinstance(raw_control.get("home", {}), dict)
+                    else ""
+                ).strip(),
+                home_device_id=str(
+                    raw_control.get("home", {}).get("device_id", "")
+                    if isinstance(raw_control.get("home", {}), dict)
+                    else ""
+                ).strip(),
+                home_observable_entity_id=str(
+                    raw_control.get("home", {}).get("observable_entity_id", "")
+                    if isinstance(raw_control.get("home", {}), dict)
+                    else ""
                 ).strip(),
             )
         )
@@ -665,6 +720,9 @@ def load_settings(path: str | Path) -> Settings:
         home_timezone=str(
             integration_values.get("home_timezone", "Australia/Brisbane")
         ).strip(),
+        vehicle_home_geofence_entity_id=str(
+            integration_values.get("vehicle_home_geofence_entity_id", "")
+        ).strip(),
         energy_solar_power_entity_id=str(
             integration_values.get("energy_solar_power_entity_id", "")
         ).strip(),
@@ -819,6 +877,15 @@ def load_settings(path: str | Path) -> Settings:
         ),
         llm_max_tool_rounds=int(integration_values.get("llm_max_tool_rounds", 4)),
         llm_context_turns=int(integration_values.get("llm_context_turns", 12)),
+        llm_fast_context_tokens=int(integration_values.get("llm_fast_context_tokens", 8192)),
+        llm_standard_context_tokens=int(integration_values.get("llm_standard_context_tokens", 16384)),
+        llm_deep_context_tokens=int(integration_values.get("llm_deep_context_tokens", 65536)),
+        llm_hermes_context_tokens=int(integration_values.get("llm_hermes_context_tokens", 65536)),
+        llm_experimental_context_tokens=int(integration_values.get("llm_experimental_context_tokens", 131072)),
+        llm_fast_output_tokens=int(integration_values.get("llm_fast_output_tokens", 512)),
+        llm_standard_output_tokens=int(integration_values.get("llm_standard_output_tokens", 1024)),
+        llm_deep_output_tokens=int(integration_values.get("llm_deep_output_tokens", 2048)),
+        llm_hermes_output_tokens=int(integration_values.get("llm_hermes_output_tokens", 4096)),
         llm_backends=tuple(_parse_llm_backend(item) for item in raw_llm_backends),
         meeting_stt_url=str(integration_values.get("meeting_stt_url", "")).rstrip("/"),
         meeting_stt_token_env=str(
@@ -909,6 +976,25 @@ def load_settings(path: str | Path) -> Settings:
         raise ValueError(
             "integrations.llm_max_output_tokens must be between 64 and 8192"
         )
+    context_budgets = {
+        "fast": integrations.llm_fast_context_tokens,
+        "standard": integrations.llm_standard_context_tokens,
+        "deep": integrations.llm_deep_context_tokens,
+        "hermes": integrations.llm_hermes_context_tokens,
+        "experimental": integrations.llm_experimental_context_tokens,
+    }
+    if any(value < 1024 or value > 262_144 for value in context_budgets.values()):
+        raise ValueError("integrations.llm context budgets must be between 1024 and 262144")
+    if any(
+        value < 64 or value > 8192
+        for value in (
+            integrations.llm_fast_output_tokens,
+            integrations.llm_standard_output_tokens,
+            integrations.llm_deep_output_tokens,
+            integrations.llm_hermes_output_tokens,
+        )
+    ):
+        raise ValueError("integrations.llm mode output budgets must be between 64 and 8192")
     backend_ids: set[str] = set()
     allowed_llm_roles = {
         "assistant",

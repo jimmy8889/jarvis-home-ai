@@ -34,6 +34,7 @@ outdoor_temperature_entity_id = "sensor.gw1100c_outdoor_temperature"
 indoor_temperature_entity_id = "sensor.temp3_temperature"
 temperature_history_hours = 24
 home_timezone = "Australia/Brisbane"
+vehicle_home_geofence_entity_id = "sensor.tesla_geofence"
 energy_solar_power_entity_id = "sensor.pv_power_mqtt_abs"
 energy_grid_power_entity_id = "sensor.saj_ct_grid_power_total"
 energy_battery_power_entity_id = "sensor.saj_battery_power_2"
@@ -101,6 +102,15 @@ llm_timeout_seconds = 60
 llm_max_output_tokens = 1024
 llm_max_tool_rounds = 4
 llm_context_turns = 12
+llm_fast_context_tokens = 8192
+llm_standard_context_tokens = 16384
+llm_deep_context_tokens = 65536
+llm_hermes_context_tokens = 65536
+llm_experimental_context_tokens = 131072
+llm_fast_output_tokens = 512
+llm_standard_output_tokens = 1024
+llm_deep_output_tokens = 2048
+llm_hermes_output_tokens = 4096
 meeting_stt_url = ""
 meeting_stt_token_env = "PILOT_MEETING_STT_TOKEN"
 meeting_stt_model = "whisper-1"
@@ -148,178 +158,244 @@ default_climate_target_c = 22.0
 manual_battery_baseline_kwh = 75.0
 
 [vehicles.telemetry]
-state = "sensor.tesla_state"
-online = "binary_sensor.jarvis_online"
-battery_percent = "sensor.jarvis_battery"
-rated_range_km = "sensor.tesla_rated_battery_range_km"
-ideal_range_km = "sensor.tesla_ideal_battery_range_km"
-odometer_km = "sensor.jarvis_odometer"
-latitude = "device_tracker.jarvis_location_tracker"
-longitude = "device_tracker.jarvis_location_tracker"
-location_name = "device_tracker.jarvis_location_tracker"
-inside_temperature_c = "sensor.jarvis_temperature_inside"
-outside_temperature_c = "sensor.jarvis_temperature_outside"
-locked = "lock.jarvis_doors"
-doors = "binary_sensor.jarvis_doors"
-windows = "binary_sensor.jarvis_windows"
-frunk = "cover.jarvis_frunk"
-trunk = "cover.jarvis_trunk"
-software_version = "sensor.tesla_version"
-software_update = "update.jarvis_software_update"
-charging_state = "sensor.tesla_charging_state"
-charge_port = "cover.jarvis_charger_door"
-charge_limit_percent = "sensor.tesla_charge_limit_soc"
-charge_rate_kw = "sensor.jarvis_charger_power"
-time_to_full_hours = "sensor.tesla_time_to_full_charge"
-energy_added_kwh = "sensor.jarvis_energy_added"
-tyre_front_left_bar = "sensor.tesla_tpms_pressure_fl"
-tyre_front_right_bar = "sensor.tesla_tpms_pressure_fr"
-tyre_rear_left_bar = "sensor.tesla_tpms_pressure_rl"
-tyre_rear_right_bar = "sensor.tesla_tpms_pressure_rr"
+state = "binary_sensor.jarvis_status"
+online = "binary_sensor.jarvis_status"
+battery_percent = "sensor.jarvis_battery_level"
+rated_range_km = "sensor.jarvis_battery_range"
+odometer_km = "sensor.jarvis_odometer_2"
+latitude = "device_tracker.jarvis_location"
+longitude = "device_tracker.jarvis_location"
+location_name = "device_tracker.jarvis_location"
+inside_temperature_c = "sensor.jarvis_inside_temperature"
+outside_temperature_c = "sensor.jarvis_outside_temperature"
+locked = "lock.jarvis_lock"
+frunk = "cover.jarvis_frunk_2"
+trunk = "cover.jarvis_trunk_2"
+charging_state = "sensor.jarvis_charging"
+charge_port = "cover.jarvis_charge_port_door"
+charge_limit_percent = "number.jarvis_charge_limit_2"
+charge_rate_kw = "sensor.jarvis_charger_power_2"
+time_to_full_hours = "sensor.jarvis_time_to_full_charge"
+energy_added_kwh = "sensor.jarvis_charge_energy_added"
+navigation_destination = "sensor.jarvis_destination"
+distance_to_destination_km = "sensor.jarvis_distance_to_arrival_2"
+time_to_destination_hours = "sensor.jarvis_time_to_arrival"
+state_of_charge_at_arrival_percent = "sensor.jarvis_state_of_charge_at_arrival"
+tyre_front_left_bar = "sensor.jarvis_tire_pressure_front_left"
+tyre_front_right_bar = "sensor.jarvis_tire_pressure_front_right"
+tyre_rear_left_bar = "sensor.jarvis_tire_pressure_rear_left"
+tyre_rear_right_bar = "sensor.jarvis_tire_pressure_rear_right"
 
 [vehicles.controls.wake]
 domain = "button"
 service = "press"
-entity_id = "button.jarvis_wake_up"
+entity_id = "button.jarvis_wake"
+
+[vehicles.controls.wake.home]
+domain = "button"
+service = "press"
+entity_id = "button.tesla_ble_039d9c_wake_up"
 
 [vehicles.controls.lock]
 domain = "lock"
 service = "lock"
-entity_id = "lock.jarvis_doors"
-observable_entity_id = "lock.jarvis_doors"
+entity_id = "lock.jarvis_lock"
+observable_entity_id = "lock.jarvis_lock"
+
+[vehicles.controls.lock.home]
+domain = "lock"
+service = "lock"
+entity_id = "lock.tesla_ble_lock_car"
 
 [vehicles.controls.unlock]
 domain = "lock"
 service = "unlock"
-entity_id = "lock.jarvis_doors"
-observable_entity_id = "lock.jarvis_doors"
+entity_id = "lock.jarvis_lock"
+observable_entity_id = "lock.jarvis_lock"
+
+[vehicles.controls.unlock.home]
+domain = "lock"
+service = "unlock"
+entity_id = "lock.tesla_ble_lock_car"
 
 [vehicles.controls.open_frunk]
 domain = "cover"
 service = "open_cover"
-entity_id = "cover.jarvis_frunk"
-observable_entity_id = "cover.jarvis_frunk"
+entity_id = "cover.jarvis_frunk_2"
+observable_entity_id = "cover.jarvis_frunk_2"
+
+[vehicles.controls.open_frunk.home]
+domain = "cover"
+service = "open_cover"
+entity_id = "cover.tesla_ble_frunk"
 
 [vehicles.controls.open_trunk]
 domain = "cover"
 service = "open_cover"
-entity_id = "cover.jarvis_trunk"
-observable_entity_id = "cover.jarvis_trunk"
+entity_id = "cover.jarvis_trunk_2"
+observable_entity_id = "cover.jarvis_trunk_2"
+
+[vehicles.controls.open_trunk.home]
+domain = "cover"
+service = "open_cover"
+entity_id = "cover.tesla_ble_boot"
 
 [vehicles.controls.close_trunk]
 domain = "cover"
 service = "close_cover"
-entity_id = "cover.jarvis_trunk"
-observable_entity_id = "cover.jarvis_trunk"
+entity_id = "cover.jarvis_trunk_2"
+observable_entity_id = "cover.jarvis_trunk_2"
+
+[vehicles.controls.close_trunk.home]
+domain = "cover"
+service = "close_cover"
+entity_id = "cover.tesla_ble_boot"
 
 [vehicles.controls.vent_windows]
 domain = "cover"
 service = "open_cover"
-entity_id = "cover.jarvis_windows"
-observable_entity_id = "cover.jarvis_windows"
+entity_id = "cover.jarvis_windows_2"
+observable_entity_id = "cover.jarvis_windows_2"
+
+[vehicles.controls.vent_windows.home]
+domain = "cover"
+service = "open_cover"
+entity_id = "cover.tesla_ble_vent"
 
 [vehicles.controls.close_windows]
 domain = "cover"
 service = "close_cover"
-entity_id = "cover.jarvis_windows"
-observable_entity_id = "cover.jarvis_windows"
+entity_id = "cover.jarvis_windows_2"
+observable_entity_id = "cover.jarvis_windows_2"
+
+[vehicles.controls.close_windows.home]
+domain = "cover"
+service = "close_cover"
+entity_id = "cover.tesla_ble_vent"
 
 [vehicles.controls.climate_on]
 domain = "climate"
 service = "set_hvac_mode"
-entity_id = "climate.jarvis_hvac_climate_system"
-observable_entity_id = "climate.jarvis_hvac_climate_system"
+entity_id = "climate.jarvis_climate"
+observable_entity_id = "climate.jarvis_climate"
+
+[vehicles.controls.climate_on.home]
+domain = "switch"
+service = "turn_on"
+entity_id = "switch.tesla_ble_climate"
 
 [vehicles.controls.climate_off]
 domain = "climate"
 service = "set_hvac_mode"
-entity_id = "climate.jarvis_hvac_climate_system"
-observable_entity_id = "climate.jarvis_hvac_climate_system"
+entity_id = "climate.jarvis_climate"
+observable_entity_id = "climate.jarvis_climate"
+
+[vehicles.controls.climate_off.home]
+domain = "switch"
+service = "turn_off"
+entity_id = "switch.tesla_ble_climate"
 
 [vehicles.controls.set_temperature]
 domain = "climate"
 service = "set_temperature"
-entity_id = "climate.jarvis_hvac_climate_system"
+entity_id = "climate.jarvis_climate"
 
 [vehicles.controls.set_seat_climate_front_right]
 domain = "select"
 service = "select_option"
-entity_id = "select.jarvis_heated_seat_right"
-observable_entity_id = "select.jarvis_heated_seat_right"
+entity_id = "select.jarvis_seat_heater_front_right"
+observable_entity_id = "select.jarvis_seat_heater_front_right"
 
 [vehicles.controls.set_steering_heat]
 domain = "select"
 service = "select_option"
-entity_id = "select.jarvis_heated_steering_wheel"
-observable_entity_id = "select.jarvis_heated_steering_wheel"
+entity_id = "select.jarvis_steering_wheel_heater"
+observable_entity_id = "select.jarvis_steering_wheel_heater"
 
 [vehicles.controls.start_charging]
 domain = "switch"
 service = "turn_on"
-entity_id = "switch.jarvis_charger"
-observable_entity_id = "switch.jarvis_charger"
+entity_id = "switch.jarvis_charge"
+observable_entity_id = "switch.jarvis_charge"
+
+[vehicles.controls.start_charging.home]
+domain = "switch"
+service = "turn_on"
+entity_id = "switch.tesla_ble_charger"
 
 [vehicles.controls.stop_charging]
 domain = "switch"
 service = "turn_off"
-entity_id = "switch.jarvis_charger"
-observable_entity_id = "switch.jarvis_charger"
+entity_id = "switch.jarvis_charge"
+observable_entity_id = "switch.jarvis_charge"
+
+[vehicles.controls.stop_charging.home]
+domain = "switch"
+service = "turn_off"
+entity_id = "switch.tesla_ble_charger"
 
 [vehicles.controls.set_charge_limit]
 domain = "number"
 service = "set_value"
-entity_id = "number.jarvis_charge_limit"
-observable_entity_id = "number.jarvis_charge_limit"
+entity_id = "number.jarvis_charge_limit_2"
+observable_entity_id = "number.jarvis_charge_limit_2"
+
+[vehicles.controls.set_charge_limit.home]
+domain = "number"
+service = "set_value"
+entity_id = "number.tesla_ble_charging_limit"
 
 [vehicles.controls.sentry_on]
 domain = "switch"
 service = "turn_on"
-entity_id = "switch.jarvis_sentry_mode"
-observable_entity_id = "switch.jarvis_sentry_mode"
+entity_id = "switch.jarvis_sentry_mode_2"
+observable_entity_id = "switch.jarvis_sentry_mode_2"
+
+[vehicles.controls.sentry_on.home]
+domain = "switch"
+service = "turn_on"
+entity_id = "switch.tesla_ble_sentry_mode"
 
 [vehicles.controls.sentry_off]
 domain = "switch"
 service = "turn_off"
-entity_id = "switch.jarvis_sentry_mode"
-observable_entity_id = "switch.jarvis_sentry_mode"
+entity_id = "switch.jarvis_sentry_mode_2"
+observable_entity_id = "switch.jarvis_sentry_mode_2"
 
-[vehicles.controls.valet_on]
-domain = "switch"
-service = "turn_on"
-entity_id = "switch.jarvis_valet_mode"
-observable_entity_id = "switch.jarvis_valet_mode"
-
-[vehicles.controls.valet_off]
+[vehicles.controls.sentry_off.home]
 domain = "switch"
 service = "turn_off"
-entity_id = "switch.jarvis_valet_mode"
-observable_entity_id = "switch.jarvis_valet_mode"
+entity_id = "switch.tesla_ble_sentry_mode"
 
 [vehicles.controls.flash_lights]
 domain = "button"
 service = "press"
-entity_id = "button.jarvis_flash_lights"
+entity_id = "button.jarvis_flash_lights_2"
+
+[vehicles.controls.flash_lights.home]
+domain = "button"
+service = "press"
+entity_id = "button.tesla_ble_flash_light"
 
 [vehicles.controls.honk_horn]
 domain = "button"
 service = "press"
-entity_id = "button.jarvis_horn"
+entity_id = "button.jarvis_honk_horn"
+
+[vehicles.controls.honk_horn.home]
+domain = "button"
+service = "press"
+entity_id = "button.tesla_ble_039d9c_sound_horn"
 
 [vehicles.controls.remote_start]
 domain = "button"
 service = "press"
-entity_id = "button.jarvis_remote_start"
-
-[vehicles.controls.install_software]
-domain = "update"
-service = "install"
-entity_id = "update.jarvis_software_update"
-observable_entity_id = "update.jarvis_software_update"
+entity_id = "button.jarvis_keyless_driving"
 
 [vehicles.controls.send_route]
-domain = "tesla_custom"
-service = "api"
-provider_vehicle_id_env = "PILOT_TESLA_VEHICLE_ID"
+domain = "pilot_vehicle"
+service = "send_navigation"
+device_id = "bb68e0870d7405246b9d8e66eaaa017b"
 
 [[rooms]]
 id = "bedroom"

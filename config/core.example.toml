@@ -36,6 +36,7 @@ outdoor_temperature_entity_id = ""
 indoor_temperature_entity_id = ""
 temperature_history_hours = 24
 home_timezone = "Australia/Brisbane"
+vehicle_home_geofence_entity_id = "sensor.tesla_geofence"
 # Optional bounded energy summary for authenticated display devices.
 energy_solar_power_entity_id = ""
 energy_grid_power_entity_id = ""
@@ -96,6 +97,10 @@ tts_sample_rate = 16000
 tts_sample_channels = 1
 tts_sample_bytes = 2
 tts_timeout_seconds = 60
+voice_stt_url = "http://127.0.0.1:8031/v1"
+voice_stt_token_env = "PILOT_VOICE_STT_TOKEN"
+voice_stt_model = "small.en"
+voice_stt_timeout_seconds = 20
 # Optional local vLLM/OpenAI-compatible reasoning provider.
 llm_provider = ""
 llm_url = ""
@@ -107,6 +112,15 @@ llm_timeout_seconds = 60
 llm_max_output_tokens = 1024
 llm_max_tool_rounds = 4
 llm_context_turns = 12
+llm_fast_context_tokens = 8192
+llm_standard_context_tokens = 16384
+llm_deep_context_tokens = 65536
+llm_hermes_context_tokens = 65536
+llm_experimental_context_tokens = 131072
+llm_fast_output_tokens = 512
+llm_standard_output_tokens = 1024
+llm_deep_output_tokens = 2048
+llm_hermes_output_tokens = 4096
 meeting_stt_url = "http://whisper.internal:8000/v1"
 meeting_stt_token_env = "PILOT_MEETING_STT_TOKEN"
 meeting_stt_model = "whisper-1"
@@ -145,45 +159,69 @@ teslamate_car_id = 1
 default_climate_target_c = 22.0
 
 [vehicles.telemetry]
-battery_percent = "sensor.jarvis_battery"
-online = "binary_sensor.jarvis_online"
-state = "sensor.tesla_state"
-odometer_km = "sensor.jarvis_odometer"
-rated_range_km = "sensor.tesla_rated_battery_range_km"
-inside_temperature_c = "sensor.jarvis_temperature_inside"
-outside_temperature_c = "sensor.jarvis_temperature_outside"
-locked = "lock.jarvis_doors"
-latitude = "device_tracker.jarvis_location_tracker"
-longitude = "device_tracker.jarvis_location_tracker"
-location_name = "device_tracker.jarvis_location_tracker"
-tyre_front_left_bar = "sensor.tesla_tpms_pressure_fl"
-tyre_front_right_bar = "sensor.tesla_tpms_pressure_fr"
-tyre_rear_left_bar = "sensor.tesla_tpms_pressure_rl"
-tyre_rear_right_bar = "sensor.tesla_tpms_pressure_rr"
+battery_percent = "sensor.jarvis_battery_level"
+online = "binary_sensor.jarvis_status"
+state = "binary_sensor.jarvis_status"
+odometer_km = "sensor.jarvis_odometer_2"
+rated_range_km = "sensor.jarvis_battery_range"
+inside_temperature_c = "sensor.jarvis_inside_temperature"
+outside_temperature_c = "sensor.jarvis_outside_temperature"
+locked = "lock.jarvis_lock"
+charging_state = "sensor.jarvis_charging"
+charge_port = "cover.jarvis_charge_port_door"
+charge_limit_percent = "number.jarvis_charge_limit_2"
+charge_rate_kw = "sensor.jarvis_charger_power_2"
+time_to_full_hours = "sensor.jarvis_time_to_full_charge"
+energy_added_kwh = "sensor.jarvis_charge_energy_added"
+navigation_destination = "sensor.jarvis_destination"
+distance_to_destination_km = "sensor.jarvis_distance_to_arrival_2"
+time_to_destination_hours = "sensor.jarvis_time_to_arrival"
+state_of_charge_at_arrival_percent = "sensor.jarvis_state_of_charge_at_arrival"
+latitude = "device_tracker.jarvis_location"
+longitude = "device_tracker.jarvis_location"
+location_name = "device_tracker.jarvis_location"
+tyre_front_left_bar = "sensor.jarvis_tire_pressure_front_left"
+tyre_front_right_bar = "sensor.jarvis_tire_pressure_front_right"
+tyre_rear_left_bar = "sensor.jarvis_tire_pressure_rear_left"
+tyre_rear_right_bar = "sensor.jarvis_tire_pressure_rear_right"
 
 [vehicles.controls.wake]
 domain = "button"
 service = "press"
 entity_id = "button.jarvis_wake_up"
 
+[vehicles.controls.wake.home]
+domain = "button"
+service = "press"
+entity_id = "button.tesla_ble_039d9c_wake_up"
+
 [vehicles.controls.lock]
 domain = "lock"
 service = "lock"
-entity_id = "lock.jarvis_doors"
-observable_entity_id = "lock.jarvis_doors"
+entity_id = "lock.jarvis_lock"
+observable_entity_id = "lock.jarvis_lock"
+
+[vehicles.controls.lock.home]
+domain = "lock"
+service = "lock"
+entity_id = "lock.tesla_ble_lock_car"
 
 [vehicles.controls.unlock]
 domain = "lock"
 service = "unlock"
-entity_id = "lock.jarvis_doors"
-observable_entity_id = "lock.jarvis_doors"
+entity_id = "lock.jarvis_lock"
+observable_entity_id = "lock.jarvis_lock"
 
-# The generic command is internally fixed to SEND_GPS_TO_VEHICLE. The provider
-# vehicle ID comes from a Core secret and is never returned to a device.
+[vehicles.controls.unlock.home]
+domain = "lock"
+service = "unlock"
+entity_id = "lock.tesla_ble_lock_car"
+
 [vehicles.controls.send_route]
-domain = "tesla_custom"
-service = "api"
-provider_vehicle_id_env = "PILOT_TESLA_VEHICLE_ID"
+domain = "pilot_vehicle"
+service = "send_navigation"
+# Native HA Tesla Fleet device ID (internal configuration only).
+device_id = "native-tesla-device-id"
 
 [[rooms]]
 id = "bedroom"

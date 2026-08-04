@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import UTC, date, datetime, timedelta
+import asyncio
 from pathlib import Path
 import tempfile
 import unittest
@@ -95,6 +96,27 @@ class VehicleServiceTests(unittest.TestCase):
         self.assertEqual(result["status"], "abnormal_unverified")
         self.assertGreater(result["value_bar"], 6)
 
+    def test_native_fleet_time_to_full_timestamp_becomes_remaining_hours(self) -> None:
+        now = datetime(2026, 8, 4, 12, 0, tzinfo=UTC)
+        state = (now + timedelta(hours=2, minutes=15)).isoformat()
+
+        result = VehicleService._time_to_full_hours(state, now=now)
+
+        self.assertEqual(result, 2.25)
+
+    def test_numeric_time_to_full_hours_remains_compatible_with_teslamate(self) -> None:
+        self.assertEqual(VehicleService._time_to_full_hours("1.5"), 1.5)
+
+    def test_arrival_time_uses_remaining_hours_contract(self) -> None:
+        payload = {
+            "state": "0.75",
+            "attributes": {},
+        }
+
+        self.assertEqual(
+            VehicleService._state_value("time_to_destination_hours", payload), 0.75
+        )
+
     def test_high_risk_action_requires_confirmation_and_is_idempotent(self) -> None:
         service = VehicleService(
             self.settings,
@@ -149,6 +171,57 @@ class VehicleServiceTests(unittest.TestCase):
         )
         self.assertFalse(
             VehicleService._observable_matches("install_software", update)
+        )
+
+    def test_home_geofence_selects_ble_control_target(self) -> None:
+        settings = vehicle_settings(Path(self.root.name))
+        settings = Settings(
+            server=settings.server,
+            integrations=IntegrationSettings(
+                teslamate_adapter_url="http://teslamate-adapter.test:8781",
+                vehicle_home_geofence_entity_id="sensor.tesla_geofence",
+            ),
+            rooms=settings.rooms,
+            players=settings.players,
+            vehicles=(
+                Vehicle(
+                    id="jarvis",
+                    name="Jarvis",
+                    teslamate_car_id=1,
+                    controls=(
+                        VehicleControl(
+                            "climate_on",
+                            "climate",
+                            "set_hvac_mode",
+                            "climate.jarvis",
+                            home_domain="switch",
+                            home_service="turn_on",
+                            home_entity_id="switch.tesla_ble_climate",
+                        ),
+                    ),
+                ),
+            ),
+        )
+        integrations = AsyncMock()
+        integrations.home_assistant_state.return_value = {
+            "state": "Home",
+            "attributes": {},
+        }
+        integrations.home_assistant_vehicle_action.return_value = {"accepted": True}
+        service = VehicleService(settings, self.store, integrations)
+
+        asyncio.run(
+            service._call_control(  # noqa: SLF001 - target-selection contract
+                settings.vehicles[0].controls[0], "climate_on", {}
+            )
+        )
+
+        integrations.home_assistant_vehicle_action.assert_awaited_once_with(
+            "switch",
+            "turn_on",
+            entity_id="switch.tesla_ble_climate",
+            device_id="",
+            service_data={},
         )
 
 

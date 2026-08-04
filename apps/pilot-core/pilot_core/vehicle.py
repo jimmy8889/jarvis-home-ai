@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncIterator
+from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
 from hashlib import sha256
 import math
@@ -405,6 +406,10 @@ class VehicleService:
         state = payload.get("state")
         if state in {None, "", "unknown", "unavailable"}:
             return None
+        if key == "time_to_full_hours":
+            return VehicleService._time_to_full_hours(state)
+        if key == "time_to_destination_hours":
+            return VehicleService._time_to_full_hours(state)
         if key in {
             "online",
             "locked",
@@ -438,7 +443,10 @@ class VehicleService:
             "charge_limit_percent",
             "charge_rate_kw",
             "time_to_full_hours",
+            "time_to_destination_hours",
             "energy_added_kwh",
+            "distance_to_destination_km",
+            "state_of_charge_at_arrival_percent",
         }
         if key in numeric_keys or key.startswith("tyre_"):
             try:
@@ -447,6 +455,35 @@ class VehicleService:
             except (TypeError, ValueError):
                 return None
         return str(state)[:500]
+
+    @staticmethod
+    def _time_to_full_hours(
+        state: Any, *, now: datetime | None = None
+    ) -> float | None:
+        """Normalize Tesla Fleet's timestamp into remaining hours.
+
+        Native Tesla Fleet publishes ``Time to full charge`` as a timestamp,
+        while the older TeslaMate sensor publishes a numeric number of hours.
+        Accept both forms so the public vehicle contract remains stable.
+        """
+        try:
+            numeric = float(state)
+            if math.isfinite(numeric):
+                return round(max(numeric, 0), 2)
+        except (TypeError, ValueError):
+            pass
+
+        try:
+            target = datetime.fromisoformat(str(state).replace("Z", "+00:00"))
+        except (TypeError, ValueError):
+            return None
+        if target.tzinfo is None:
+            target = target.replace(tzinfo=UTC)
+        reference = now or datetime.now(UTC)
+        if reference.tzinfo is None:
+            reference = reference.replace(tzinfo=UTC)
+        remaining_hours = (target - reference).total_seconds() / 3_600
+        return round(max(remaining_hours, 0), 2)
 
     @staticmethod
     def _tyre_value(value: Any, state: dict[str, Any] | None) -> dict[str, Any]:
@@ -600,11 +637,16 @@ class VehicleService:
     ) -> tuple[dict[str, Any], bool]:
         vehicle = self.vehicle(vehicle_id)
         if action == "destination_workflow":
-            destination_id = str(parameters.get("destination_id", ""))
-            if set(parameters) != {"destination_id"} or not destination_id:
-                raise VehicleError("destination_id is required")
-            if self.store.get_vehicle_destination(vehicle_id, destination_id) is None:
-                raise KeyError(destination_id)
+            if "destination_id" in parameters:
+                destination_id = str(parameters.get("destination_id", ""))
+                if set(parameters) != {"destination_id"} or not destination_id:
+                    raise VehicleError("destination_id is required")
+                if self.store.get_vehicle_destination(vehicle_id, destination_id) is None:
+                    raise KeyError(destination_id)
+            elif not {"latitude", "longitude"}.issubset(parameters):
+                raise VehicleError(
+                    "destination_workflow requires destination_id or latitude and longitude"
+                )
         elif action == "set_seat_heat":
             seat = str(parameters.get("seat", ""))
             if f"set_seat_heat_{seat}" not in vehicle.controls_map():
@@ -637,6 +679,53 @@ class VehicleService:
             "set_charge_limit": {"percent"},
             "destination_workflow": {"destination_id"},
         }.get(action, set())
+        if action == "destination_workflow" and "destination_id" not in parameters:
+            allowed_keys = {
+                "latitude",
+                "longitude",
+                "climate_enabled",
+                "temperature_c",
+                "seat_climate_mode",
+            }
+            if not {"latitude", "longitude"}.issubset(parameters) or not set(
+                parameters
+            ).issubset(allowed_keys):
+                raise VehicleError("destination coordinates or options are invalid")
+            try:
+                latitude = float(parameters["latitude"])
+                longitude = float(parameters["longitude"])
+            except (TypeError, ValueError) as error:
+                raise VehicleError("destination coordinates are invalid") from error
+            if not math.isfinite(latitude) or not -90 <= latitude <= 90:
+                raise VehicleError("latitude must be -90..90")
+            if not math.isfinite(longitude) or not -180 <= longitude <= 180:
+                raise VehicleError("longitude must be -180..180")
+            if "climate_enabled" in parameters and not isinstance(
+                parameters["climate_enabled"], bool
+            ):
+                raise VehicleError("climate_enabled must be a boolean")
+            if "temperature_c" in parameters:
+                try:
+                    temperature = float(parameters["temperature_c"])
+                except (TypeError, ValueError) as error:
+                    raise VehicleError("temperature_c is invalid") from error
+                if not math.isfinite(temperature) or not 15 <= temperature <= 30:
+                    raise VehicleError("temperature_c must be 15..30")
+            if "seat_climate_mode" in parameters and parameters["seat_climate_mode"] not in {
+                "off",
+                "heat_low",
+                "heat_medium",
+                "heat_high",
+                "cool_low",
+                "cool_medium",
+                "cool_high",
+            }:
+                raise VehicleError("seat climate mode is invalid")
+            if parameters.get("climate_enabled") is False and parameters.get(
+                "seat_climate_mode"
+            ) not in (None, "off"):
+                raise VehicleError("seat climate requires destination climate")
+            return
         if set(parameters) != allowed_keys:
             raise VehicleError("vehicle action parameters are invalid")
         if action == "set_temperature" and not 15 <= float(parameters["temperature_c"]) <= 30:
@@ -723,13 +812,22 @@ class VehicleService:
     async def _destination_workflow(self, request: dict[str, Any]) -> dict[str, Any]:
         vehicle = self.vehicle(request["vehicle_id"])
         controls = vehicle.controls_map()
-        destination = self.store.get_vehicle_destination(
-            vehicle.id, request["parameters"]["destination_id"]
-        )
-        if destination is None:
-            return self.store.complete_vehicle_action(
-                request["id"], "failed", {"error": "destination was removed"}
+        if "destination_id" in request["parameters"]:
+            destination = self.store.get_vehicle_destination(
+                vehicle.id, request["parameters"]["destination_id"]
             )
+            if destination is None:
+                return self.store.complete_vehicle_action(
+                    request["id"], "failed", {"error": "destination was removed"}
+                )
+        else:
+            destination = {
+                "latitude": request["parameters"]["latitude"],
+                "longitude": request["parameters"]["longitude"],
+                "climate_enabled": request["parameters"].get("climate_enabled", True),
+                "temperature_c": request["parameters"].get("temperature_c"),
+                "seat_climate_mode": request["parameters"].get("seat_climate_mode"),
+            }
         steps: list[dict[str, Any]] = []
 
         async def run_step(
@@ -805,12 +903,39 @@ class VehicleService:
             await asyncio.sleep(2)
         return False
 
+    async def _vehicle_is_home(self) -> bool:
+        """Use local BLE controls only when the configured geofence says Home."""
+        entity_id = self.settings.integrations.vehicle_home_geofence_entity_id
+        if not entity_id:
+            return False
+        try:
+            state = await self.integrations.home_assistant_state(entity_id)
+        except (IntegrationRequestFailed, IntegrationUnavailable):
+            return False
+        return str(state.get("state") or "").strip().casefold() in {
+            "home",
+            "at_home",
+        }
+
     async def _call_control(
         self,
         control: VehicleControl,
         action: str,
         parameters: dict[str, Any],
     ) -> dict[str, Any]:
+        if (
+            control.home_domain
+            and control.home_service
+            and await self._vehicle_is_home()
+        ):
+            control = replace(
+                control,
+                domain=control.home_domain,
+                service=control.home_service,
+                entity_id=control.home_entity_id,
+                device_id=control.home_device_id,
+                observable_entity_id=control.home_observable_entity_id,
+            )
         service_data: dict[str, Any] = {}
         if action == "set_temperature":
             service_data["temperature"] = float(parameters["temperature_c"])
@@ -837,29 +962,22 @@ class VehicleService:
             }
             service_data["option"] = seat_options[str(parameters["mode"])]
         elif action == "climate_on":
-            # Tesla Custom exposes heat_cool/off but does not advertise the
-            # optional climate.turn_on/turn_off feature flags. Driving the
-            # entity through its declared HVAC mode is deterministic and
-            # avoids Home Assistant returning HTTP 500.
-            service_data["hvac_mode"] = "heat_cool"
+            # Native Tesla Fleet advertises the HVAC mode even when the
+            # optional climate.turn_on/turn_off feature flags are absent.
+            # Driving the entity through its declared HVAC mode is
+            # deterministic across Home Assistant providers.
+            if control.domain == "climate":
+                service_data["hvac_mode"] = "heat_cool"
         elif action == "climate_off":
-            service_data["hvac_mode"] = "off"
+            if control.domain == "climate":
+                service_data["hvac_mode"] = "off"
         elif action == "set_charge_limit":
             service_data["value"] = int(parameters["percent"])
         elif action == "send_route":
-            provider_vehicle_id = read_secret(control.provider_vehicle_id_env)
-            if not provider_vehicle_id:
-                raise IntegrationUnavailable(
-                    "Tesla navigation vehicle identifier is not configured"
-                )
             service_data = {
-                "command": "SEND_GPS_TO_VEHICLE",
-                "parameters": {
-                    "path_vars": {"vehicle_id": provider_vehicle_id},
-                    "lat": float(parameters["latitude"]),
-                    "lon": float(parameters["longitude"]),
-                    "order": 0,
-                },
+                "latitude": float(parameters["latitude"]),
+                "longitude": float(parameters["longitude"]),
+                "order": 0,
             }
         return await self.integrations.home_assistant_vehicle_action(
             control.domain,

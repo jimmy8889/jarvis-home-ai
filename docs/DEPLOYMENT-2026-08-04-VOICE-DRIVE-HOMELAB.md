@@ -40,8 +40,8 @@ symlink rollback.
 
 ## 2026-08-04: Home Lab contract and update cadence
 
-Pilot Core `0.35.0` is deployed on apps01 as
-`core-0.35.0-homelab-20260804.1`. The Home Lab API remains
+Pilot Core `0.35.1` is deployed on apps01 as
+`core-0.35.1-homelab-20260804.1`. The Home Lab API remains
 `pilot.homelab.v1`, but provider-normalised integer fields are now guaranteed
 to be JSON integers. This prevents the iOS `DecodingError.typeMismatch` failure
 caused by TrueNAS returning uptime as a floating-point number.

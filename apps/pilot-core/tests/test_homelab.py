@@ -250,6 +250,12 @@ class HomeLabTests(unittest.IsolatedAsyncioTestCase):
         self.assertIs(type(snapshot["pools"][0]["size_bytes"]), int)
         self.assertIs(type(snapshot["disks"][0]["rotation_rate"]), int)
 
+    def test_truenas_normalizes_object_alert_timestamp(self) -> None:
+        snapshot = TrueNASMonitor._normalize(
+            {}, [], [], {}, [{"uuid": "a1", "datetime": {"$date": "2026-08-04T00:00:00Z"}}]
+        )
+        self.assertEqual(snapshot["alerts"][0]["datetime"], "2026-08-04T00:00:00Z")
+
 
 if __name__ == "__main__":
     unittest.main()

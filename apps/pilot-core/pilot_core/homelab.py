@@ -51,6 +51,20 @@ def _integer(value: Any) -> int | None:
     return int(number) if number is not None else None
 
 
+def _timestamp_text(value: Any) -> str | None:
+    """Keep provider timestamps JSON-string-compatible for portable clients."""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, dict):
+        for key in ("$date", "date", "datetime", "value"):
+            candidate = value.get(key)
+            if isinstance(candidate, str):
+                return candidate
+            if isinstance(candidate, (int, float)):
+                return str(candidate)
+    return None
+
+
 class ProxmoxMonitor:
     def __init__(
         self,
@@ -382,7 +396,7 @@ class TrueNASMonitor:
                 "id": str(alert.get("uuid") or alert.get("id") or index),
                 "level": str(alert.get("level") or "warning").lower(),
                 "title": str(alert.get("formatted") or alert.get("klass") or "TrueNAS alert")[:500],
-                "datetime": alert.get("datetime"),
+                "datetime": _timestamp_text(alert.get("datetime")),
             }
             for index, alert in enumerate(alerts if isinstance(alerts, list) else [])
             if isinstance(alert, dict) and not alert.get("dismissed")

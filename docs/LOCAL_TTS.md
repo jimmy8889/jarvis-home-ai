@@ -92,6 +92,21 @@ device snapshot expose the same list to setup clients. Pilot rejects an unknown
 voice before making a GPU request, so a bad setup value cannot silently break
 voice responses.
 
+The iOS Pilot app exposes the same catalogue in Settings under **Pilot voice**.
+Selecting a voice and tapping **Preview** synthesizes a short sample on the RTX
+3080 and downloads it through the device-authenticated Core audio-asset route.
+The selected voice is persisted on the phone and is sent with subsequent voice
+requests; Core's configured voice remains the fallback for other clients.
+Device clients use:
+
+```text
+GET  /v1/devices/{device_id}/tts/voices
+POST /v1/devices/{device_id}/tts/preview
+```
+
+Both routes require the device bearer token and the `voice` capability. Preview
+audio is private to the requesting device and expires after five minutes.
+
 ## Validation and safety
 
 - Supported output formats are WAV, FLAC, MP3, OGG, and AAC.

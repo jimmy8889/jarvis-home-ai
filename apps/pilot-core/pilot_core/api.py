@@ -64,7 +64,9 @@ from .secret_values import read_secret
 from .storage import Store
 from .tts import LocalTTS, TTSRequestFailed, TTSUnavailable
 from .voice import (
+    FallbackVoicePipeline,
     HomeAssistantVoicePipeline,
+    OpenAICompatibleVoicePipeline,
     VoicePipelineFailed,
     VoicePipelineUnavailable,
 )
@@ -672,7 +674,15 @@ def create_app(
         settings.server.audio_asset_retention_seconds,
     )
     local_tts = LocalTTS(settings.integrations, settings.server.audio_asset_max_bytes)
-    voice_pipeline = HomeAssistantVoicePipeline(settings.integrations)
+    home_assistant_voice = HomeAssistantVoicePipeline(settings.integrations)
+    voice_pipeline = (
+        FallbackVoicePipeline(
+            OpenAICompatibleVoicePipeline(settings.integrations),
+            home_assistant_voice,
+        )
+        if settings.integrations.voice_stt_url
+        else home_assistant_voice
+    )
     local_llm = OpenAICompatibleLLM(settings.integrations)
     assistant_tools = AssistantTools(
         registry,

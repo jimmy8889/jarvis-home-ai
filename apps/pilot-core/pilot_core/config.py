@@ -113,6 +113,10 @@ class IntegrationSettings:
     tts_sample_channels: int = 1
     tts_sample_bytes: int = 2
     tts_timeout_seconds: int = 60
+    voice_stt_url: str = ""
+    voice_stt_token_env: str = "PILOT_VOICE_STT_TOKEN"
+    voice_stt_model: str = "small.en"
+    voice_stt_timeout_seconds: int = 20
     llm_provider: str = ""
     llm_url: str = ""
     llm_token_env: str = "PILOT_LLM_TOKEN"
@@ -781,6 +785,16 @@ def load_settings(path: str | Path) -> Settings:
         tts_sample_channels=int(integration_values.get("tts_sample_channels", 1)),
         tts_sample_bytes=int(integration_values.get("tts_sample_bytes", 2)),
         tts_timeout_seconds=int(integration_values.get("tts_timeout_seconds", 60)),
+        voice_stt_url=str(integration_values.get("voice_stt_url", "")).rstrip("/"),
+        voice_stt_token_env=str(
+            integration_values.get("voice_stt_token_env", "PILOT_VOICE_STT_TOKEN")
+        ).strip(),
+        voice_stt_model=str(
+            integration_values.get("voice_stt_model", "small.en")
+        ).strip(),
+        voice_stt_timeout_seconds=int(
+            integration_values.get("voice_stt_timeout_seconds", 20)
+        ),
         llm_provider=str(integration_values.get("llm_provider", "")).strip(),
         llm_url=str(integration_values.get("llm_url", "")).rstrip("/"),
         llm_token_env=str(integration_values.get("llm_token_env", "PILOT_LLM_TOKEN")),
@@ -854,6 +868,16 @@ def load_settings(path: str | Path) -> Settings:
         raise ValueError("integrations.tts_sample_bytes must be 2")
     if not 1 <= integrations.tts_timeout_seconds <= 300:
         raise ValueError("integrations.tts_timeout_seconds must be between 1 and 300")
+    if integrations.voice_stt_url:
+        parsed_voice_stt = urlparse(integrations.voice_stt_url)
+        if parsed_voice_stt.scheme not in {"http", "https"} or not parsed_voice_stt.netloc:
+            raise ValueError("integrations.voice_stt_url must be a valid service URL")
+        if not integrations.voice_stt_model:
+            raise ValueError("integrations.voice_stt_model is required when voice STT is configured")
+    if not 5 <= integrations.voice_stt_timeout_seconds <= 120:
+        raise ValueError(
+            "integrations.voice_stt_timeout_seconds must be between 5 and 120"
+        )
     if integrations.llm_provider not in {"", "openai", "vllm"}:
         raise ValueError("integrations.llm_provider must be openai or vllm")
     if integrations.llm_reasoning_effort not in {"", "none", "low", "medium", "high"}:

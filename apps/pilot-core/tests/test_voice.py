@@ -3,9 +3,10 @@ from __future__ import annotations
 import json
 import os
 import unittest
+import httpx
 
 from pilot_core.config import IntegrationSettings
-from pilot_core.voice import HomeAssistantVoicePipeline
+from pilot_core.voice import HomeAssistantVoicePipeline, OpenAICompatibleVoicePipeline
 
 
 class FakeSocket:
@@ -136,6 +137,40 @@ class VoicePipelineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(transcript, "what about tomorrow")
         command = json.loads(socket.sent[1])
         self.assertEqual(command["end_stage"], "stt")
+
+    async def test_gpu_transcription_posts_wav_to_openai_compatible_endpoint(self) -> None:
+        observed: dict[str, object] = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            observed["url"] = str(request.url)
+            observed["authorization"] = request.headers.get("authorization")
+            observed["body"] = request.content
+            return httpx.Response(200, json={"text": "turn on the office lights"})
+
+        os.environ["PILOT_VOICE_STT_TOKEN"] = "gpu-stt-secret"
+
+        async def audio():
+            yield b"\x01\x02" * 160
+
+        pipeline = OpenAICompatibleVoicePipeline(
+            IntegrationSettings(
+                voice_stt_url="http://speech.local:8031/v1",
+                voice_stt_model="small.en",
+            ),
+            transport=httpx.MockTransport(handler),
+        )
+        transcript = await pipeline.transcribe(
+            audio(), sample_rate=16000, language="en-AU"
+        )
+
+        self.assertEqual(transcript, "turn on the office lights")
+        self.assertEqual(
+            observed["url"], "http://speech.local:8031/v1/audio/transcriptions"
+        )
+        self.assertEqual(observed["authorization"], "Bearer gpu-stt-secret")
+        self.assertIn(b"name=\"model\"", observed["body"])
+        self.assertIn(b"small.en", observed["body"])
+        os.environ.pop("PILOT_VOICE_STT_TOKEN", None)
 
 
 if __name__ == "__main__":

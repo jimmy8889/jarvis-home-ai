@@ -2,10 +2,13 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterable, Callable
 from dataclasses import dataclass
+from io import BytesIO
 import json
+import wave
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
+import httpx
 from websockets.asyncio.client import connect
 
 from .config import IntegrationSettings
@@ -42,6 +45,126 @@ def _speech_text(intent_output: dict[str, Any]) -> str:
     except (KeyError, TypeError):
         return ""
     return value.strip() if isinstance(value, str) else ""
+
+
+class OpenAICompatibleVoicePipeline:
+    """GPU-backed STT adapter for an OpenAI-compatible transcription API."""
+
+    def __init__(
+        self,
+        settings: IntegrationSettings,
+        transport: httpx.AsyncBaseTransport | None = None,
+    ) -> None:
+        self.settings = settings
+        self.transport = transport
+
+    def status(self) -> dict[str, Any]:
+        return {
+            "configured": bool(
+                self.settings.voice_stt_url
+                and read_secret(self.settings.voice_stt_token_env)
+            ),
+            "provider": "openai_compatible",
+            "model": self.settings.voice_stt_model or None,
+            "url": self.settings.voice_stt_url or None,
+            "device": "cuda",
+        }
+
+    async def transcribe(
+        self,
+        audio: AsyncIterable[bytes],
+        *,
+        sample_rate: int,
+        language: str | None = None,
+    ) -> str:
+        base_url = self.settings.voice_stt_url.rstrip("/")
+        token = read_secret(self.settings.voice_stt_token_env)
+        if not base_url or not token:
+            raise VoicePipelineUnavailable(
+                "GPU voice STT URL and token are required for voice"
+            )
+        if sample_rate not in {8000, 16000, 24000, 32000, 48000}:
+            raise VoicePipelineFailed("unsupported input sample rate")
+
+        raw = bytearray()
+        async for chunk in audio:
+            if chunk:
+                raw.extend(chunk)
+                # Keep the endpoint bounded even when a client omits Content-Length.
+                if len(raw) > 8_000_000:
+                    raise VoicePipelineFailed("voice audio exceeds the GPU STT size limit")
+        if not raw:
+            raise VoicePipelineFailed("voice audio is empty")
+        wav_buffer = BytesIO()
+        with wave.open(wav_buffer, "wb") as writer:
+            writer.setnchannels(1)
+            writer.setsampwidth(2)
+            writer.setframerate(sample_rate)
+            writer.writeframes(bytes(raw))
+        form_language = (language or "en").split("-", 1)[0].lower()
+        headers = {"Authorization": f"Bearer {token}"}
+        data = {
+            "model": self.settings.voice_stt_model or "whisper-1",
+            "language": form_language,
+            "response_format": "json",
+        }
+        try:
+            async with httpx.AsyncClient(
+                timeout=self.settings.voice_stt_timeout_seconds,
+                transport=self.transport,
+                follow_redirects=False,
+            ) as client:
+                response = await client.post(
+                    f"{base_url}/audio/transcriptions",
+                    headers=headers,
+                    data=data,
+                    files={"file": ("voice.wav", wav_buffer.getvalue(), "audio/wav")},
+                )
+                response.raise_for_status()
+                payload = response.json()
+        except httpx.HTTPStatusError as error:
+            raise VoicePipelineFailed(
+                f"GPU voice transcription rejected: HTTP {error.response.status_code}"
+            ) from error
+        except (httpx.HTTPError, ValueError) as error:
+            raise VoicePipelineFailed(f"GPU voice transcription failed: {error}") from error
+        text = payload.get("text") if isinstance(payload, dict) else None
+        if not isinstance(text, str) or not text.strip():
+            raise VoicePipelineFailed("GPU speech provider returned no transcript")
+        return text.strip()
+
+
+class FallbackVoicePipeline:
+    """Prefer GPU STT while retaining HA as a recovery path."""
+
+    def __init__(self, primary: Any, fallback: Any) -> None:
+        self.primary = primary
+        self.fallback = fallback
+
+    def status(self) -> dict[str, Any]:
+        return {
+            "configured": bool(
+                self.primary.status().get("configured")
+                or self.fallback.status().get("configured")
+            ),
+            "provider": "gpu_with_home_assistant_fallback",
+            "primary": self.primary.status(),
+            "fallback": self.fallback.status(),
+        }
+
+    async def transcribe(self, audio: AsyncIterable[bytes], **kwargs: Any) -> str:
+        # The request stream is not replayable, so buffer it once for the two
+        # providers. Voice commands are intentionally short and bounded.
+        chunks = [chunk async for chunk in audio if chunk]
+        try:
+            return await self.primary.transcribe(iter_async(chunks), **kwargs)
+        except (VoicePipelineUnavailable, VoicePipelineFailed):
+            return await self.fallback.transcribe(iter_async(chunks), **kwargs)
+
+
+async def iter_async(chunks: list[bytes]):
+    for chunk in chunks:
+        yield chunk
 
 
 class HomeAssistantVoicePipeline:

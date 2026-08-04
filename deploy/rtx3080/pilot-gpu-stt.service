@@ -1,0 +1,31 @@
+[Unit]
+Description=Pilot GPU Whisper STT API
+Wants=network-online.target
+After=network-online.target nvidia-persistenced.service vllm-tts.service
+
+[Service]
+Type=simple
+User=vllm
+Group=vllm
+SupplementaryGroups=video render
+Environment=PYTHONUNBUFFERED=1
+Environment=LD_LIBRARY_PATH=/opt/pilot-stt/venv/lib/python3.12/site-packages/nvidia/cublas/lib:/opt/pilot-stt/venv/lib/python3.12/site-packages/nvidia/cudnn/lib:/opt/pilot-stt/venv/lib/python3.12/site-packages/nvidia/cuda_nvrtc/lib:/opt/vllm-omni/lib/python3.12/site-packages/nvidia/cu13/lib:/opt/vllm-omni/lib/python3.12/site-packages/nvidia/cudnn/lib
+Environment=PILOT_STT_MODEL=small.en
+Environment=PILOT_STT_MODEL_ROOT=/srv/models/faster-whisper
+Environment=PILOT_STT_COMPUTE_TYPE=float16
+Environment=PILOT_STT_PORT=8031
+Environment=PILOT_STT_API_KEY_FILE=/etc/pilot/stt-api-key
+EnvironmentFile=/etc/pilot/stt.env
+ExecStart=/opt/pilot-stt/venv/bin/python /opt/pilot-stt/pilot_speech_server.py
+Restart=on-failure
+RestartSec=5s
+TimeoutStartSec=300
+TimeoutStopSec=30
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/srv/models/faster-whisper /opt/pilot-stt
+
+[Install]
+WantedBy=multi-user.target

@@ -104,6 +104,11 @@ class IntegrationSettings:
     tts_provider: str = ""
     tts_url: str = ""
     tts_token_env: str = "PILOT_TTS_TOKEN"
+    # Optional second local TTS engine. Kokoro is selected by its voice IDs
+    # (for example ``bm_george``) while the configured primary engine remains
+    # the default for all other voices.
+    tts_kokoro_url: str = ""
+    tts_kokoro_token_env: str = "PILOT_KOKORO_TOKEN"
     tts_engine_id: str = ""
     tts_model: str = "tts-1"
     tts_voice: str = "default"
@@ -776,6 +781,12 @@ def load_settings(path: str | Path) -> Settings:
         tts_provider=str(integration_values.get("tts_provider", "")).strip(),
         tts_url=str(integration_values.get("tts_url", "")).rstrip("/"),
         tts_token_env=str(integration_values.get("tts_token_env", "PILOT_TTS_TOKEN")),
+        tts_kokoro_url=str(
+            integration_values.get("tts_kokoro_url", "")
+        ).rstrip("/"),
+        tts_kokoro_token_env=str(
+            integration_values.get("tts_kokoro_token_env", "PILOT_KOKORO_TOKEN")
+        ).strip(),
         tts_engine_id=str(integration_values.get("tts_engine_id", "")).strip(),
         tts_model=str(integration_values.get("tts_model", "tts-1")).strip(),
         tts_voice=str(integration_values.get("tts_voice", "default")).strip(),
@@ -1028,6 +1039,10 @@ def load_settings(path: str | Path) -> Settings:
             )
     if integrations.tts_provider == "openai" and not integrations.tts_url:
         raise ValueError("tts_url is required for the OpenAI TTS provider")
+    if integrations.tts_kokoro_url:
+        parsed_kokoro = urlparse(integrations.tts_kokoro_url)
+        if parsed_kokoro.scheme not in {"http", "https"} or not parsed_kokoro.netloc:
+            raise ValueError("integrations.tts_kokoro_url must be a valid service URL")
     if integrations.llm_provider in {"openai", "vllm"} and not integrations.llm_backends:
         if not integrations.llm_url:
             raise ValueError("llm_url is required for the local LLM provider")

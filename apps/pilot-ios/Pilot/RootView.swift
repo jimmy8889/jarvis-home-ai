@@ -3972,9 +3972,20 @@ private struct SettingsView: View {
                             }
                         } else {
                             Picker("Preview voice", selection: $model.selectedTTSVoice) {
-                                ForEach(model.ttsVoices, id: \.self) { voice in
-                                    Text(voice.replacingOccurrences(of: "_", with: " ").capitalized)
-                                        .tag(voice)
+                                if model.ttsVoiceGroups.isEmpty {
+                                    ForEach(model.ttsVoices, id: \.self) { voice in
+                                        Text(voice.replacingOccurrences(of: "_", with: " ").capitalized)
+                                            .tag(voice)
+                                    }
+                                } else {
+                                    ForEach(model.ttsVoiceGroups, id: \.provider) { group in
+                                        Section(group.model) {
+                                            ForEach(group.voices, id: \.self) { voice in
+                                                Text(voice.replacingOccurrences(of: "_", with: " ").capitalized)
+                                                    .tag(voice)
+                                            }
+                                        }
+                                    }
                                 }
                             }
                             .onChange(of: model.selectedTTSVoice) { _, _ in

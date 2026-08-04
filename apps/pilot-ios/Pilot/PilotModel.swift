@@ -60,6 +60,7 @@ final class PilotModel {
     var voiceAssistantPhase: VoiceAssistantPhase = .idle
     var lastVoiceTranscript: String?
     var ttsVoices: [String] = []
+    var ttsVoiceGroups: [TTSVoiceGroup] = []
     var activeTTSVoice: String?
     var selectedTTSVoice = ""
     var ttsVoiceError: String?
@@ -220,6 +221,7 @@ final class PilotModel {
         do {
             let catalog = try await api().ttsVoices()
             ttsVoices = catalog.voices
+            ttsVoiceGroups = catalog.voiceGroups ?? []
             activeTTSVoice = catalog.activeVoice
             if selectedTTSVoice.isEmpty || !catalog.voices.contains(selectedTTSVoice) {
                 selectedTTSVoice = catalog.activeVoice ?? catalog.voices.first ?? ""

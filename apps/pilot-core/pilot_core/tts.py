@@ -43,6 +43,19 @@ QWEN3_TTS_VOICES = (
     "vivian",
 )
 
+# English voices shipped by Kokoro-82M. The British male voices are the
+# closest bundled baseline to an Australian delivery; Kokoro itself does not
+# provide an Australian accent or voice cloning.
+KOKORO_TTS_VOICES = (
+    "af_alloy", "af_aoede", "af_bella", "af_heart", "af_jessica", "af_kore",
+    "af_nicole", "af_nova", "af_river", "af_sarah", "af_sky",
+    "am_adam", "am_echo", "am_eric", "am_fenrir", "am_liam", "am_michael",
+    "am_onyx", "am_puck", "am_santa",
+    "bf_alice", "bf_emma", "bf_isabella", "bf_lily",
+    "bm_daniel", "bm_fable", "bm_george", "bm_lewis",
+)
+KOKORO_MODEL = "Kokoro-82M"
+
 
 class TTSUnavailable(RuntimeError):
     """Local speech synthesis has not been configured."""
@@ -97,14 +110,38 @@ class LocalTTS:
             "model": self.settings.tts_model if provider == "openai" else None,
             "voice": self.settings.tts_voice or None,
             "available_voices": list(self.available_voices()),
+            "voice_groups": self.voice_groups(),
             "format": self.settings.tts_format,
             "language": self.settings.tts_language,
         }
 
     def available_voices(self) -> tuple[str, ...]:
+        voices: list[str] = []
         if self.settings.tts_provider == "openai" and self.settings.tts_model == "tts":
-            return QWEN3_TTS_VOICES
-        return ()
+            voices.extend(QWEN3_TTS_VOICES)
+        if self.settings.tts_kokoro_url:
+            voices.extend(KOKORO_TTS_VOICES)
+        return tuple(voices)
+
+    def voice_groups(self) -> list[dict[str, Any]]:
+        groups: list[dict[str, Any]] = []
+        if self.settings.tts_provider == "openai" and self.settings.tts_model == "tts":
+            groups.append(
+                {
+                    "provider": "qwen3-tts",
+                    "model": self.settings.tts_model,
+                    "voices": list(QWEN3_TTS_VOICES),
+                }
+            )
+        if self.settings.tts_kokoro_url:
+            groups.append(
+                {
+                    "provider": "kokoro",
+                    "model": KOKORO_MODEL,
+                    "voices": list(KOKORO_TTS_VOICES),
+                }
+            )
+        return groups
 
     async def synthesize(
         self,
@@ -113,13 +150,19 @@ class LocalTTS:
         voice: str | None = None,
     ) -> SynthesizedAudio:
         provider = self.settings.tts_provider
-        if not provider:
-            raise TTSUnavailable("local TTS provider is not configured")
         selected_language = language or self.settings.tts_language
         selected_voice = voice or self.settings.tts_voice
+        kokoro_voice = selected_voice in KOKORO_TTS_VOICES
+        # Preserve generic OpenAI-compatible configurations that happen to
+        # use a Kokoro voice ID. Automatic routing is enabled only when the
+        # dedicated sidecar URL is configured.
+        kokoro_selected = kokoro_voice and bool(self.settings.tts_kokoro_url)
+        if not provider and not (kokoro_selected and self.settings.tts_kokoro_url):
+            raise TTSUnavailable("local TTS provider is not configured")
         if (
             provider == "openai"
             and self.settings.tts_model == "tts"
+            and not kokoro_selected
             and selected_voice not in QWEN3_TTS_VOICES
         ):
             raise TTSUnavailable(
@@ -133,8 +176,23 @@ class LocalTTS:
                 follow_redirects=False,
             ) as client:
                 if provider == "home_assistant":
+                    if kokoro_selected:
+                        raise TTSUnavailable(
+                            "Kokoro voices require the OpenAI-compatible local provider"
+                        )
                     return await self._home_assistant(
                         client, text, selected_language, selected_voice
+                    )
+                if kokoro_selected:
+                    return await self._openai(
+                        client,
+                        text,
+                        selected_language,
+                        selected_voice,
+                        url=self.settings.tts_kokoro_url,
+                        model=KOKORO_MODEL,
+                        token_env=self.settings.tts_kokoro_token_env,
+                        result_provider="kokoro",
                     )
                 if provider == "openai":
                     return await self._openai(
@@ -246,23 +304,31 @@ class LocalTTS:
         text: str,
         language: str,
         voice: str,
+        *,
+        url: str | None = None,
+        model: str | None = None,
+        token_env: str | None = None,
+        result_provider: str = "openai",
     ) -> SynthesizedAudio:
-        parsed = urlsplit(self.settings.tts_url)
+        request_url = url or self.settings.tts_url
+        request_model = model or self.settings.tts_model
+        request_token_env = token_env or self.settings.tts_token_env
+        parsed = urlsplit(request_url)
         if parsed.scheme not in {"http", "https"} or not parsed.netloc:
             raise TTSUnavailable("OpenAI-compatible TTS URL is invalid")
         headers = {"Accept": FORMAT_CONTENT_TYPES[self.settings.tts_format]}
-        token = read_secret(self.settings.tts_token_env)
+        token = read_secret(request_token_env)
         if token:
             headers["Authorization"] = f"Bearer {token}"
         payload = {
-            "model": self.settings.tts_model,
+            "model": request_model,
             "voice": voice or "default",
             "input": text,
             "response_format": self.settings.tts_format,
         }
         content, content_type, audio_format = await self._download(
             client,
-            self.settings.tts_url,
+            request_url,
             headers=headers,
             expected_format=self.settings.tts_format,
             method="POST",
@@ -272,9 +338,9 @@ class LocalTTS:
             content=content,
             content_type=content_type,
             filename=f"speech.{audio_format}",
-            provider="openai",
+            provider=result_provider,
             voice=voice or "default",
-            model=self.settings.tts_model,
+            model=request_model,
             language=language,
         )
 

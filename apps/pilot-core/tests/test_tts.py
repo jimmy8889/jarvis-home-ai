@@ -191,6 +191,51 @@ class OpenAITTSTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(TTSUnavailable, "voice is not available"):
             await tts.synthesize("Invalid voice", voice="not-a-qwen-voice")
 
+    async def test_kokoro_voice_routes_to_the_optional_sidecar(self) -> None:
+        observed: dict[str, object] = {}
+        os.environ["PILOT_KOKORO_TOKEN"] = "kokoro-secret"
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            observed["url"] = str(request.url)
+            observed["payload"] = json.loads(request.content)
+            observed["authorization"] = request.headers.get("authorization")
+            return httpx.Response(
+                200,
+                content=WAV,
+                headers={"Content-Type": "audio/wav"},
+            )
+
+        try:
+            settings = IntegrationSettings(
+                tts_provider="openai",
+                tts_url="http://tts.local:8030/v1/audio/speech",
+                tts_model="tts",
+                tts_voice="serena",
+                tts_kokoro_url="http://tts.local:8032/v1/audio/speech",
+                tts_kokoro_token_env="PILOT_KOKORO_TOKEN",
+                tts_format="wav",
+            )
+            tts = LocalTTS(settings, 1_000_000, httpx.MockTransport(handler))
+            result = await tts.synthesize("G'day from Pilot", voice="bm_george")
+        finally:
+            os.environ.pop("PILOT_KOKORO_TOKEN", None)
+
+        self.assertEqual(observed["url"], "http://tts.local:8032/v1/audio/speech")
+        self.assertEqual(
+            observed["payload"],
+            {
+                "model": "Kokoro-82M",
+                "voice": "bm_george",
+                "input": "G'day from Pilot",
+                "response_format": "wav",
+            },
+        )
+        self.assertEqual(observed["authorization"], "Bearer kokoro-secret")
+        self.assertEqual(result.provider, "kokoro")
+        self.assertEqual(result.model, "Kokoro-82M")
+        self.assertIn("bm_george", tts.available_voices())
+        self.assertEqual(tts.voice_groups()[1]["provider"], "kokoro")
+
     async def test_rejects_oversized_or_invalid_audio(self) -> None:
         settings = IntegrationSettings(
             tts_provider="openai",

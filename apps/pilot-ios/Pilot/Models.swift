@@ -636,11 +636,19 @@ struct TTSVoiceCatalog: Codable, Sendable {
     let model: String?
     let activeVoice: String?
     let voices: [String]
+    let voiceGroups: [TTSVoiceGroup]?
 
     enum CodingKeys: String, CodingKey {
         case provider, model, voices
         case activeVoice = "active_voice"
+        case voiceGroups = "voice_groups"
     }
+}
+
+struct TTSVoiceGroup: Codable, Sendable {
+    let provider: String
+    let model: String
+    let voices: [String]
 }
 
 struct TTSSynthesisMetadata: Codable, Sendable {

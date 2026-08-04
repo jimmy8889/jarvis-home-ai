@@ -2408,6 +2408,7 @@ def create_app(
             "model": settings.integrations.tts_model or None,
             "active_voice": settings.integrations.tts_voice or None,
             "voices": list(local_tts.available_voices()),
+            "voice_groups": local_tts.voice_groups(),
         }
 
     @app.post(
@@ -2558,6 +2559,7 @@ def create_app(
             "model": status.get("model"),
             "active_voice": status.get("voice"),
             "voices": status.get("available_voices", []),
+            "voice_groups": status.get("voice_groups", []),
         }
 
     @app.post("/v1/devices/{device_id}/tts/preview")

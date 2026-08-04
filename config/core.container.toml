@@ -75,6 +75,10 @@ homelab_cache_seconds = 5
 tts_provider = "openai"
 tts_url = "http://10.0.1.43:8030/v1/audio/speech"
 tts_token_env = "PILOT_TTS_TOKEN"
+# Optional Kokoro-82M sidecar on the RTX 3080. Kokoro voice IDs (bm_*/bf_*)
+# are routed here while Qwen remains the default engine for its own voices.
+tts_kokoro_url = "http://10.0.1.43:8032/v1/audio/speech"
+tts_kokoro_token_env = "PILOT_KOKORO_TOKEN"
 tts_engine_id = ""
 tts_model = "tts"
 tts_voice = "serena"

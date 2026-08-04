@@ -1,0 +1,31 @@
+[Unit]
+Description=Pilot Kokoro-82M TTS API
+Wants=network-online.target
+After=network-online.target nvidia-persistenced.service vllm-tts.service
+
+[Service]
+Type=simple
+User=vllm
+Group=vllm
+SupplementaryGroups=video render
+Environment=PYTHONUNBUFFERED=1
+Environment=HF_HOME=/srv/models/huggingface/kokoro
+Environment=HF_HUB_CACHE=/srv/models/huggingface/kokoro/hub
+Environment=TRANSFORMERS_CACHE=/srv/models/huggingface/kokoro/transformers
+Environment=LD_LIBRARY_PATH=/opt/vllm-omni/lib64/python3.12/site-packages/nvidia/cublas/lib:/opt/vllm-omni/lib64/python3.12/site-packages/nvidia/cudnn/lib:/opt/vllm-omni/lib64/python3.12/site-packages/nvidia/cuda_nvrtc/lib:/opt/vllm-omni/lib64/python3.12/site-packages/nvidia/cu13/lib:/opt/vllm-omni/lib64/python3.12/site-packages/nvidia/cudnn/lib
+Environment=PILOT_KOKORO_PORT=8032
+Environment=PILOT_KOKORO_DEVICE=cuda
+Environment=PILOT_KOKORO_API_KEY_FILE=/etc/pilot/kokoro-api-key
+ExecStart=/opt/vllm-omni/bin/python3.12 /opt/pilot-kokoro/pilot_kokoro_server.py
+Restart=on-failure
+RestartSec=5s
+TimeoutStartSec=300
+TimeoutStopSec=30
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/srv/models/huggingface/kokoro /opt/pilot-kokoro
+
+[Install]
+WantedBy=multi-user.target

@@ -215,6 +215,12 @@ class DeviceAssistantRequest(BaseModel):
     room_id: str | None = Field(default=None, min_length=1, max_length=128)
 
 
+class DeviceTTSPreviewRequest(BaseModel):
+    text: str = Field(default="This is a Pilot voice preview.", min_length=1, max_length=500)
+    voice: str = Field(min_length=1, max_length=64)
+    language: str = Field(default="en-AU", min_length=2, max_length=35)
+
+
 class DeviceHomeActionRequest(BaseModel):
     room_id: str | None = Field(default=None, min_length=1, max_length=128)
     entity_id: str = Field(
@@ -2535,6 +2541,67 @@ def create_app(
         response.headers["Cache-Control"] = "no-store"
         return device_manifest_payload(device)
 
+    @app.get("/v1/devices/{device_id}/tts/voices")
+    async def device_tts_voices(
+        device_id: str,
+        response: Response,
+        x_pilot_device_id: str = Header(),
+        authorization: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        device = authenticated_device(device_id, x_pilot_device_id, authorization)
+        if "voice" not in device["capabilities"]:
+            raise HTTPException(status_code=403, detail="device does not have voice capability")
+        response.headers["Cache-Control"] = "private, max-age=300"
+        status = local_tts.status()
+        return {
+            "provider": status.get("provider"),
+            "model": status.get("model"),
+            "active_voice": status.get("voice"),
+            "voices": status.get("available_voices", []),
+        }
+
+    @app.post("/v1/devices/{device_id}/tts/preview")
+    async def device_tts_preview(
+        device_id: str,
+        request: DeviceTTSPreviewRequest,
+        response: Response,
+        x_pilot_device_id: str = Header(),
+        authorization: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        device = authenticated_device(device_id, x_pilot_device_id, authorization)
+        if "voice" not in device["capabilities"]:
+            raise HTTPException(status_code=403, detail="device does not have voice capability")
+        try:
+            synthesized = await local_tts.synthesize(
+                request.text,
+                request.language,
+                request.voice,
+            )
+            asset = audio_assets.create(
+                device["room_id"],
+                "assistant",
+                synthesized.filename,
+                synthesized.content_type,
+                synthesized.content,
+                300,
+                device_id,
+            )
+        except TTSUnavailable as error:
+            raise HTTPException(status_code=422, detail=str(error)) from None
+        except TTSRequestFailed as error:
+            raise HTTPException(status_code=502, detail=str(error)) from None
+        except AudioAssetError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from None
+        response.headers["Cache-Control"] = "no-store"
+        return {
+            "voice": request.voice,
+            "synthesis": synthesized.metadata(),
+            "audio": {
+                **audio_assets.public_view(asset),
+                "download_url": f"/v1/audio-assets/{asset['id']}",
+            },
+        }
+
     @app.get("/v1/devices/{device_id}/vehicles")
     async def device_vehicles(
         device_id: str,
@@ -4267,6 +4334,7 @@ def create_app(
         x_pilot_language: str | None = Header(default=None),
         x_pilot_conversation_id: str | None = Header(default=None),
         x_pilot_room_id: str | None = Header(default=None),
+        x_pilot_tts_voice: str | None = Header(default=None),
     ) -> dict[str, Any]:
         device = authenticated_device(device_id, x_pilot_device_id, authorization)
         if "voice" not in device["capabilities"]:
@@ -4341,6 +4409,7 @@ def create_app(
             synthesized = await local_tts.synthesize(
                 assistant_result.response_text,
                 x_pilot_language,
+                x_pilot_tts_voice,
             )
         except TTSUnavailable as error:
             raise HTTPException(status_code=503, detail=str(error)) from None

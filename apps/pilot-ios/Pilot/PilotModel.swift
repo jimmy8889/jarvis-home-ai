@@ -59,6 +59,12 @@ final class PilotModel {
     var assistantStatus = "ready"
     var voiceAssistantPhase: VoiceAssistantPhase = .idle
     var lastVoiceTranscript: String?
+    var ttsVoices: [String] = []
+    var activeTTSVoice: String?
+    var selectedTTSVoice = ""
+    var ttsVoiceError: String?
+    var isLoadingTTSVoices = false
+    var isPreviewingTTSVoice = false
     private(set) var hasActiveConfiguration = false
     @ObservationIgnored private var activeCoreURL = ""
     @ObservationIgnored private var activeDeviceID = ""
@@ -104,12 +110,14 @@ final class PilotModel {
             musicPlaysOnThisIPhone = UserDefaults.standard.bool(
                 forKey: "pilot.musicPlaysOnThisIPhone"
             )
+            selectedTTSVoice = UserDefaults.standard.string(forKey: "pilot.ttsVoice") ?? ""
         } else {
             coreURL = ""
             deviceID = ""
             token = ""
             selectedRoomID = "office"
             musicPlaysOnThisIPhone = false
+            selectedTTSVoice = ""
         }
         connectionState = .notConfigured
         activeCoreURL = coreURL
@@ -202,6 +210,42 @@ final class PilotModel {
         Task {
             let ready = await preparePhonePlaybackIfNeeded()
             mediaError = ready ? nil : phonePlayback.status.label
+        }
+    }
+
+    func refreshTTSVoices() async {
+        guard hasActiveConfiguration else { return }
+        isLoadingTTSVoices = true
+        defer { isLoadingTTSVoices = false }
+        do {
+            let catalog = try await api().ttsVoices()
+            ttsVoices = catalog.voices
+            activeTTSVoice = catalog.activeVoice
+            if selectedTTSVoice.isEmpty || !catalog.voices.contains(selectedTTSVoice) {
+                selectedTTSVoice = catalog.activeVoice ?? catalog.voices.first ?? ""
+            }
+            ttsVoiceError = nil
+        } catch {
+            ttsVoiceError = Self.friendlyMessage(for: error)
+        }
+    }
+
+    func saveTTSVoice() {
+        guard !selectedTTSVoice.isEmpty else { return }
+        UserDefaults.standard.set(selectedTTSVoice, forKey: "pilot.ttsVoice")
+    }
+
+    func previewTTSVoice() async {
+        guard !selectedTTSVoice.isEmpty else { return }
+        isPreviewingTTSVoice = true
+        defer { isPreviewingTTSVoice = false }
+        do {
+            let preview = try await api().ttsPreview(voice: selectedTTSVoice)
+            let audio = try await api().voiceResponseAudio(at: preview.audio.downloadURL)
+            _ = try voiceAudio.playResponse(audio)
+            ttsVoiceError = nil
+        } catch {
+            ttsVoiceError = Self.friendlyMessage(for: error)
         }
     }
 
@@ -305,6 +349,7 @@ final class PilotModel {
             await refreshDashboard(silent: true)
             await refreshHomeLab(silent: true)
             await refreshMeetings(silent: true)
+            await refreshTTSVoices()
             return true
         } catch {
             connectionState = .offline(Self.friendlyMessage(for: error))
@@ -340,6 +385,7 @@ final class PilotModel {
             await refreshDashboard(silent: true)
             await refreshHomeLab(silent: true)
             await refreshMeetings(silent: true)
+            await refreshTTSVoices()
             return true
         } catch {
             let message = Self.friendlyMessage(for: error)
@@ -847,7 +893,8 @@ final class PilotModel {
             let reply = try await service.voice(
                 pcmData: pcm,
                 roomID: selectedRoomID,
-                conversationID: conversationID
+                conversationID: conversationID,
+                ttsVoice: selectedTTSVoice.isEmpty ? nil : selectedTTSVoice
             )
             try Task.checkCancellation()
 

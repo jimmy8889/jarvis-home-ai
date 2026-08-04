@@ -40,6 +40,29 @@ struct PilotAPI: Sendable {
         return try JSONDecoder().decode(PilotClientManifest.self, from: data)
     }
 
+    func ttsVoices() async throws -> TTSVoiceCatalog {
+        let data = try await request(path: "v1/devices/\(deviceID)/tts/voices")
+        return try JSONDecoder().decode(TTSVoiceCatalog.self, from: data)
+    }
+
+    func ttsPreview(
+        voice: String,
+        text: String = "This is a Pilot voice preview.",
+        language: String = "en-AU"
+    ) async throws -> TTSPreviewEnvelope {
+        let body = try JSONSerialization.data(withJSONObject: [
+            "voice": voice,
+            "text": text,
+            "language": language,
+        ])
+        let data = try await request(
+            path: "v1/devices/\(deviceID)/tts/preview",
+            method: "POST",
+            body: body
+        )
+        return try JSONDecoder().decode(TTSPreviewEnvelope.self, from: data)
+    }
+
     func energy() async throws -> EnergySnapshot {
         let data = try await request(path: "v1/devices/\(deviceID)/energy")
         if let direct = try? JSONDecoder().decode(EnergyEnvelope.self, from: data) {
@@ -321,7 +344,8 @@ struct PilotAPI: Sendable {
     func voice(
         pcmData: Data,
         roomID: String,
-        conversationID: String?
+        conversationID: String?,
+        ttsVoice: String? = nil
     ) async throws -> VoiceAssistantReply {
         guard !pcmData.isEmpty else { throw VoiceAudioError.recordingTooShort }
         let voiceRequest = Self.voiceRequest(
@@ -329,7 +353,8 @@ struct PilotAPI: Sendable {
             deviceID: deviceID,
             token: token,
             roomID: roomID,
-            conversationID: conversationID
+            conversationID: conversationID,
+            ttsVoice: ttsVoice
         )
         let (data, response) = try await URLSession.shared.upload(
             for: voiceRequest,
@@ -367,7 +392,8 @@ struct PilotAPI: Sendable {
         deviceID: String,
         token: String,
         roomID: String,
-        conversationID: String?
+        conversationID: String?,
+        ttsVoice: String? = nil
     ) -> URLRequest {
         let url = coreURL.appending(path: "v1/devices/\(deviceID)/voice")
         var request = URLRequest(url: url)
@@ -378,6 +404,9 @@ struct PilotAPI: Sendable {
         request.setValue(roomID, forHTTPHeaderField: "X-Pilot-Room-ID")
         request.setValue("16000", forHTTPHeaderField: "X-Pilot-Sample-Rate")
         request.setValue("en-AU", forHTTPHeaderField: "X-Pilot-Language")
+        if let ttsVoice, !ttsVoice.isEmpty {
+            request.setValue(ttsVoice, forHTTPHeaderField: "X-Pilot-TTS-Voice")
+        }
         request.setValue("audio/l16", forHTTPHeaderField: "Content-Type")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         if let conversationID, !conversationID.isEmpty {

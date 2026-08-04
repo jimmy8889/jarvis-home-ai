@@ -631,6 +631,39 @@ struct VoiceAssistantAudio: Codable, Sendable {
     }
 }
 
+struct TTSVoiceCatalog: Codable, Sendable {
+    let provider: String?
+    let model: String?
+    let activeVoice: String?
+    let voices: [String]
+
+    enum CodingKeys: String, CodingKey {
+        case provider, model, voices
+        case activeVoice = "active_voice"
+    }
+}
+
+struct TTSSynthesisMetadata: Codable, Sendable {
+    let provider: String?
+    let voice: String?
+    let model: String?
+    let language: String?
+    let contentType: String?
+    let sizeBytes: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case provider, voice, model, language
+        case contentType = "content_type"
+        case sizeBytes = "size_bytes"
+    }
+}
+
+struct TTSPreviewEnvelope: Codable, Sendable {
+    let voice: String
+    let synthesis: TTSSynthesisMetadata?
+    let audio: VoiceAssistantAudio
+}
+
 enum VoiceAssistantPhase: Equatable, Sendable {
     case idle
     case requestingPermission

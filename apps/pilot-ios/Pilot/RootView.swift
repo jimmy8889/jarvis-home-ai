@@ -3954,6 +3954,66 @@ private struct SettingsView: View {
                     }
                     .listRowBackground(Color.white.opacity(0.06))
 
+                    Section("Pilot voice") {
+                        if model.ttsVoices.isEmpty {
+                            HStack {
+                                Text("Voice catalogue not loaded")
+                                    .foregroundStyle(.secondary)
+                                Spacer()
+                                Button {
+                                    Task { await model.refreshTTSVoices() }
+                                } label: {
+                                    if model.isLoadingTTSVoices {
+                                        ProgressView().controlSize(.small)
+                                    } else {
+                                        Text("Load")
+                                    }
+                                }
+                            }
+                        } else {
+                            Picker("Preview voice", selection: $model.selectedTTSVoice) {
+                                ForEach(model.ttsVoices, id: \.self) { voice in
+                                    Text(voice.replacingOccurrences(of: "_", with: " ").capitalized)
+                                        .tag(voice)
+                                }
+                            }
+                            .onChange(of: model.selectedTTSVoice) { _, _ in
+                                model.saveTTSVoice()
+                            }
+
+                            Button {
+                                Task { await model.previewTTSVoice() }
+                            } label: {
+                                HStack {
+                                    Label(
+                                        "Preview \(model.selectedTTSVoice.replacingOccurrences(of: "_", with: " ").capitalized)",
+                                        systemImage: "speaker.wave.2.fill"
+                                    )
+                                    Spacer()
+                                    if model.isPreviewingTTSVoice {
+                                        ProgressView().controlSize(.small)
+                                    }
+                                }
+                            }
+                            .disabled(model.isPreviewingTTSVoice || model.selectedTTSVoice.isEmpty)
+
+                            if let activeVoice = model.activeTTSVoice {
+                                Text("Assistant responses use \(activeVoice.replacingOccurrences(of: "_", with: " ").capitalized) by default. The selected voice is also sent with new voice requests.")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        if let error = model.ttsVoiceError {
+                            Text(error)
+                                .font(.caption)
+                                .foregroundStyle(.red)
+                        }
+                        Text("Voice previews are generated locally on the RTX 3080 through Pilot Core.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .listRowBackground(Color.white.opacity(0.06))
+
                     Section("About") {
                         LabeledContent("Client", value: "iOS / iPadOS")
                         LabeledContent("Authority", value: "Pilot Core")

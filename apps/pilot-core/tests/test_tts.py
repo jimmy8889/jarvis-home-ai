@@ -7,7 +7,7 @@ import unittest
 import httpx
 
 from pilot_core.config import IntegrationSettings
-from pilot_core.tts import LocalTTS, TTSRequestFailed
+from pilot_core.tts import LocalTTS, TTSRequestFailed, TTSUnavailable
 
 
 WAV = b"RIFF\x04\x00\x00\x00WAVEpilot"
@@ -177,6 +177,19 @@ class OpenAITTSTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(observed["authorization"], "Bearer tts-secret")
         self.assertEqual(result.content_type, "audio/wav")
         self.assertEqual(result.voice, "af_sky")
+
+    async def test_qwen_voice_picker_exposes_and_validates_3080_voices(self) -> None:
+        settings = IntegrationSettings(
+            tts_provider="openai",
+            tts_url="http://tts.local:8030/v1/audio/speech",
+            tts_model="tts",
+            tts_voice="serena",
+        )
+        tts = LocalTTS(settings, 1_000_000)
+        self.assertIn("serena", tts.available_voices())
+        self.assertIn("vivian", tts.status()["available_voices"])
+        with self.assertRaisesRegex(TTSUnavailable, "voice is not available"):
+            await tts.synthesize("Invalid voice", voice="not-a-qwen-voice")
 
     async def test_rejects_oversized_or_invalid_audio(self) -> None:
         settings = IntegrationSettings(

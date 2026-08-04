@@ -76,6 +76,22 @@ tts_timeout_seconds = 60
 The token is optional for a trusted local server but remains recommended when
 the endpoint is reachable by other hosts.
 
+### RTX 3080 Qwen3-TTS voices
+
+The production `tts` model on the RTX 3080 currently provides these voices:
+
+```text
+aiden  dylan  eric  ono_anna  ryan
+serena sohee  uncle_fu  vivian
+```
+
+Pilot's active voice is `serena`. Change `tts_voice` in the `[integrations]`
+section of `config/core.container.toml` to any of the names above, then rebuild
+or restart Pilot Core. The authenticated `GET /v1/tts/voices` endpoint and each
+device snapshot expose the same list to setup clients. Pilot rejects an unknown
+voice before making a GPU request, so a bad setup value cannot silently break
+voice responses.
+
 ## Validation and safety
 
 - Supported output formats are WAV, FLAC, MP3, OGG, and AAC.

@@ -28,6 +28,21 @@ CONTENT_TYPE_FORMATS = {
     "audio/aac": "aac",
 }
 
+# Voices bundled by the Qwen3-TTS CustomVoice model currently deployed on the
+# RTX 3080. Keep this list in Pilot so setup clients can render a picker without
+# having to contact the GPU service or expose its bearer token.
+QWEN3_TTS_VOICES = (
+    "aiden",
+    "dylan",
+    "eric",
+    "ono_anna",
+    "ryan",
+    "serena",
+    "sohee",
+    "uncle_fu",
+    "vivian",
+)
+
 
 class TTSUnavailable(RuntimeError):
     """Local speech synthesis has not been configured."""
@@ -81,9 +96,15 @@ class LocalTTS:
             ),
             "model": self.settings.tts_model if provider == "openai" else None,
             "voice": self.settings.tts_voice or None,
+            "available_voices": list(self.available_voices()),
             "format": self.settings.tts_format,
             "language": self.settings.tts_language,
         }
+
+    def available_voices(self) -> tuple[str, ...]:
+        if self.settings.tts_provider == "openai" and self.settings.tts_model == "tts":
+            return QWEN3_TTS_VOICES
+        return ()
 
     async def synthesize(
         self,
@@ -96,6 +117,15 @@ class LocalTTS:
             raise TTSUnavailable("local TTS provider is not configured")
         selected_language = language or self.settings.tts_language
         selected_voice = voice or self.settings.tts_voice
+        if (
+            provider == "openai"
+            and self.settings.tts_model == "tts"
+            and selected_voice not in QWEN3_TTS_VOICES
+        ):
+            raise TTSUnavailable(
+                "voice is not available on the RTX 3080; choose one of: "
+                + ", ".join(QWEN3_TTS_VOICES)
+            )
         try:
             async with httpx.AsyncClient(
                 timeout=self.settings.tts_timeout_seconds,

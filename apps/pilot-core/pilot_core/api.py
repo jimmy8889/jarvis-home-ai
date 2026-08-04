@@ -2394,6 +2394,16 @@ def create_app(
     async def tts_status() -> dict[str, Any]:
         return local_tts.status()
 
+    @app.get("/v1/tts/voices", dependencies=[Depends(require_admin)])
+    async def tts_voices() -> dict[str, Any]:
+        """Return the voice choices supported by the active TTS provider."""
+        return {
+            "provider": settings.integrations.tts_provider or None,
+            "model": settings.integrations.tts_model or None,
+            "active_voice": settings.integrations.tts_voice or None,
+            "voices": list(local_tts.available_voices()),
+        }
+
     @app.post(
         "/v1/voice/acceptance",
         dependencies=[Depends(require_admin)],

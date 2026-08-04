@@ -83,6 +83,39 @@ class HomeAssistantTTSTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(TTSRequestFailed, "unsafe"):
             await tts.synthesize("Do not fetch arbitrary URLs")
 
+    async def test_retries_with_configured_piper_locale(self) -> None:
+        requests: list[dict[str, object]] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            if request.url.path == "/api/tts_get_url":
+                payload = json.loads(request.content)
+                requests.append(payload)
+                if payload["language"] == "en-AU":
+                    return httpx.Response(500, text="unsupported locale")
+                return httpx.Response(
+                    200,
+                    json={"path": "/api/tts_proxy/fallback.wav"},
+                )
+            if request.url.path == "/api/tts_proxy/fallback.wav":
+                return httpx.Response(
+                    200, content=WAV, headers={"Content-Type": "audio/wav"}
+                )
+            return httpx.Response(404)
+
+        settings = IntegrationSettings(
+            home_assistant_url="http://homeassistant.local:8123",
+            tts_provider="home_assistant",
+            tts_engine_id="tts.piper",
+            tts_language="en_US",
+            tts_format="wav",
+        )
+        tts = LocalTTS(settings, 1_000_000, httpx.MockTransport(handler))
+        result = await tts.synthesize("Fallback locale", "en-AU")
+
+        self.assertEqual([item["language"] for item in requests], ["en-AU", "en_US"])
+        self.assertEqual(result.language, "en-AU")
+        self.assertEqual(result.content_type, "audio/wav")
+
     async def test_rejects_encoded_proxy_path_traversal(self) -> None:
         def handler(request: httpx.Request) -> httpx.Response:
             return httpx.Response(

@@ -151,6 +151,26 @@ class LocalTTS:
         response = await client.post(
             f"{base_url}/api/tts_get_url", headers=headers, json=payload
         )
+        # Home Assistant's Piper engine is often configured with a concrete
+        # locale (for example ``en_US``), while clients naturally send a
+        # regional BCP-47 locale (for example ``en-AU``).  HA currently
+        # responds with a generic 500 when the requested locale is not one of
+        # Piper's loaded languages. Retry once with the configured provider
+        # locale rather than turning an otherwise valid voice request into a
+        # 502. The original client language is retained in the response
+        # metadata so conversation/UI locale remains truthful.
+        fallback_language = self.settings.tts_language.strip()
+        if (
+            response.status_code >= 500
+            and fallback_language
+            and fallback_language != language
+        ):
+            fallback_payload = {**payload, "language": fallback_language}
+            response = await client.post(
+                f"{base_url}/api/tts_get_url",
+                headers=headers,
+                json=fallback_payload,
+            )
         response.raise_for_status()
         try:
             result = response.json()

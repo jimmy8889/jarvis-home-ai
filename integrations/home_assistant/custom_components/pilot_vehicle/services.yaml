@@ -1,0 +1,35 @@
+send_navigation:
+  name: Send navigation
+  description: Send a bounded destination to the configured native Tesla Fleet vehicle.
+  fields:
+    device_id:
+      name: Device
+      description: Native Home Assistant Tesla Fleet device ID.
+      required: true
+      selector:
+        text:
+    latitude:
+      name: Latitude
+      description: Destination latitude (-90 to 90).
+      required: true
+      selector:
+        number:
+          min: -90
+          max: 90
+    longitude:
+      name: Longitude
+      description: Destination longitude (-180 to 180).
+      required: true
+      selector:
+        number:
+          min: -180
+          max: 180
+    order:
+      name: Order
+      description: Tesla navigation order; only zero is accepted.
+      required: false
+      default: 0
+      selector:
+        number:
+          min: 0
+          max: 0

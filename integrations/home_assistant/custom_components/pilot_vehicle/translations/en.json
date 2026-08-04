@@ -1,0 +1,8 @@
+{
+  "title": "Pilot Vehicle",
+  "config": {
+    "abort": {
+      "already_configured": "Pilot Vehicle is already configured."
+    }
+  }
+}

@@ -52,6 +52,13 @@ cd apps/pilot-ios
 xcodegen generate
 ```
 
+`PilotClientKit` is a shared local Swift package at
+`packages/PilotClientKit`. Open `apps/pilot-ios/Pilot.xcodeproj` from a full
+repository checkout; do not copy only the `apps/pilot-ios` directory. If Xcode
+shows the package as missing after switching branches, run `xcodegen generate`
+from `apps/pilot-ios`, then use **File > Packages > Reset Package Caches** and
+**File > Packages > Resolve Package Versions**.
+
 Register `pilot-ios-james` with the `voice`, `media-control`, and
 `portable-client` capabilities before configuring the application.
 

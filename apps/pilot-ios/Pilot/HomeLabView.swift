@@ -27,7 +27,12 @@ struct HomeLabView: View {
         .background(PilotTheme.background.ignoresSafeArea())
         .navigationTitle("Home Lab")
         .refreshable { await model.refreshHomeLab(force: true) }
-        .task { await model.refreshHomeLab(silent: true) }
+        .task {
+            while !Task.isCancelled {
+                await model.refreshHomeLab(silent: true, force: true)
+                try? await Task.sleep(for: .seconds(5))
+            }
+        }
         .sheet(item: $selectedNode) { node in nodeDetail(node) }
         .sheet(item: $selectedWorkload) { workload in workloadDetail(workload) }
         .alert("Migrate workload?", isPresented: Binding(

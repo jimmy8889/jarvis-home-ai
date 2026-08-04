@@ -487,7 +487,7 @@ class Integrations:
             "switch": {"turn_on", "turn_off"},
             "lock": {"lock", "unlock"},
             "cover": {"open_cover", "close_cover", "stop_cover"},
-            "climate": {"turn_on", "turn_off", "set_temperature"},
+            "climate": {"turn_on", "turn_off", "set_temperature", "set_hvac_mode"},
             "number": {"set_value"},
             "select": {"select_option"},
             "update": {"install"},
@@ -505,6 +505,7 @@ class Integrations:
         data = dict(service_data or {})
         permitted_keys = {
             "temperature",
+            "hvac_mode",
             "value",
             "option",
             "level",

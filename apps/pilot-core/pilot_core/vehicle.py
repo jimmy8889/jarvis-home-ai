@@ -836,6 +836,14 @@ class VehicleService:
                 "cool_high": "Cool High",
             }
             service_data["option"] = seat_options[str(parameters["mode"])]
+        elif action == "climate_on":
+            # Tesla Custom exposes heat_cool/off but does not advertise the
+            # optional climate.turn_on/turn_off feature flags. Driving the
+            # entity through its declared HVAC mode is deterministic and
+            # avoids Home Assistant returning HTTP 500.
+            service_data["hvac_mode"] = "heat_cool"
+        elif action == "climate_off":
+            service_data["hvac_mode"] = "off"
         elif action == "set_charge_limit":
             service_data["value"] = int(parameters["percent"])
         elif action == "send_route":

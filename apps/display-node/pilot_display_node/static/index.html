@@ -188,6 +188,23 @@
             </article>
           </div>
         </section>
+
+        <section class="page" data-page="homelab" aria-label="Home Lab">
+          <div class="page-title homelab-title">
+            <div><span class="eyebrow">Infrastructure</span><h1>Home Lab</h1></div>
+            <span id="homelab-state" class="state">Checking</span>
+          </div>
+          <div class="homelab-summary">
+            <article><span>Nodes</span><strong id="homelab-nodes">—</strong><small>online</small></article>
+            <article><span>Workloads</span><strong id="homelab-workloads">—</strong><small>running</small></article>
+            <article><span>Storage pools</span><strong id="homelab-pools">—</strong><small id="homelab-pool-state">checking</small></article>
+            <article><span>Hottest</span><strong id="homelab-hot">—</strong><small>CPU / GPU / disks</small></article>
+          </div>
+          <div class="homelab-columns">
+            <section><h2>Compute</h2><div id="homelab-compute" class="homelab-list"></div></section>
+            <section><h2>TrueNAS</h2><div id="homelab-storage" class="homelab-list"></div></section>
+          </div>
+        </section>
       </div>
 
       <nav aria-label="Dashboard pages">
@@ -197,6 +214,7 @@
         <button type="button" data-target="daily"><span>◉</span>Daily</button>
         <button type="button" data-target="climate"><span>☀</span>Climate</button>
         <button type="button" data-target="music"><span>♪</span>Music</button>
+        <button type="button" data-target="homelab"><span>▦</span>Home Lab</button>
         <button type="button" data-target="system"><span>●</span>System</button>
       </nav>
 

@@ -59,6 +59,28 @@ class ConfigTests(unittest.TestCase):
         self.assertTrue(settings.players[1].enabled)
         self.assertFalse(settings.players[1].control_enabled)
 
+    def test_music_disabled_room_does_not_require_placeholder_player(self) -> None:
+        configured = VALID_CONFIG + """
+
+[[rooms]]
+id = "bedroom"
+name = "Bedroom"
+response_player_id = "bedroom-response"
+default_music_player_id = ""
+music_enabled = false
+
+[[players]]
+id = "bedroom-response"
+room_id = "bedroom"
+name = "Bedroom Response"
+protocol = "pilot-device"
+kind = "response"
+"""
+        settings = self._load(configured)
+        bedroom = next(room for room in settings.rooms if room.id == "bedroom")
+        self.assertFalse(bedroom.music_enabled)
+        self.assertEqual(bedroom.default_music_player_id, "")
+
     def test_loads_separate_player_control_endpoint(self) -> None:
         configured = VALID_CONFIG.replace(
             'kind = "music"',

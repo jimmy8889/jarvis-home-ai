@@ -313,7 +313,8 @@
 - name: Install pinned display Sendspin client
   ansible.builtin.pip:
     name: "sendspin=={{ display_node_sendspin_version }}"
-    virtualenv: "/opt/pilot-display/vendor/sendspin-{{ display_node_sendspin_version }}"
+    executable: >-
+      /opt/pilot-display/vendor/sendspin-{{ display_node_sendspin_version }}/bin/pip
   when: display_node_sendspin_install | bool
 
 - name: Create display application virtual environment
@@ -324,7 +325,8 @@
 - name: Install display application
   ansible.builtin.pip:
     name: "/opt/pilot-display/releases/{{ display_node_release_id }}/apps/display-node"
-    virtualenv: "/opt/pilot-display/releases/{{ display_node_release_id }}/.venv"
+    executable: >-
+      /opt/pilot-display/releases/{{ display_node_release_id }}/.venv/bin/pip
 
 - name: Inspect current release
   ansible.builtin.stat:

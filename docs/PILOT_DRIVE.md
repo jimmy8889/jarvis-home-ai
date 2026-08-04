@@ -145,6 +145,8 @@ Pilot Core. Defaults are 30 days and 1,000 km. Reminders are in-app only.
 
 Saved destinations include a name, address, coordinates, icon, climate flag,
 optional temperature override, and optional front-right seat climate mode.
+The destination editor can search MapKit for an address or place, populate the
+required address and coordinates, and still supports moving the pin manually.
 The supported seat modes are off; heat low, medium, and high; and cool low,
 medium, and high. A one-tap request is idempotent on the server and reports
 wake, climate, temperature, front-right seat, and route independently. A

@@ -555,6 +555,23 @@ nav button.active {
   box-shadow: inset 0 0 28px rgba(75,184,255,.08);
 }
 nav button:active { transform: scale(.97); }
+
+.homelab-title { margin-bottom: 14px; }
+.homelab-summary { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; }
+.homelab-summary article, .homelab-card { background:rgba(18,27,40,.92); border:1px solid rgba(138,173,218,.16); border-radius:18px; padding:14px 16px; }
+.homelab-summary span, .homelab-summary small { display:block; color:var(--muted); font-size:12px; }
+.homelab-summary strong { display:block; font-size:25px; margin:3px 0; }
+.homelab-columns { display:grid; grid-template-columns:1.35fr 1fr; gap:16px; margin-top:15px; }
+.homelab-columns h2 { margin:0 0 8px 3px; font-size:16px; }
+.homelab-list { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:9px; }
+.homelab-card-heading { display:flex; align-items:center; justify-content:space-between; gap:10px; }
+.homelab-card-heading strong { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.homelab-card small { display:block; color:var(--muted); margin-top:6px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.homelab-pill { font-size:10px; text-transform:uppercase; color:#ff9c88; }
+.homelab-pill.ok { color:#55eca9; }
+.homelab-meter { height:4px; margin-top:10px; background:#ffffff10; border-radius:99px; overflow:hidden; }
+.homelab-meter i { display:block; height:100%; background:linear-gradient(90deg,#4bb8ff,#55eca9); border-radius:inherit; }
+.homelab-empty { color:var(--muted); padding:18px; margin:0; }
 footer { color: #65748a; font-size: 11px; }
 
 /* Pilot 0.26 shared home-monitoring surface. */

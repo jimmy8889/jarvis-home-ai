@@ -8,6 +8,9 @@ struct DestinationEditor: View {
     @State private var draft: DestinationDraft
     @State private var useTemperatureOverride: Bool
     @State private var isSaving = false
+    @State private var searchQuery = ""
+    @State private var isSearching = false
+    @State private var searchMessage: String?
 
     init(model: DriveModel, destination: SavedDestination? = nil) {
         self.model = model
@@ -19,6 +22,32 @@ struct DestinationEditor: View {
     var body: some View {
         NavigationStack {
             Form {
+                Section("Find a place") {
+                    HStack(spacing: 10) {
+                        TextField("Search an address or place", text: $searchQuery)
+                            .textInputAutocapitalization(.words)
+                            .autocorrectionDisabled(false)
+                            .submitLabel(.search)
+                            .onSubmit { Task { await searchPlace() } }
+                        Button {
+                            Task { await searchPlace() }
+                        } label: {
+                            if isSearching {
+                                ProgressView()
+                            } else {
+                                Image(systemName: "magnifyingglass")
+                            }
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isSearching)
+                        .accessibilityLabel("Search for destination")
+                    }
+                    if let searchMessage {
+                        Text(searchMessage)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                }
                 Section("Destination") {
                     TextField("Name", text: $draft.name)
                     TextField("Address", text: $draft.address, axis: .vertical)
@@ -113,5 +142,35 @@ struct DestinationEditor: View {
             center: coordinate,
             span: MKCoordinateSpan(latitudeDelta: 0.04, longitudeDelta: 0.04)
         )
+    }
+
+    @MainActor
+    private func searchPlace() async {
+        let query = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return }
+        isSearching = true
+        searchMessage = nil
+        defer { isSearching = false }
+
+        let request = MKLocalSearch.Request()
+        request.naturalLanguageQuery = query
+        request.region = region
+        do {
+            let response = try await MKLocalSearch(request: request).start()
+            guard let item = response.mapItems.first else {
+                searchMessage = "No matching place found. Try a fuller address."
+                return
+            }
+            let placemark = item.placemark
+            draft.latitude = placemark.coordinate.latitude
+            draft.longitude = placemark.coordinate.longitude
+            draft.address = placemark.title ?? item.name ?? query
+            if draft.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                draft.name = item.name ?? query
+            }
+            searchMessage = "Selected \(draft.address). You can move the pin on the map."
+        } catch {
+            searchMessage = "Place search is unavailable. Enter the address and tap the map instead."
+        }
     }
 }

@@ -26,10 +26,12 @@ const elements = Object.fromEntries(
     "console-weather-icon", "console-weather-temperature", "console-weather-condition",
     "console-energy-solar", "console-energy-home", "console-energy-battery",
     "console-energy-soc", "console-artwork", "console-progress-fill", "console-play-toggle",
+    "homelab-state", "homelab-nodes", "homelab-workloads", "homelab-pools",
+    "homelab-pool-state", "homelab-hot", "homelab-compute", "homelab-storage",
   ].map((id) => [id.replaceAll("-", "_"), document.querySelector(`#${id}`)]),
 );
 
-const dashboardPages = ["home", "history", "daily", "climate", "music", "system"];
+const dashboardPages = ["home", "history", "daily", "climate", "music", "homelab", "system"];
 function pageNames() {
   return document.body.dataset.mode === "media-console"
     ? ["media", ...dashboardPages]
@@ -1257,17 +1259,88 @@ async function updateStatus() {
   }
 }
 
+function percent(value) {
+  return typeof value === "number" ? `${Math.round(value * 100)}%` : "—";
+}
+
+function homelabCard(title, status, detail, ratio) {
+  const card = textNode("article", "homelab-card", "");
+  const heading = textNode("div", "homelab-card-heading", "");
+  heading.append(textNode("strong", "", title), textNode("span", `homelab-pill ${status === "online" || status === "running" || status === "ok" ? "ok" : ""}`, status));
+  card.append(heading, textNode("small", "", detail));
+  if (typeof ratio === "number") {
+    const meter = textNode("div", "homelab-meter", "");
+    const fill = textNode("i", "", "");
+    fill.style.width = `${Math.max(0, Math.min(100, ratio * 100))}%`;
+    meter.append(fill);
+    card.append(meter);
+  }
+  return card;
+}
+
+function renderHomeLab(value) {
+  const summary = value.summary || {};
+  elements.homelab_state.textContent = value.stale ? "Cached" : value.status === "healthy" ? "Live" : "Attention";
+  elements.homelab_state.className = `state ${value.status === "healthy" && !value.stale ? "online" : "offline"}`;
+  elements.homelab_nodes.textContent = `${summary.online_node_count ?? 0} / ${summary.node_count ?? 0}`;
+  elements.homelab_workloads.textContent = `${summary.running_workload_count ?? 0} / ${summary.workload_count ?? 0}`;
+  elements.homelab_pools.textContent = String(summary.pool_count ?? 0);
+  elements.homelab_pool_state.textContent = (summary.active_alert_count ?? 0) ? `${summary.active_alert_count} active alert${summary.active_alert_count === 1 ? "" : "s"}` : "healthy";
+  elements.homelab_hot.textContent = typeof summary.hottest_temperature_c === "number" ? `${number.format(summary.hottest_temperature_c)}°C` : "—";
+
+  elements.homelab_compute.replaceChildren();
+  const nodes = value.providers?.proxmox?.nodes || [];
+  for (const node of nodes) {
+    const details = `CPU ${percent(node.cpu_ratio)} · RAM ${percent(node.memory_ratio)} · ${node.cpu_threads ?? "—"} threads`;
+    elements.homelab_compute.append(homelabCard(node.name, node.status, details, node.cpu_ratio));
+  }
+  for (const agent of value.agents || []) {
+    const hottest = [...(agent.temperatures || []).map((item) => item.temperature_c), ...(agent.gpus || []).map((item) => item.temperature_c)].filter((item) => typeof item === "number").sort((a, b) => b - a)[0];
+    const gpuUsage = (agent.gpus || [])
+      .map((gpu) => percent(gpu.utilization_ratio))
+      .filter((value) => value !== "—")
+      .map((value, index) => `GPU${index + 1} ${value}`)
+      .join(" · ");
+    const detail = `CPU ${percent(agent.cpu_ratio)}${gpuUsage ? ` · ${gpuUsage}` : " · GPU —"}${typeof hottest === "number" ? ` · ${number.format(hottest)}°C` : ""}`;
+    if (!nodes.some((node) => node.name === agent.hostname)) elements.homelab_compute.append(homelabCard(agent.hostname, agent.stale ? "stale" : "online", detail, agent.cpu_ratio));
+  }
+  if (!elements.homelab_compute.children.length) elements.homelab_compute.append(textNode("p", "homelab-empty", "No compute data available"));
+
+  elements.homelab_storage.replaceChildren();
+  const pools = value.providers?.truenas?.pools || [];
+  for (const pool of pools) {
+    const free = typeof pool.free_bytes === "number" ? `${gigabytes(pool.free_bytes)} free` : "Capacity unavailable";
+    elements.homelab_storage.append(homelabCard(pool.name, pool.healthy === false ? "warning" : pool.status, free, pool.usage_ratio));
+  }
+  if (!pools.length) elements.homelab_storage.append(textNode("p", "homelab-empty", value.providers?.truenas?.error || "TrueNAS data unavailable"));
+}
+
+async function updateHomeLab() {
+  try {
+    const response = await fetch("/api/homelab", { cache: "no-store" });
+    const value = await response.json();
+    if (!response.ok) throw new Error(value.detail || `HTTP ${response.status}`);
+    renderHomeLab(value);
+  } catch (error) {
+    elements.homelab_state.textContent = "Unavailable";
+    elements.homelab_state.className = "state offline";
+    if (!elements.homelab_compute.children.length) elements.homelab_compute.append(textNode("p", "homelab-empty", String(error)));
+  }
+}
+
 updateClock();
 showPage(window.location.hash.slice(1) || "home");
 updateStatus();
 updateMedia();
 updateDashboard();
 updateLiveSnapshot();
+updateHomeLab();
 setInterval(updateClock, 1000);
 setInterval(updateStatus, 5000);
 setInterval(updateMedia, 10000);
 setInterval(updateDashboard, 30000);
 setInterval(updateLiveSnapshot, 2500);
+setInterval(updateHomeLab, 5000);
 setInterval(() => {
   document.querySelectorAll(".track-progress i, #console-progress-fill")
     .forEach(updateProgressClock);

@@ -106,26 +106,34 @@ final class PilotTests: XCTestCase {
     func testEndOfSpeechNeverSubmitsQuietOrSingleNoiseSpike() {
         var quiet = VoiceEndOfSpeechDetector()
         XCTAssertEqual(quiet.observe(decibels: -60, duration: 12), .none)
-        XCTAssertEqual(quiet.observe(decibels: -60, duration: 45), .noSpeech)
+        XCTAssertEqual(quiet.observe(decibels: -60, duration: 20), .noSpeech)
 
         var noiseSpike = VoiceEndOfSpeechDetector()
         XCTAssertEqual(noiseSpike.observe(decibels: -18, duration: 0.2), .none)
-        XCTAssertEqual(noiseSpike.observe(decibels: -60, duration: 44.9), .none)
-        XCTAssertEqual(noiseSpike.observe(decibels: -60, duration: 45), .noSpeech)
+        XCTAssertEqual(noiseSpike.observe(decibels: -60, duration: 19.9), .none)
+        XCTAssertEqual(noiseSpike.observe(decibels: -60, duration: 20), .noSpeech)
     }
 
-    func testEndOfSpeechFortyFiveSecondCapSubmitsDetectedSpeech() {
+    func testEndOfSpeechTwentySecondCapSubmitsDetectedSpeech() {
         var detector = VoiceEndOfSpeechDetector()
-        for index in 0..<4 {
+        for index in 0..<3 {
             XCTAssertEqual(
                 detector.observe(
                     decibels: -20,
-                    duration: 44.70 + Double(index) * 0.05
+                    duration: 19.70 + Double(index) * 0.05
                 ),
                 .none
             )
         }
-        XCTAssertEqual(detector.observe(decibels: -20, duration: 45), .submit)
+        XCTAssertEqual(detector.observe(decibels: -20, duration: 20), .submit)
+    }
+
+    func testEndOfSpeechRecognisesQuieterPhoneSpeech() {
+        var detector = VoiceEndOfSpeechDetector()
+        XCTAssertEqual(detector.observe(decibels: -40, duration: 0.10), .none)
+        XCTAssertEqual(detector.observe(decibels: -40, duration: 0.15), .none)
+        XCTAssertEqual(detector.observe(decibels: -40, duration: 0.20), .none)
+        XCTAssertEqual(detector.observe(decibels: -55, duration: 1.31), .submit)
     }
 
     @MainActor

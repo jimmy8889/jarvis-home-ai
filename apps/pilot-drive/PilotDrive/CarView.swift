@@ -132,13 +132,21 @@ struct CarView: View {
                 Text("Quick destinations").font(.headline)
                 Spacer()
                 Button { showingDestinationEditor = true } label: {
-                    Label("Add", systemImage: "plus")
+                    Label("Add destination", systemImage: "plus")
                 }
+                .buttonStyle(.borderedProminent)
+                .tint(DriveTheme.accent)
+                .accessibilityLabel("Add destination")
             }
             if model.destinations.isEmpty {
                 Text("Save a regular destination to wake Jarvis, set climate, and send the route with one tap.")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
+                Button { showingDestinationEditor = true } label: {
+                    Label("Choose a place", systemImage: "mappin.and.ellipse")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
             } else {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 10) {

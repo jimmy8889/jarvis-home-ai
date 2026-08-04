@@ -75,7 +75,7 @@ proxmox_verify_tls = true
 truenas_url = ""
 truenas_token_env = "TRUENAS_API_KEY"
 truenas_verify_tls = true
-homelab_cache_seconds = 15
+homelab_cache_seconds = 5
 # Local TTS stays disabled until the provider and engine are confirmed.
 tts_provider = ""
 # To reuse the Home Assistant Piper integration:
@@ -187,7 +187,7 @@ id = "bedroom"
 name = "Bedroom"
 music_enabled = false
 response_player_id = "bedroom-display-speaker"
-default_music_player_id = "bedroom-music"
+default_music_player_id = ""
 default_device_id = "pilot-bedroom-display"
 agent_url = ""
 
@@ -198,15 +198,6 @@ name = "Bedroom Display Speaker"
 protocol = "pilot-device"
 kind = "response"
 endpoint = "pilot-bedroom-display"
-control_enabled = false
-
-[[players]]
-id = "bedroom-music"
-room_id = "bedroom"
-name = "Bedroom Music"
-protocol = "future"
-kind = "music"
-endpoint = ""
 control_enabled = false
 
 [[rooms]]

@@ -71,7 +71,7 @@ truenas_token_env = "TRUENAS_API_KEY"
 # Transport remains encrypted, but hostname/CA verification must stay disabled
 # until a LAN-valid certificate is installed on the appliance.
 truenas_verify_tls = false
-homelab_cache_seconds = 15
+homelab_cache_seconds = 5
 tts_provider = "home_assistant"
 tts_url = ""
 tts_token_env = "PILOT_TTS_TOKEN"
@@ -218,13 +218,13 @@ observable_entity_id = "cover.jarvis_windows"
 
 [vehicles.controls.climate_on]
 domain = "climate"
-service = "turn_on"
+service = "set_hvac_mode"
 entity_id = "climate.jarvis_hvac_climate_system"
 observable_entity_id = "climate.jarvis_hvac_climate_system"
 
 [vehicles.controls.climate_off]
 domain = "climate"
-service = "turn_off"
+service = "set_hvac_mode"
 entity_id = "climate.jarvis_hvac_climate_system"
 observable_entity_id = "climate.jarvis_hvac_climate_system"
 
@@ -319,7 +319,7 @@ name = "Bedroom"
 music_enabled = false
 home_area_ids = ["bedroom"]
 response_player_id = "bedroom-display-speaker"
-default_music_player_id = "bedroom-music"
+default_music_player_id = ""
 default_device_id = "pilot-bedroom-display"
 agent_url = ""
 
@@ -330,15 +330,6 @@ name = "Bedroom Display Speaker"
 protocol = "pilot-device"
 kind = "response"
 endpoint = "pilot-bedroom-display"
-control_enabled = false
-
-[[players]]
-id = "bedroom-music"
-room_id = "bedroom"
-name = "Bedroom Music"
-protocol = "future"
-kind = "music"
-endpoint = ""
 control_enabled = false
 
 [[rooms]]

@@ -327,6 +327,7 @@ def _parse_llm_backend(value: object) -> LLMBackend:
 
 def _parse_room(value: dict[str, object]) -> Room:
     room_id = _require_nonempty(value.get("id"), "room.id")
+    music_enabled = bool(value.get("music_enabled", True))
     area_values = value.get("home_area_ids", [room_id])
     if not isinstance(area_values, list) or not all(
         isinstance(item, str) and item.strip() for item in area_values
@@ -340,9 +341,13 @@ def _parse_room(value: dict[str, object]) -> Room:
             value.get("response_player_id"),
             f"room[{room_id}].response_player_id",
         ),
-        default_music_player_id=_require_nonempty(
-            value.get("default_music_player_id"),
-            f"room[{room_id}].default_music_player_id",
+        default_music_player_id=(
+            _require_nonempty(
+                value.get("default_music_player_id"),
+                f"room[{room_id}].default_music_player_id",
+            )
+            if music_enabled
+            else str(value.get("default_music_player_id", "")).strip()
         ),
         default_device_id=str(value.get("default_device_id", "")).strip(),
         agent_url=str(value.get("agent_url", "")).strip(),
@@ -350,7 +355,7 @@ def _parse_room(value: dict[str, object]) -> Room:
             value.get("assist_satellite_entity_id", "")
         ).strip(),
         home_area_ids=home_area_ids,
-        music_enabled=bool(value.get("music_enabled", True)),
+        music_enabled=music_enabled,
     )
 
 
@@ -464,10 +469,10 @@ def _validate_references(rooms: tuple[Room, ...], players: tuple[Player, ...]) -
             )
 
     for room in rooms:
-        for field, player_id in (
-            ("response_player_id", room.response_player_id),
-            ("default_music_player_id", room.default_music_player_id),
-        ):
+        references = [("response_player_id", room.response_player_id)]
+        if room.music_enabled:
+            references.append(("default_music_player_id", room.default_music_player_id))
+        for field, player_id in references:
             player = players_by_id.get(player_id)
             if player is None:
                 raise ValueError(

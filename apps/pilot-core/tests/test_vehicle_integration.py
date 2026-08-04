@@ -78,6 +78,35 @@ class VehicleIntegrationTests(unittest.TestCase):
                 )
             )
 
+    def test_hvac_mode_is_bounded_and_forwarded(self) -> None:
+        captured: dict[str, object] = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            captured["path"] = request.url.path
+            captured["payload"] = json.loads(request.content)
+            return httpx.Response(200, json=[])
+
+        integrations = Integrations(
+            IntegrationSettings(home_assistant_url="http://ha.test:8123"),
+            transport=httpx.MockTransport(handler),
+        )
+        asyncio.run(
+            integrations.home_assistant_vehicle_action(
+                "climate",
+                "set_hvac_mode",
+                entity_id="climate.jarvis_hvac_climate_system",
+                service_data={"hvac_mode": "heat_cool"},
+            )
+        )
+        self.assertEqual(captured["path"], "/api/services/climate/set_hvac_mode")
+        self.assertEqual(
+            captured["payload"],
+            {
+                "entity_id": "climate.jarvis_hvac_climate_system",
+                "hvac_mode": "heat_cool",
+            },
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

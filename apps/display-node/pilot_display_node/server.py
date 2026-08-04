@@ -504,6 +504,15 @@ class DisplayHandler(BaseHTTPRequestHandler):
             )
             self._send_json(payload, status)
             return
+        if path == "/api/homelab":
+            status, payload = _core_device_request(  # type: ignore[attr-defined]
+                self.server.core_url,
+                self.server.device_id,
+                self.server.device_token_file,
+                "homelab?force=true",
+            )
+            self._send_json(payload, status)
+            return
         if path == "/api/events/snapshot":
             values = parse_qs(parsed_path.query)
             cursor = values.get("cursor", [""])[0]

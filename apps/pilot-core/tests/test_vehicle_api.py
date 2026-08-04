@@ -166,7 +166,12 @@ class VehicleApiTests(unittest.TestCase):
                             "lock.jarvis",
                             observable_entity_id="lock.jarvis",
                         ),
-                        VehicleControl("climate_on", "climate", "turn_on", "climate.jarvis"),
+                        VehicleControl(
+                            "climate_on", "climate", "set_hvac_mode", "climate.jarvis"
+                        ),
+                        VehicleControl(
+                            "climate_off", "climate", "set_hvac_mode", "climate.jarvis"
+                        ),
                         VehicleControl(
                             "set_temperature",
                             "climate",

@@ -224,11 +224,14 @@ struct VoiceEndOfSpeechDetector {
         case noSpeech
     }
 
-    static let speechThresholdDecibels = -34.0
-    static let requiredSpeechFrames = 4
+    // Phone cases, speaker distance and iOS voice processing can leave normal
+    // speech in the -40 dB range. The previous -34 dB gate could record valid
+    // audio indefinitely without ever submitting it to Pilot Core.
+    static let speechThresholdDecibels = -42.0
+    static let requiredSpeechFrames = 3
     static let minimumRecordingDuration = 0.65
     static let sustainedSilenceDuration = 1.10
-    static let maximumRecordingDuration = 45.0
+    static let maximumRecordingDuration = 20.0
 
     private var consecutiveSpeechFrames = 0
     private var speechDetected = false

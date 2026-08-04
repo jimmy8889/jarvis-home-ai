@@ -1292,3 +1292,23 @@ deployed integration, hardware boundary, or milestone status changes.
   online plus live RTX 3080 and RTX 3090 agents. TrueNAS remains explicitly
   pending its dedicated API key. The signed Pilot app was installed and
   launch-verified on the paired iPhone.
+
+## 2026-08-04: phone voice, vehicle routing and infrastructure surfaces
+
+The phone remains the first acceptance surface for conversational voice. Audio
+capture and end-of-speech detection are client responsibilities; transcription,
+curated Home Assistant tools, vLLM reasoning and TTS remain centralized in
+Pilot Core. Client failures must distinguish microphone/capture, transport,
+transcription, reasoning and playback rather than reporting one generic error.
+
+Rooms may explicitly disable music without registering a placeholder player.
+Bedroom is the first such room: it retains response audio but has no music
+destination. Vehicle actions continue through curated Home Assistant services;
+Tesla climate uses declared HVAC modes and navigation uses one file-backed
+provider identifier with a fixed GPS command.
+
+Home Lab monitoring is now a shared product surface rather than an iOS-only
+feature. Pilot Core owns provider credentials and normalized snapshots; display
+nodes receive only device-scoped projections. Historical infrastructure metrics
+will be stored in InfluxDB and rendered in Grafana, while current health remains
+available directly from Pilot Core if the history tier is unavailable.

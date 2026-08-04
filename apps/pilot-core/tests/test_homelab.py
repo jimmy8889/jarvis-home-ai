@@ -231,6 +231,25 @@ class HomeLabTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(snapshot["summary"]["online_node_count"], 1)
         self.assertEqual(snapshot["summary"]["hottest_temperature_c"], 62)
 
+    def test_truenas_normalizes_integral_float_fields_for_strict_clients(self) -> None:
+        snapshot = TrueNASMonitor._normalize(
+            {
+                "hostname": "truenas",
+                "uptime_seconds": 1234.75,
+                "physmem": 4096.0,
+                "cores": 10.0,
+            },
+            [{"name": "tank", "size": 100.0, "allocated": 25.0, "free": 75.0}],
+            [{"name": "sda", "size": 50.0, "rotationrate": 7200.0}],
+            {},
+            [],
+        )
+        self.assertIs(type(snapshot["system"]["uptime_seconds"]), int)
+        self.assertIs(type(snapshot["system"]["memory_total_bytes"]), int)
+        self.assertIs(type(snapshot["system"]["cpu_cores"]), int)
+        self.assertIs(type(snapshot["pools"][0]["size_bytes"]), int)
+        self.assertIs(type(snapshot["disks"][0]["rotation_rate"]), int)
+
 
 if __name__ == "__main__":
     unittest.main()

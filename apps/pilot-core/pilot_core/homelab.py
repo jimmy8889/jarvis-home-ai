@@ -40,6 +40,17 @@ def _number(value: Any) -> float | None:
     return result if math.isfinite(result) else None
 
 
+def _integer(value: Any) -> int | None:
+    """Return a JSON integer for clients that use strict integer decoding.
+
+    TrueNAS reports uptime and a few hardware fields as floating-point numbers
+    even though they are semantically integral. Normalising those values here
+    keeps the public homelab contract stable for Swift and other strict clients.
+    """
+    number = _number(value)
+    return int(number) if number is not None else None
+
+
 class ProxmoxMonitor:
     def __init__(
         self,
@@ -154,18 +165,18 @@ class ProxmoxMonitor:
                         "name": str(item.get("node") or "Unknown node"),
                         "status": str(item.get("status") or "unknown"),
                         "cpu_ratio": _number(item.get("cpu")),
-                        "cpu_threads": item.get("maxcpu"),
-                        "memory_used_bytes": item.get("mem"),
-                        "memory_total_bytes": item.get("maxmem"),
+                        "cpu_threads": _integer(item.get("maxcpu")),
+                        "memory_used_bytes": _integer(item.get("mem")),
+                        "memory_total_bytes": _integer(item.get("maxmem")),
                         "memory_ratio": _ratio(item.get("mem"), item.get("maxmem")),
-                        "disk_used_bytes": item.get("disk"),
-                        "disk_total_bytes": item.get("maxdisk"),
+                        "disk_used_bytes": _integer(item.get("disk")),
+                        "disk_total_bytes": _integer(item.get("maxdisk")),
                         "disk_ratio": _ratio(item.get("disk"), item.get("maxdisk")),
-                        "uptime_seconds": item.get("uptime"),
-                        "disk_read_bytes": item.get("diskread"),
-                        "disk_write_bytes": item.get("diskwrite"),
-                        "network_in_bytes": item.get("netin"),
-                        "network_out_bytes": item.get("netout"),
+                        "uptime_seconds": _integer(item.get("uptime")),
+                        "disk_read_bytes": _integer(item.get("diskread")),
+                        "disk_write_bytes": _integer(item.get("diskwrite")),
+                        "network_in_bytes": _integer(item.get("netin")),
+                        "network_out_bytes": _integer(item.get("netout")),
                         "tags": str(item.get("tags") or "").split(";") if item.get("tags") else [],
                     }
                 )
@@ -173,16 +184,16 @@ class ProxmoxMonitor:
                 workloads.append(
                     {
                         "id": str(item.get("id") or ""),
-                        "vmid": item.get("vmid"),
+                        "vmid": _integer(item.get("vmid")),
                         "name": str(item.get("name") or f"VM {item.get('vmid', '?')}"),
                         "kind": kind,
                         "node": str(item.get("node") or ""),
                         "status": str(item.get("status") or "unknown"),
                         "cpu_ratio": _number(item.get("cpu")),
                         "memory_ratio": _ratio(item.get("mem"), item.get("maxmem")),
-                        "memory_used_bytes": item.get("mem"),
-                        "memory_total_bytes": item.get("maxmem"),
-                        "uptime_seconds": item.get("uptime"),
+                        "memory_used_bytes": _integer(item.get("mem")),
+                        "memory_total_bytes": _integer(item.get("maxmem")),
+                        "uptime_seconds": _integer(item.get("uptime")),
                     }
                 )
             elif kind == "storage":
@@ -192,8 +203,8 @@ class ProxmoxMonitor:
                         "name": str(item.get("storage") or "Storage"),
                         "node": str(item.get("node") or ""),
                         "status": str(item.get("status") or "unknown"),
-                        "used_bytes": item.get("disk"),
-                        "total_bytes": item.get("maxdisk"),
+                        "used_bytes": _integer(item.get("disk")),
+                        "total_bytes": _integer(item.get("maxdisk")),
                         "usage_ratio": _ratio(item.get("disk"), item.get("maxdisk")),
                     }
                 )
@@ -324,9 +335,9 @@ class TrueNASMonitor:
                     "status": str(pool.get("status") or "unknown"),
                     "healthy": pool.get("healthy"),
                     "warning": pool.get("warning"),
-                    "size_bytes": pool.get("size"),
-                    "allocated_bytes": pool.get("allocated"),
-                    "free_bytes": pool.get("free"),
+                    "size_bytes": _integer(pool.get("size")),
+                    "allocated_bytes": _integer(pool.get("allocated")),
+                    "free_bytes": _integer(pool.get("free")),
                     "usage_ratio": _ratio(pool.get("allocated"), pool.get("size")),
                     "scan": pool.get("scan"),
                 }
@@ -356,10 +367,10 @@ class TrueNASMonitor:
                     "name": name,
                     "model": str(disk.get("model") or "Unknown disk"),
                     "serial": str(disk.get("serial") or ""),
-                    "size_bytes": disk.get("size"),
+                    "size_bytes": _integer(disk.get("size")),
                     "pool": disk.get("pool"),
                     "type": disk.get("type"),
-                    "rotation_rate": disk.get("rotationrate"),
+                    "rotation_rate": _integer(disk.get("rotationrate")),
                     "smart_enabled": disk.get("togglesmart"),
                     "smart_options": disk.get("smartoptions"),
                     "temperature_c": temperature_c,
@@ -382,11 +393,11 @@ class TrueNASMonitor:
             "system": {
                 "hostname": str(system.get("hostname") or "TrueNAS"),
                 "version": str(system.get("version") or ""),
-                "uptime_seconds": system.get("uptime_seconds"),
+                "uptime_seconds": _integer(system.get("uptime_seconds")),
                 "model": str(system.get("system_product") or system.get("model") or ""),
-                "memory_total_bytes": system.get("physmem"),
+                "memory_total_bytes": _integer(system.get("physmem")),
                 "cpu_model": str(system.get("model") or system.get("cpu_model") or ""),
-                "cpu_cores": system.get("cores"),
+                "cpu_cores": _integer(system.get("cores")),
             },
             "pools": sorted(normalized_pools, key=lambda row: row["name"]),
             "disks": sorted(normalized_disks, key=lambda row: row["name"]),

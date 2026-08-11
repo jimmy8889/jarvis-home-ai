@@ -140,6 +140,11 @@ The resulting low, expected, and high solar scenarios have different uses:
 - Node-RED translates the desired site export using live PV and household load.
 - Commands are applied at the full validated target immediately; there is no artificial command ramp delaying a five-minute FIT response.
 - Battery discharge is shaped up or down across forecast prices according to available stored energy and future retained value.
+- Morning solar is not automatically diverted into the battery. When FIT is
+  valuable and the conservative later-solar forecast can still reach the
+  evening SOC target, the optimiser exports morning solar and defers charging
+  until a lower-FIT period. The lost export revenue is treated as the charging
+  opportunity cost.
 - Battery discharge is never scheduled below the live SAJ floor or the configured 5% hard minimum.
 - During forced discharge, PV charging is disabled before discharge is enabled.
 - A post-command signed SAJ battery-power sample confirms physical direction and minimum response.
@@ -244,3 +249,6 @@ Before deployment:
 - Created this dedicated living energy-automation guide.
 - Documented the production optimiser, five-minute Amber fast path, price-shaped full-power battery dispatch, guarded Node-RED actuation, EV solar-only/fallback policy, hot-water scheduling, iPhone notifications, and dashboard.
 - Added the 11.8 kWp north plus 24.78 kWp south two-plane solar model, local irradiance correction, and curtailment-independent solar learning.
+- Confirmed and regression-tested high-FIT morning solar export with battery
+  charging deferred to lower-FIT solar periods when the evening target remains
+  conservatively feasible.

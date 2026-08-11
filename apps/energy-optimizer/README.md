@@ -52,6 +52,9 @@ material energy-automation change must update that guide in the same commit.
   while the best feasible intervals can use the full verified inverter output.
   Node-RED applies each new target immediately; there is no smoothing ramp or
   deliberate command delay.
+- Solar charging also carries an opportunity cost: valuable morning solar is
+  exported and battery charging is deferred to lower-FIT periods whenever the
+  conservative later-solar forecast can still satisfy the evening SOC target.
 - A price event first publishes a short-lived current-interval dispatch from the last valid horizon, with no debounce, polling wait or command ramp. It requires explicit current Amber start/end metadata, fresh safety telemetry and all production gates; it preserves the cached morning reserve and any more valuable allocated future interval. Invalid, stale, low or negative pricing cannot inherit a forced export. The full 36-hour calculation then replaces it, normally about two seconds later on the measured development system.
 - Tesla charging is modelled as three phase at 6–16 A (about 4.45–11.86 kW at the observed phase voltage). Conservative direct-solar slots are exhausted before a clearly labelled departure-deadline fallback is considered.
 - A morning target is enforced only when pre-solar discharge has economic value and conservative solar can refill the battery, or the early price dominates later retained value. Poor-price days intentionally retain more SOC.

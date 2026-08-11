@@ -369,6 +369,33 @@ def test_evening_full_target_is_enforced_when_low_solar_can_fill_it(tmp_path):
     assert at_crossover.soc_end_pct >= 99.0
 
 
+def test_high_morning_fit_exports_solar_and_defers_battery_charging_to_low_fit(tmp_path):
+    opt = EnergyOptimizer(
+        Settings(data_dir=tmp_path, battery_capacity_kwh=10.0),
+        LearningState(tmp_path / "state.json"),
+    )
+    now = datetime(2026, 8, 12, 7, 0, tzinfo=BRISBANE)
+    plan_slots = slots(now, fit=0.0, buy=0.30, solar=10.0, load=1.0, count=8)
+    for item in plan_slots[:2]:
+        item.export_price = 0.30
+    evening = now + timedelta(hours=4)
+
+    result = opt._dispatch(
+        plan_slots,
+        initial_soc_pct=20.0,
+        capacity_kwh=10.0,
+        evening=evening,
+    )
+
+    # Valuable morning generation is exported, not diverted into the battery.
+    assert all(item.battery_kw >= 0 for item in result[:2])
+    assert all(item.site_grid_kw <= -9.0 for item in result[:2])
+    # Charging is delayed until the FIT has fallen, while the conservative
+    # later surplus still gets the battery full before evening crossover.
+    assert any(item.battery_kw < 0 for item in result[2:])
+    assert result[-1].soc_end_pct >= 99.0
+
+
 def test_morning_target_is_enforced_when_discharge_has_value_and_solar_can_refill(tmp_path):
     opt = EnergyOptimizer(
         Settings(data_dir=tmp_path, battery_capacity_kwh=10.0),

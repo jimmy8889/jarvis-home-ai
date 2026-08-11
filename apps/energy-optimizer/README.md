@@ -2,6 +2,10 @@
 
 Local, production, forecast-aware dispatch planning for Amber prices, SAJ battery/solar, hot water and three-phase Tesla charging.
 
+The canonical human-readable system guide is
+[`energy-automation/README.md`](../../energy-automation/README.md). Every
+material energy-automation change must update that guide in the same commit.
+
 ## Current rollout state
 
 - Deployed on `10.0.1.204` as the isolated `energy-optimizer` Docker service.

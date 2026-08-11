@@ -263,6 +263,8 @@ views:
           Recommendation: **{{ states('sensor.energy_optimizer_hot_water') | title }}**  
           Runtime delivered today: **{{ states('sensor.hot_water_runtime_today') }} h / 3 h**  
           Planned command: **{{ p.hot_water_command | default('unknown') | title }}**  
+          Expected optimiser window: **{{ as_timestamp(state_attr('sensor.energy_optimizer_hot_water', 'expected_start'), 0) | timestamp_custom('%a %-I:%M %p') }} – {{ as_timestamp(state_attr('sensor.energy_optimizer_hot_water', 'expected_end'), 0) | timestamp_custom('%a %-I:%M %p') }}**<br>
+          Expected scheduled time: **{{ state_attr('sensor.energy_optimizer_hot_water', 'expected_hours') | float(0) | round(2) }} h**<br>
           Deadline: **before solar crossover, never later than 4:00 PM**
 
           ## 🚗 Car

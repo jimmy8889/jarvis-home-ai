@@ -172,6 +172,8 @@ Policy:
 - The element is modelled as a 3.7 kW binary load.
 - It receives three hours in minimum 15-minute dwell blocks.
 - Blocks are selected by lowest opportunity cost, including negative FIT periods and otherwise-curtailed solar.
+- The Flexible Loads dashboard shows the expected optimiser start, finish, and
+  scheduled hours for the current hot-water plan.
 - It should finish before the predicted evening crossover and never later than 4pm.
 - An independent Home Assistant latest-start fallback still delivers the required service if the optimiser is unavailable.
 
@@ -252,3 +254,5 @@ Before deployment:
 - Confirmed and regression-tested high-FIT morning solar export with battery
   charging deferred to lower-FIT solar periods when the evening target remains
   conservatively feasible.
+- Added the expected hot-water operating window and scheduled hours to the
+  Flexible Loads dashboard.

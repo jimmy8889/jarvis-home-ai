@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import json
 import logging
 from typing import Any
@@ -512,6 +512,19 @@ class Coordinator:
             "valid_until": plan.valid_until.isoformat(),
             **(publish_context or {}),
         }
+        hot_water_intervals = [
+            item for item in plan.intervals if item.hot_water_kw > 0
+        ]
+        hot_water_start = hot_water_intervals[0].start if hot_water_intervals else None
+        hot_water_end = (
+            hot_water_intervals[-1].start
+            + timedelta(minutes=hot_water_intervals[-1].duration_minutes)
+            if hot_water_intervals
+            else None
+        )
+        hot_water_hours = sum(
+            item.duration_minutes for item in hot_water_intervals
+        ) / 60
         publishes = [
             self.ha.publish_state("sensor.energy_optimizer_status", plan.mode, {
                 **common,
@@ -579,6 +592,9 @@ class Coordinator:
                 "friendly_name": "Energy Optimizer Hot Water",
                 "icon": "mdi:water-boiler",
                 "evening_crossover": plan.evening_crossover.isoformat() if plan.evening_crossover else None,
+                "expected_start": hot_water_start.isoformat() if hot_water_start else None,
+                "expected_end": hot_water_end.isoformat() if hot_water_end else None,
+                "expected_hours": round(hot_water_hours, 2),
             }),
             self.ha.publish_state("sensor.energy_optimizer_ev", plan.ev_action, {
                 **common,

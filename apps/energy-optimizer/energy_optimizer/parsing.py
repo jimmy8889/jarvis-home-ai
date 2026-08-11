@@ -51,9 +51,55 @@ def build_time_grid(now: datetime, horizon_hours: int, slot_minutes: int) -> lis
     return [start + timedelta(minutes=slot_minutes * i) for i in range(count)]
 
 
+def build_dispatch_grid(
+    now: datetime,
+    horizon_hours: int,
+    coarse_slot_minutes: int,
+    fine_slot_minutes: int,
+    fine_horizon_minutes: int,
+) -> list[tuple[datetime, timedelta]]:
+    """Build a gap-free hybrid grid starting at the decision instant.
+
+    Amber settles in five-minute intervals.  Keeping the active interval and
+    the immediate forecast at that resolution prevents a short price spike
+    from being averaged into a half-hour slot.  The rest of the 36-hour plan
+    remains coarse so the battery dynamic programme stays inexpensive.
+    """
+    if min(horizon_hours, coarse_slot_minutes, fine_slot_minutes) <= 0:
+        raise ValueError("dispatch grid durations must be positive")
+    horizon_end = now + timedelta(hours=horizon_hours)
+    active_start = floor_time(now, fine_slot_minutes)
+    fine_end = min(
+        horizon_end,
+        active_start + timedelta(minutes=max(fine_slot_minutes, fine_horizon_minutes)),
+    )
+    cursor = now
+    next_fine_boundary = active_start + timedelta(minutes=fine_slot_minutes)
+    result: list[tuple[datetime, timedelta]] = []
+
+    while cursor < fine_end:
+        while next_fine_boundary <= cursor:
+            next_fine_boundary += timedelta(minutes=fine_slot_minutes)
+        slot_end = min(horizon_end, fine_end, next_fine_boundary)
+        result.append((cursor, slot_end - cursor))
+        cursor = slot_end
+        next_fine_boundary += timedelta(minutes=fine_slot_minutes)
+
+    coarse_duration = timedelta(minutes=coarse_slot_minutes)
+    while cursor < horizon_end:
+        slot_end = min(horizon_end, cursor + coarse_duration)
+        result.append((cursor, slot_end - cursor))
+        cursor = slot_end
+    return result
+
+
 def _price_points(entity: dict[str, Any], timezone: ZoneInfo) -> list[tuple[datetime, float]]:
     attrs = entity.get("attributes", {})
+    if not isinstance(attrs, dict):
+        return []
     raw = attrs.get("forecast") or attrs.get("forecasts") or attrs.get("chartForecast") or []
+    if not isinstance(raw, list):
+        return []
     points: list[tuple[datetime, float]] = []
     for item in raw:
         if not isinstance(item, dict):
@@ -71,6 +117,88 @@ def _price_points(entity: dict[str, Any], timezone: ZoneInfo) -> list[tuple[date
             points.append((when, price))
     points.sort(key=lambda item: item[0])
     return points
+
+
+def active_price(
+    entity: dict[str, Any],
+    now: datetime,
+    timezone: ZoneInfo,
+    interval_minutes: int,
+    *,
+    require_explicit_window: bool = False,
+) -> tuple[float, datetime, datetime] | None:
+    """Return the live Amber price only while its five-minute window is active."""
+    try:
+        value = float(entity.get("state"))
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(value):
+        return None
+    attributes = entity.get("attributes", {})
+    if not isinstance(attributes, dict):
+        return None
+    start = parse_datetime(
+        attributes.get("start_time")
+        or attributes.get("startTime")
+        or attributes.get("nem_date"),
+        timezone,
+    )
+    end = parse_datetime(
+        attributes.get("end_time") or attributes.get("endTime"),
+        timezone,
+    )
+    if require_explicit_window and (start is None or end is None or end <= start):
+        return None
+    if start is None:
+        start = floor_time(now, interval_minutes)
+    if end is None or end <= start:
+        end = start + timedelta(minutes=interval_minutes)
+    if require_explicit_window:
+        expected_seconds = interval_minutes * 60
+        actual_seconds = (end - start).total_seconds()
+        # Amber settlement windows are five minutes.  Allow a small tolerance
+        # for providers that round their boundary timestamps, but never turn a
+        # malformed long-lived state into a current dispatch price.
+        if abs(actual_seconds - expected_seconds) > 60:
+            return None
+    if start <= now < end:
+        return value, start, end
+    return None
+
+
+def active_price_pair(
+    fit_entity: dict[str, Any],
+    import_entity: dict[str, Any],
+    now: datetime,
+    timezone: ZoneInfo,
+    interval_minutes: int,
+) -> tuple[
+    tuple[float, datetime, datetime],
+    tuple[float, datetime, datetime],
+] | None:
+    """Return a validated FIT/import pair for one current Amber interval."""
+    fit = active_price(
+        fit_entity,
+        now,
+        timezone,
+        interval_minutes,
+        require_explicit_window=True,
+    )
+    imports = active_price(
+        import_entity,
+        now,
+        timezone,
+        interval_minutes,
+        require_explicit_window=True,
+    )
+    if fit is None or imports is None:
+        return None
+    if (
+        abs((fit[1] - imports[1]).total_seconds()) > 1
+        or abs((fit[2] - imports[2]).total_seconds()) > 1
+    ):
+        return None
+    return fit, imports
 
 
 def _fallback_price(when: datetime, *, export: bool) -> float:
@@ -169,6 +297,8 @@ def build_slots(
     now: datetime,
     horizon_hours: int,
     slot_minutes: int,
+    amber_interval_minutes: int | None = None,
+    amber_fine_horizon_minutes: int = 0,
     timezone: ZoneInfo,
     fit_entity: dict[str, Any],
     import_entity: dict[str, Any],
@@ -182,13 +312,42 @@ def build_slots(
     solar_points = _solar_points(solar_entities, timezone)
     weather = weather_condition.lower()
     low_weather_factor = 0.80 if weather in {"rainy", "pouring", "lightning-rainy"} else 0.90
-    duration_h = slot_minutes / 60
-    duration = timedelta(minutes=slot_minutes)
+    fine_minutes = amber_interval_minutes or slot_minutes
+    grid = build_dispatch_grid(
+        now,
+        horizon_hours,
+        slot_minutes,
+        fine_minutes,
+        amber_fine_horizon_minutes,
+    )
+    active_pair = active_price_pair(
+        fit_entity,
+        import_entity,
+        now,
+        timezone,
+        fine_minutes,
+    )
+    active_fit, active_import = active_pair if active_pair else (None, None)
     slots: list[Slot] = []
-    for when in build_time_grid(now, horizon_hours, slot_minutes):
+    for when, duration in grid:
+        duration_h = duration.total_seconds() / 3600
         fit, fit_source = _slot_price(fit_points, when, duration, export=True)
         import_price, import_source = _slot_price(import_points, when, duration, export=False)
+        slot_end = when + duration
+        if active_fit and when < active_fit[2] and slot_end > active_fit[1]:
+            fit = active_fit[0]
+            fit_source = "amber_live"
+        if active_import and when < active_import[2] and slot_end > active_import[1]:
+            import_price = active_import[0]
+            import_source = "amber_live"
         solar, low, high = _sample_solar(solar_points, when, calibration_ratio, low_weather_factor)
+        price_sources = {fit_source, import_source}
+        if price_sources == {"amber_live"}:
+            price_source = "amber_live"
+        elif all(item.startswith("amber") for item in price_sources):
+            price_source = "amber"
+        else:
+            price_source = "historical_fallback"
         slots.append(Slot(
             start=when,
             duration_h=duration_h,
@@ -198,6 +357,6 @@ def build_slots(
             load_kw=max(0.2, float(load_forecast(when))),
             import_price=import_price,
             export_price=fit,
-            price_source="amber" if fit_source == import_source == "amber" else "historical_fallback",
+            price_source=price_source,
         ))
     return slots

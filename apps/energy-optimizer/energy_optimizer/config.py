@@ -15,6 +15,10 @@ class Settings:
     interval_seconds: int = 300
     horizon_hours: int = 36
     slot_minutes: int = 30
+    amber_interval_minutes: int = 5
+    amber_fine_horizon_minutes: int = 60
+    fast_dispatch_state_max_age_seconds: int = 330
+    fast_dispatch_plan_max_age_seconds: int = 600
     timezone: str = "Australia/Brisbane"
 
     battery_capacity_kwh: float = 47.0

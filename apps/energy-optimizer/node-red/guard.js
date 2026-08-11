@@ -3,7 +3,12 @@
 const MAX_DISCHARGE_KW = 28;
 const MAX_CHARGE_KW = 30;
 const DEFAULT_DISCHARGE_CAP_KW = 28;
-const RAMP_UP_STEP_KW = 14;
+// This is a semantic plan-validation ceiling, not an inverter power limit.
+// It permits a high-PV site target plus the independently clamped 28 kW
+// battery contribution while still rejecting implausible values.
+const MAX_SITE_EXPORT_TARGET_KW = 100;
+const MAX_TELEMETRY_AGE_MS = 330 * 1000;
+const MAX_TELEMETRY_FUTURE_SKEW_MS = 60 * 1000;
 
 function finite(value) {
   if (value === null || value === undefined) return null;
@@ -73,7 +78,7 @@ function validatePlan(input) {
   if (plan.schema_version !== 1 || !Number.isFinite(validUntil) || !Number.isFinite(generatedAt)) {
     return rejected(result, "rejected_schema");
   }
-  if (nowMs > validUntil || nowMs - generatedAt > 10 * 60 * 1000 || generatedAt > nowMs + 60 * 1000) {
+  if (nowMs >= validUntil || nowMs - generatedAt > 10 * 60 * 1000 || generatedAt > nowMs + 60 * 1000) {
     return rejected(result, "rejected_stale");
   }
   if (plan.actuation_allowed !== true || String(plan.mode).toLowerCase() !== "active") {
@@ -95,12 +100,32 @@ function validatePlan(input) {
     return rejected(result, "rejected_invalid_numeric");
   }
 
+  // SOC, PV and load are live measurements. A frozen numeric value is unsafe
+  // to actuate against, so require HA's measurement timestamps as well. Static
+  // limits/helpers such as the inverter floor deliberately have no age check.
+  const socMeasuredAtMs = finite(input.socMeasuredAtMs);
+  const pvMeasuredAtMs = finite(input.pvMeasuredAtMs);
+  const homeLoadMeasuredAtMs = finite(input.homeLoadMeasuredAtMs);
+  if ([socMeasuredAtMs, pvMeasuredAtMs, homeLoadMeasuredAtMs].some((value) => value === null)) {
+    return rejected(result, "rejected_telemetry_timestamp");
+  }
+  const socAgeMs = nowMs - socMeasuredAtMs;
+  const pvAgeMs = nowMs - pvMeasuredAtMs;
+  const homeLoadAgeMs = nowMs - homeLoadMeasuredAtMs;
+  if (
+    [socAgeMs, pvAgeMs, homeLoadAgeMs].some(
+      (ageMs) => ageMs > MAX_TELEMETRY_AGE_MS || ageMs < -MAX_TELEMETRY_FUTURE_SKEW_MS,
+    )
+  ) {
+    return rejected(result, "rejected_telemetry_stale");
+  }
+
   const liveFloor = Math.max(5, inverterFloor);
   if (
     soc < liveFloor - 0.5 || soc > 100.5 ||
     inverterFloor < 5 || inverterFloor > 100 ||
     Math.abs(target) > MAX_CHARGE_KW + 0.01 ||
-    siteExport < -0.01 || siteExport > 40 ||
+    siteExport < -0.01 || siteExport > MAX_SITE_EXPORT_TARGET_KW ||
     livePvKw < 0 || livePvKw > 100 || liveLoadKw < 0 || liveLoadKw > 100
   ) {
     return rejected(result, "rejected_bounds");
@@ -123,6 +148,13 @@ function validatePlan(input) {
     livePvKw,
     liveLoadKw,
     pvExportCommand,
+    validUntilMs: validUntil,
+    evaluatedAtMs: nowMs,
+    telemetryAgeSeconds: {
+      soc: socAgeMs / 1000,
+      pv: pvAgeMs / 1000,
+      homeLoad: homeLoadAgeMs / 1000,
+    },
   };
 
   if (action === "discharge_export") {
@@ -182,17 +214,6 @@ function validatePlan(input) {
   };
 }
 
-// Ramp upward commands only. Reductions, rejections and stops take effect
-// immediately; from rest a 28 kW request reaches 14 kW now and 28 kW on the
-// next one-minute watchdog pass.
-function rampTarget(previousKw, requestedKw, maxIncreaseKw = RAMP_UP_STEP_KW) {
-  const previous = Math.max(0, finite(previousKw) ?? 0);
-  const requested = Math.max(0, finite(requestedKw) ?? 0);
-  const step = Math.max(0, finite(maxIncreaseKw) ?? RAMP_UP_STEP_KW);
-  if (requested <= previous) return requested;
-  return Math.min(requested, previous + step);
-}
-
 function evaluateFeedback(input) {
   const action = String(input.action || "");
   const targetKw = finite(input.targetKw);
@@ -221,10 +242,10 @@ if (typeof module !== "undefined") {
     DEFAULT_DISCHARGE_CAP_KW,
     MAX_CHARGE_KW,
     MAX_DISCHARGE_KW,
-    RAMP_UP_STEP_KW,
+    MAX_SITE_EXPORT_TARGET_KW,
+    MAX_TELEMETRY_AGE_MS,
     evaluateFeedback,
     finite,
-    rampTarget,
     validatePlan,
   };
 }

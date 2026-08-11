@@ -26,7 +26,7 @@ class Slot:
 @dataclass
 class DispatchInterval:
     start: datetime
-    duration_minutes: int
+    duration_minutes: float
     solar_kw: float
     solar_low_kw: float
     load_kw: float

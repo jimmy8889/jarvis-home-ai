@@ -4,7 +4,7 @@
     "type": "tab",
     "label": "Energy Optimizer Guarded Actuator (Production v2)",
     "disabled": false,
-    "info": "Production v2 guarded actuator. Every disarmed or rejected state actively cancels forced modes. Discharge translates the site-export target from live PV/load, ramps upward to the full verified 28 kW limit, disables PV charging while exporting, and confirms SAJ feedback. Grid charge is limited to 30 kW. The disabled v1 tab is retained for rollback."
+    "info": "Production v2 guarded actuator. Every disarmed or rejected state actively cancels forced modes. Discharge translates a semantically validated site-export target (conservatively bounded at 100 kW) from live PV/load and immediately applies the battery balance clamped to the verified 28 kW limit, disables PV charging while exporting, and confirms SAJ feedback after actuation. Grid charge immediately applies its full clamped target up to 30 kW. Live battery SOC, PV and load measurements must have a last_reported (preferred) or last_updated timestamp no older than 330 seconds; static limits and helpers are not aged. Every allow or curtail decision directly reasserts the raw SAJ export-limit register before synchronizing the helper, so an unchanged optimistic helper cannot suppress the hardware write. Each accepted plan also replaces a one-shot valid-until timer that safe-stops exactly at expiry; the independent 60-second stale-plan watchdog remains. The disabled v1 tab is retained for rollback."
   },
   {
     "id": "eop_plan_changed_002",
@@ -135,7 +135,7 @@
     "type": "function",
     "z": "eop_guard_tab_002",
     "name": "Read guarded HA state",
-    "func": "const ha=global.get('homeassistant');\nconst states=ha?.homeAssistant?.states || ha?.states || {};\nfunction entity(entityId) { return states[entityId] || {}; }\nfunction raw(entityId) { return entity(entityId).state; }\nfunction finite(value) { if (value===null || value===undefined || (typeof value==='string' && (!value.trim() || ['unknown','unavailable','none','null'].includes(value.trim().toLowerCase())))) return null; const parsed=Number(value); return Number.isFinite(parsed)?parsed:null; }\nfunction powerKw(entityId) { const value=finite(raw(entityId)); if (value===null) return null; const unit=String(entity(entityId).attributes?.unit_of_measurement || '').trim().toLowerCase(); if (unit==='w') return value/1000; if (unit==='kw') return value; if (unit==='mw') return value*1000; return null; }\nmsg.planEntity=entity('sensor.energy_optimizer_plan');\nmsg.mode=raw('input_select.energy_optimizer_mode');\nmsg.rolloutApproved=raw('input_boolean.energy_optimizer_rollout_approved');\nmsg.batteryControl=raw('input_boolean.energy_optimizer_battery_control');\nmsg.manualOverride=raw('input_boolean.energy_optimizer_manual_override');\nmsg.soc=raw('sensor.saj_battery_1_soc');\nmsg.minSocPct=raw('sensor.saj_battery_discharge_soc_lower_limit');\nmsg.maxDischargeCapKw=raw('input_number.energy_optimizer_max_discharge_kw');\nmsg.pvPowerKw=powerKw('sensor.pv_power_mqtt_abs');\nmsg.homeLoadKw=powerKw('sensor.saj_home_load');\nreturn msg;",
+    "func": "const ha=global.get('homeassistant');\nconst states=ha?.homeAssistant?.states || ha?.states || {};\nfunction entity(entityId) { return states[entityId] || {}; }\nfunction raw(entityId) { return entity(entityId).state; }\nfunction finite(value) { if (value===null || value===undefined || (typeof value==='string' && (!value.trim() || ['unknown','unavailable','none','null'].includes(value.trim().toLowerCase())))) return null; const parsed=Number(value); return Number.isFinite(parsed)?parsed:null; }\nfunction powerKw(entityId) { const value=finite(raw(entityId)); if (value===null) return null; const unit=String(entity(entityId).attributes?.unit_of_measurement || '').trim().toLowerCase(); if (unit==='w') return value/1000; if (unit==='kw') return value; if (unit==='mw') return value*1000; return null; }\nfunction measurementAtMs(entityId) { const value=entity(entityId); for (const candidate of [value.last_reported,value.last_updated]) { const parsed=typeof candidate==='number'?candidate:Date.parse(candidate||''); if (Number.isFinite(parsed)) return parsed; } return null; }\nmsg.planEntity=entity('sensor.energy_optimizer_plan');\nmsg.mode=raw('input_select.energy_optimizer_mode');\nmsg.rolloutApproved=raw('input_boolean.energy_optimizer_rollout_approved');\nmsg.batteryControl=raw('input_boolean.energy_optimizer_battery_control');\nmsg.manualOverride=raw('input_boolean.energy_optimizer_manual_override');\nmsg.soc=raw('sensor.saj_battery_1_soc');\nmsg.socMeasuredAtMs=measurementAtMs('sensor.saj_battery_1_soc');\nmsg.minSocPct=raw('sensor.saj_battery_discharge_soc_lower_limit');\nmsg.maxDischargeCapKw=raw('input_number.energy_optimizer_max_discharge_kw');\nmsg.pvPowerKw=powerKw('sensor.pv_power_mqtt_abs');\nmsg.pvMeasuredAtMs=measurementAtMs('sensor.pv_power_mqtt_abs');\nmsg.homeLoadKw=powerKw('sensor.saj_home_load');\nmsg.homeLoadMeasuredAtMs=measurementAtMs('sensor.saj_home_load');\nreturn msg;",
     "outputs": 1,
     "noerr": 0,
     "initialize": "",
@@ -153,8 +153,8 @@
     "id": "eop_validate_002",
     "type": "function",
     "z": "eop_guard_tab_002",
-    "name": "Validate, translate and ramp plan",
-    "func": "const MAX_DISCHARGE_KW=28, MAX_CHARGE_KW=30, DEFAULT_DISCHARGE_CAP_KW=28, RAMP_UP_STEP_KW=14;\nfunction finite(value) { if (value===null || value===undefined || (typeof value==='string' && (!value.trim() || ['unknown','unavailable','none','null'].includes(value.trim().toLowerCase())))) return null; const parsed=Number(value); return Number.isFinite(parsed)?parsed:null; }\nfunction on(value) { return String(value||'').toLowerCase()==='on'; }\nfunction rejected(result,status) { return {...result,actuate:false,safeStop:true,stopForced:true,status,action:'none',targetKw:0,requestedTargetKw:0,pvExportCommand:'allow'}; }\nfunction validatePlan(input) {\n  const nowMs=input.nowMs??Date.now(), entity=input.planEntity||{}, plan=entity.attributes||{}, mode=String(input.mode||plan.mode||'shadow').toLowerCase();\n  const result={actuate:false,safeStop:true,stopForced:true,status:'shadow',action:'none',targetKw:0,requestedTargetKw:0,plannedBatteryTargetKw:null,siteExportTargetKw:null,livePvKw:null,liveLoadKw:null,pvExportCommand:'allow',planId:String(plan.plan_id||entity.state||'unknown')};\n  if (on(input.manualOverride)) return {...result,status:'manual_override'};\n  if (mode!=='active') return {...result,status:mode||'disabled'};\n  if (!on(input.rolloutApproved)) return {...result,status:'rollout_not_approved'};\n  if (!on(input.batteryControl)) return {...result,status:'battery_control_off'};\n  const validUntil=Date.parse(plan.valid_until||''), generatedAt=Date.parse(plan.generated_at||'');\n  if (plan.schema_version!==1 || !Number.isFinite(validUntil) || !Number.isFinite(generatedAt)) return rejected(result,'rejected_schema');\n  if (nowMs>validUntil || nowMs-generatedAt>600000 || generatedAt>nowMs+60000) return rejected(result,'rejected_stale');\n  if (plan.actuation_allowed!==true || String(plan.mode).toLowerCase()!=='active') return rejected(result,'rejected_not_allowed');\n  const pvExportCommand=String(plan.pv_export_command||'allow').toLowerCase();\n  if (!['allow','curtail'].includes(pvExportCommand)) return rejected(result,'rejected_pv_command');\n  const target=finite(plan.battery_power_target_kw), siteExport=finite(plan.site_export_target_kw), soc=finite(input.soc), inverterFloor=finite(input.minSocPct), livePvKw=finite(input.pvPowerKw), liveLoadKw=finite(input.homeLoadKw);\n  if ([target,siteExport,soc,inverterFloor,livePvKw,liveLoadKw].some(value=>value===null)) return rejected(result,'rejected_invalid_numeric');\n  const liveFloor=Math.max(5,inverterFloor);\n  if (soc<liveFloor-.5 || soc>100.5 || inverterFloor<5 || inverterFloor>100 || Math.abs(target)>MAX_CHARGE_KW+.01 || siteExport<-.01 || siteExport>40 || livePvKw<0 || livePvKw>100 || liveLoadKw<0 || liveLoadKw>100) return rejected(result,'rejected_bounds');\n  const action=String(plan.action||'idle').toLowerCase();\n  if (!['discharge_export','grid_charge','curtail_pv','self_consumption','pv_charge','idle'].includes(action)) return rejected(result,'rejected_conflicting_action');\n  const active={...result,actuate:true,safeStop:false,stopForced:false,action,plannedBatteryTargetKw:target,siteExportTargetKw:siteExport,livePvKw,liveLoadKw,pvExportCommand};\n  if (action==='discharge_export') {\n    if (pvExportCommand!=='allow' || soc<=liveFloor+1 || target<=0 || target>MAX_DISCHARGE_KW+.01 || siteExport<=0) return rejected(active,'rejected_discharge_guard');\n    const configuredCap=finite(input.maxDischargeCapKw), cap=Math.min(MAX_DISCHARGE_KW,configuredCap===null?DEFAULT_DISCHARGE_CAP_KW:Math.max(0,configuredCap));\n    const requestedTargetKw=Math.min(Math.max(0,siteExport+liveLoadKw-livePvKw),cap);\n    if (requestedTargetKw<=.05) return {...active,status:'accepted_discharge_pv_meets_target',stopForced:true,targetKw:0,requestedTargetKw:0};\n    return {...active,status:'accepted_discharge',targetKw:requestedTargetKw,requestedTargetKw};\n  }\n  if (action==='grid_charge') {\n    if (soc>=99 || target>=0) return rejected(active,'rejected_charge_guard');\n    const requestedTargetKw=Math.min(MAX_CHARGE_KW,Math.abs(target));\n    return {...active,status:'accepted_grid_charge',targetKw:requestedTargetKw,requestedTargetKw};\n  }\n  if (action==='curtail_pv' && pvExportCommand!=='curtail') return rejected(active,'rejected_conflicting_action');\n  if (['self_consumption','pv_charge','idle'].includes(action) && pvExportCommand!=='allow') return rejected(active,'rejected_conflicting_action');\n  return {...active,stopForced:true,status:'accepted_normal_'+action};\n}\nfunction rampTarget(previousKw,requestedKw,maxIncreaseKw=RAMP_UP_STEP_KW) { const previous=Math.max(0,finite(previousKw)??0), requested=Math.max(0,finite(requestedKw)??0), step=Math.max(0,finite(maxIncreaseKw)??RAMP_UP_STEP_KW); return requested<=previous?requested:Math.min(requested,previous+step); }\nconst r=validatePlan(msg);\nif ((r.action==='discharge_export' || r.action==='grid_charge') && !r.safeStop && !r.stopForced) {\n  const last=flow.get('energyOptimizerLastCommand')||{}, previous=last.action===r.action?last.targetKw:0;\n  r.requestedTargetKw=r.targetKw; r.targetKw=rampTarget(previous,r.targetKw); r.ramped=r.targetKw+0.001<r.requestedTargetKw;\n  flow.set('energyOptimizerLastCommand',{action:r.action,targetKw:r.targetKw,planId:r.planId});\n} else {\n  flow.set('energyOptimizerLastCommand',{action:'none',targetKw:0,planId:r.planId});\n}\nlet detail='';\nif (r.action==='discharge_export') detail=' | site='+Number(r.siteExportTargetKw).toFixed(1)+' pv='+Number(r.livePvKw).toFixed(1)+' load='+Number(r.liveLoadKw).toFixed(1)+' request='+Number(r.requestedTargetKw).toFixed(1)+' apply='+Number(r.targetKw).toFixed(1)+'kW';\nelse if (r.action==='grid_charge') detail=' | request='+Number(r.requestedTargetKw).toFixed(1)+' apply='+Number(r.targetKw).toFixed(1)+'kW';\nconst command={action:r.action,targetKw:r.targetKw,requestedTargetKw:r.requestedTargetKw,planId:r.planId};\nconst base={optimizer:r,command};\nconst audit={...base,payload:r.status+' | '+r.planId+detail};\nconst stop=r.stopForced?{...base,payload:0}:null;\nconst curtail=!r.safeStop && r.pvExportCommand==='curtail'?{...base,payload:0}:null;\nconst allow=r.safeStop || r.pvExportCommand==='allow'?{...base,payload:1}:null;\nif (r.action==='discharge_export' && !r.safeStop && !r.stopForced) return [audit,null,{...base,payload:r.targetKw},null,curtail,allow];\nif (r.action==='grid_charge' && !r.safeStop && !r.stopForced) return [audit,null,null,{...base,payload:r.targetKw},curtail,allow];\nreturn [audit,stop,null,null,curtail,allow];",
+    "name": "Validate, translate and apply plan immediately",
+    "func": "const MAX_DISCHARGE_KW=28, MAX_CHARGE_KW=30, DEFAULT_DISCHARGE_CAP_KW=28, MAX_SITE_EXPORT_TARGET_KW=100, MAX_TELEMETRY_AGE_MS=330000, MAX_TELEMETRY_FUTURE_SKEW_MS=60000;\nfunction finite(value) { if (value===null || value===undefined || (typeof value==='string' && (!value.trim() || ['unknown','unavailable','none','null'].includes(value.trim().toLowerCase())))) return null; const parsed=Number(value); return Number.isFinite(parsed)?parsed:null; }\nfunction on(value) { return String(value||'').toLowerCase()==='on'; }\nfunction rejected(result,status) { return {...result,actuate:false,safeStop:true,stopForced:true,status,action:'none',targetKw:0,requestedTargetKw:0,pvExportCommand:'allow'}; }\nfunction validatePlan(input) {\n  const nowMs=input.nowMs??Date.now(), entity=input.planEntity||{}, plan=entity.attributes||{}, mode=String(input.mode||plan.mode||'shadow').toLowerCase();\n  const result={actuate:false,safeStop:true,stopForced:true,status:'shadow',action:'none',targetKw:0,requestedTargetKw:0,plannedBatteryTargetKw:null,siteExportTargetKw:null,livePvKw:null,liveLoadKw:null,pvExportCommand:'allow',planId:String(plan.plan_id||entity.state||'unknown')};\n  if (on(input.manualOverride)) return {...result,status:'manual_override'};\n  if (mode!=='active') return {...result,status:mode||'disabled'};\n  if (!on(input.rolloutApproved)) return {...result,status:'rollout_not_approved'};\n  if (!on(input.batteryControl)) return {...result,status:'battery_control_off'};\n  const validUntil=Date.parse(plan.valid_until||''), generatedAt=Date.parse(plan.generated_at||'');\n  if (plan.schema_version!==1 || !Number.isFinite(validUntil) || !Number.isFinite(generatedAt)) return rejected(result,'rejected_schema');\n  if (nowMs>=validUntil || nowMs-generatedAt>600000 || generatedAt>nowMs+60000) return rejected(result,'rejected_stale');\n  if (plan.actuation_allowed!==true || String(plan.mode).toLowerCase()!=='active') return rejected(result,'rejected_not_allowed');\n  const pvExportCommand=String(plan.pv_export_command||'allow').toLowerCase();\n  if (!['allow','curtail'].includes(pvExportCommand)) return rejected(result,'rejected_pv_command');\n  const target=finite(plan.battery_power_target_kw), siteExport=finite(plan.site_export_target_kw), soc=finite(input.soc), inverterFloor=finite(input.minSocPct), livePvKw=finite(input.pvPowerKw), liveLoadKw=finite(input.homeLoadKw);\n  if ([target,siteExport,soc,inverterFloor,livePvKw,liveLoadKw].some(value=>value===null)) return rejected(result,'rejected_invalid_numeric');\n  const socMeasuredAtMs=finite(input.socMeasuredAtMs), pvMeasuredAtMs=finite(input.pvMeasuredAtMs), homeLoadMeasuredAtMs=finite(input.homeLoadMeasuredAtMs);\n  if ([socMeasuredAtMs,pvMeasuredAtMs,homeLoadMeasuredAtMs].some(value=>value===null)) return rejected(result,'rejected_telemetry_timestamp');\n  const socAgeMs=nowMs-socMeasuredAtMs, pvAgeMs=nowMs-pvMeasuredAtMs, homeLoadAgeMs=nowMs-homeLoadMeasuredAtMs;\n  if ([socAgeMs,pvAgeMs,homeLoadAgeMs].some(ageMs=>ageMs>MAX_TELEMETRY_AGE_MS || ageMs < -MAX_TELEMETRY_FUTURE_SKEW_MS)) return rejected(result,'rejected_telemetry_stale');\n  const liveFloor=Math.max(5,inverterFloor);\n  if (soc<liveFloor-.5 || soc>100.5 || inverterFloor<5 || inverterFloor>100 || Math.abs(target)>MAX_CHARGE_KW+.01 || siteExport<-.01 || siteExport>MAX_SITE_EXPORT_TARGET_KW || livePvKw<0 || livePvKw>100 || liveLoadKw<0 || liveLoadKw>100) return rejected(result,'rejected_bounds');\n  const action=String(plan.action||'idle').toLowerCase();\n  if (!['discharge_export','grid_charge','curtail_pv','self_consumption','pv_charge','idle'].includes(action)) return rejected(result,'rejected_conflicting_action');\n  const active={...result,actuate:true,safeStop:false,stopForced:false,action,plannedBatteryTargetKw:target,siteExportTargetKw:siteExport,livePvKw,liveLoadKw,pvExportCommand,validUntilMs:validUntil,evaluatedAtMs:nowMs,telemetryAgeSeconds:{soc:socAgeMs/1000,pv:pvAgeMs/1000,homeLoad:homeLoadAgeMs/1000}};\n  if (action==='discharge_export') {\n    if (pvExportCommand!=='allow' || soc<=liveFloor+1 || target<=0 || target>MAX_DISCHARGE_KW+.01 || siteExport<=0) return rejected(active,'rejected_discharge_guard');\n    const configuredCap=finite(input.maxDischargeCapKw), cap=Math.min(MAX_DISCHARGE_KW,configuredCap===null?DEFAULT_DISCHARGE_CAP_KW:Math.max(0,configuredCap));\n    const requestedTargetKw=Math.min(Math.max(0,siteExport+liveLoadKw-livePvKw),cap);\n    if (requestedTargetKw<=.05) return {...active,status:'accepted_discharge_pv_meets_target',stopForced:true,targetKw:0,requestedTargetKw:0};\n    return {...active,status:'accepted_discharge',targetKw:requestedTargetKw,requestedTargetKw};\n  }\n  if (action==='grid_charge') {\n    if (soc>=99 || target>=0) return rejected(active,'rejected_charge_guard');\n    const requestedTargetKw=Math.min(MAX_CHARGE_KW,Math.abs(target));\n    return {...active,status:'accepted_grid_charge',targetKw:requestedTargetKw,requestedTargetKw};\n  }\n  if (action==='curtail_pv' && pvExportCommand!=='curtail') return rejected(active,'rejected_conflicting_action');\n  if (['self_consumption','pv_charge','idle'].includes(action) && pvExportCommand!=='allow') return rejected(active,'rejected_conflicting_action');\n  return {...active,stopForced:true,status:'accepted_normal_'+action};\n}\nconst r=validatePlan(msg);\nif ((r.action==='discharge_export' || r.action==='grid_charge') && !r.safeStop && !r.stopForced) {\n  flow.set('energyOptimizerLastCommand',{action:r.action,targetKw:r.targetKw,planId:r.planId});\n} else {\n  flow.set('energyOptimizerLastCommand',{action:'none',targetKw:0,planId:r.planId});\n}\nlet detail='';\nif (r.action==='discharge_export') detail=' | site='+Number(r.siteExportTargetKw).toFixed(1)+' pv='+Number(r.livePvKw).toFixed(1)+' load='+Number(r.liveLoadKw).toFixed(1)+' request='+Number(r.requestedTargetKw).toFixed(1)+' apply='+Number(r.targetKw).toFixed(1)+'kW';\nelse if (r.action==='grid_charge') detail=' | request='+Number(r.requestedTargetKw).toFixed(1)+' apply='+Number(r.targetKw).toFixed(1)+'kW';\nconst command={action:r.action,targetKw:r.targetKw,requestedTargetKw:r.requestedTargetKw,planId:r.planId};\nconst base={optimizer:r,command};\nconst audit={...base,payload:r.status+' | '+r.planId+detail};\nconst stop=r.stopForced?{...base,payload:0}:null;\nconst curtail=!r.safeStop && r.pvExportCommand==='curtail'?{...base,payload:0}:null;\nconst allow=r.safeStop || r.pvExportCommand==='allow'?{...base,payload:1}:null;\nif (r.action==='discharge_export' && !r.safeStop && !r.stopForced) return [audit,null,{...base,payload:r.targetKw},null,curtail,allow];\nif (r.action==='grid_charge' && !r.safeStop && !r.stopForced) return [audit,null,null,{...base,payload:r.targetKw},curtail,allow];\nreturn [audit,stop,null,null,curtail,allow];",
     "outputs": 6,
     "noerr": 0,
     "initialize": "",
@@ -164,7 +164,8 @@
     "y": 140,
     "wires": [
       [
-        "eop_audit_002"
+        "eop_audit_002",
+        "eop_arm_deadline_002"
       ],
       [
         "eop_stop_forced_002"
@@ -176,10 +177,82 @@
         "eop_set_charge_002"
       ],
       [
-        "eop_curtail_002"
+        "eop_curtail_raw_002"
       ],
       [
-        "eop_allow_export_002"
+        "eop_allow_export_raw_002"
+      ]
+    ]
+  },
+  {
+    "id": "eop_arm_deadline_002",
+    "type": "function",
+    "z": "eop_guard_tab_002",
+    "name": "Arm exact plan-expiry deadline",
+    "func": "const r=msg.optimizer||{};\nconst deadlineAtMs=Number(r.validUntilMs), topic='energy_optimizer_plan_deadline';\nconst accepted=r.actuate===true && r.safeStop!==true && Number.isFinite(deadlineAtMs);\nif (!accepted) {\n  flow.set('energyOptimizerPlanDeadline',null);\n  return {reset:true,topic,deadlinePlanId:String(r.planId||'unknown')};\n}\nconst planId=String(r.planId||'unknown'), nowMs=Date.now();\nflow.set('energyOptimizerPlanDeadline',{planId,validUntilMs:deadlineAtMs});\nreturn {...msg,payload:'arm_deadline',topic,delay:Math.max(1,deadlineAtMs-nowMs),deadlinePlanId:planId,deadlineAtMs};",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 1080,
+    "y": 80,
+    "wires": [
+      [
+        "eop_plan_deadline_timer_002"
+      ]
+    ]
+  },
+  {
+    "id": "eop_plan_deadline_timer_002",
+    "type": "trigger",
+    "z": "eop_guard_tab_002",
+    "name": "Replaceable valid-until one-shot",
+    "op1": "",
+    "op2": "expired",
+    "op1type": "nul",
+    "op2type": "str",
+    "duration": "1",
+    "extend": true,
+    "overrideDelay": true,
+    "units": "ms",
+    "reset": "",
+    "bytopic": "all",
+    "topic": "topic",
+    "outputs": 1,
+    "x": 1360,
+    "y": 80,
+    "wires": [
+      [
+        "eop_plan_deadline_expired_002"
+      ]
+    ]
+  },
+  {
+    "id": "eop_plan_deadline_expired_002",
+    "type": "function",
+    "z": "eop_guard_tab_002",
+    "name": "Safe-stop at exact plan expiry",
+    "func": "const armed=flow.get('energyOptimizerPlanDeadline');\nconst planId=String(msg.deadlinePlanId||'unknown'), deadlineAtMs=Number(msg.deadlineAtMs);\nconst matches=armed && armed.planId===planId && Number(armed.validUntilMs)===deadlineAtMs;\nif (!matches) return [null,null,null,null];\nconst nowMs=Date.now();\nif (nowMs<deadlineAtMs) return [null,null,null,{...msg,payload:'rearm_deadline',delay:Math.max(1,deadlineAtMs-nowMs)}];\nflow.set('energyOptimizerPlanDeadline',null);\nflow.set('energyOptimizerLastCommand',{action:'none',targetKw:0,planId});\nconst command={action:'none',targetKw:0,requestedTargetKw:0,planId};\nconst audit={payload:'rejected_expired_deadline | '+planId+' | valid_until='+new Date(deadlineAtMs).toISOString(),command};\nreturn [audit,{payload:0,command},{payload:1,command},null];",
+    "outputs": 4,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 1630,
+    "y": 80,
+    "wires": [
+      [
+        "eop_audit_002"
+      ],
+      [
+        "eop_stop_forced_002"
+      ],
+      [
+        "eop_allow_export_raw_002"
+      ],
+      [
+        "eop_plan_deadline_timer_002"
       ]
     ]
   },
@@ -459,7 +532,28 @@
         "eop_stop_forced_002"
       ],
       [
-        "eop_allow_export_002"
+        "eop_allow_export_raw_002"
+      ]
+    ]
+  },
+  {
+    "id": "eop_curtail_raw_002",
+    "type": "api-call-service",
+    "z": "eop_guard_tab_002",
+    "name": "Reassert raw export limit 0",
+    "server": "srv_ha_001",
+    "version": 7,
+    "action": "number.set_value",
+    "entityId": [
+      "number.saj_export_limit_input"
+    ],
+    "data": "{\"value\":0}",
+    "dataType": "json",
+    "x": 1740,
+    "y": 280,
+    "wires": [
+      [
+        "eop_curtail_002"
       ]
     ]
   },
@@ -467,7 +561,7 @@
     "id": "eop_curtail_002",
     "type": "api-call-service",
     "z": "eop_guard_tab_002",
-    "name": "Curtail negative-FIT export",
+    "name": "Synchronize export helper off",
     "server": "srv_ha_001",
     "version": 7,
     "action": "input_boolean.turn_off",
@@ -476,17 +570,38 @@
     ],
     "data": "{}",
     "dataType": "json",
-    "x": 1770,
+    "x": 2020,
     "y": 280,
     "wires": [
       []
     ]
   },
   {
+    "id": "eop_allow_export_raw_002",
+    "type": "api-call-service",
+    "z": "eop_guard_tab_002",
+    "name": "Reassert raw export limit 1100",
+    "server": "srv_ha_001",
+    "version": 7,
+    "action": "number.set_value",
+    "entityId": [
+      "number.saj_export_limit_input"
+    ],
+    "data": "{\"value\":1100}",
+    "dataType": "json",
+    "x": 1740,
+    "y": 340,
+    "wires": [
+      [
+        "eop_allow_export_002"
+      ]
+    ]
+  },
+  {
     "id": "eop_allow_export_002",
     "type": "api-call-service",
     "z": "eop_guard_tab_002",
-    "name": "Allow normal export",
+    "name": "Synchronize export helper on",
     "server": "srv_ha_001",
     "version": 7,
     "action": "input_boolean.turn_on",
@@ -495,7 +610,7 @@
     ],
     "data": "{}",
     "dataType": "json",
-    "x": 1760,
+    "x": 2020,
     "y": 340,
     "wires": [
       []

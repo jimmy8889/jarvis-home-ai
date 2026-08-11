@@ -83,11 +83,13 @@ views:
       - type: markdown
         entity_id:
           - sensor.energy_optimizer_plan
+          - sensor.amber_express_trader_sheena_street_feed_in_price
+          - sensor.amber_express_trader_sheena_street_general_price
         content: |
           {% set p = states.sensor.energy_optimizer_plan.attributes %}
           {% set grid = namespace(import_kwh=0) %}
           {% for r in (p.intervals or []) %}
-          {% if r.site_grid_kw > 0 %}{% set grid.import_kwh = grid.import_kwh + r.site_grid_kw * 0.5 %}{% endif %}
+          {% if r.site_grid_kw > 0 %}{% set grid.import_kwh = grid.import_kwh + r.site_grid_kw * (r.duration_minutes | float(30)) / 60 %}{% endif %}
           {% endfor %}
           ## Today’s plan
 
@@ -95,6 +97,8 @@ views:
           |:--|:--|
           | Solar takes over | **{{ as_timestamp(p.morning_takeover, 0) | timestamp_custom('%a %-I:%M %p') }}** |
           | Solar falls below load | **{{ as_timestamp(p.evening_crossover, 0) | timestamp_custom('%a %-I:%M %p') }}** |
+          | Active 5-minute FIT | **{{ (states('sensor.amber_express_trader_sheena_street_feed_in_price') | float(0) * 100) | round(2) }}¢/kWh** |
+          | Active 5-minute buy price | **{{ (states('sensor.amber_express_trader_sheena_street_general_price') | float(0) * 100) | round(2) }}¢/kWh** |
           | Forecast confidence | **{{ (p.confidence | float(0) * 100) | round(0) }}%** |
           | Forecast grid purchase (36h) | **{{ grid.import_kwh | round(2) }} kWh / ${{ p.expected_cost | float(0) | round(2) }}** |
           | Expected export revenue | **${{ p.expected_revenue | float(0) | round(2) }}** |
@@ -103,6 +107,9 @@ views:
           Grid purchase is planned only when demand cannot be covered locally, or when
           charging from the grid is forecast to be worth more later after losses, wear
           and the uncertainty margin. It is not a target to import electricity.
+
+          The active Amber interval is used at its exact five-minute price. A price-change
+          event creates a new plan immediately; future intervals remain forecast-aware.
 
           {% if p.warnings %}
           ### Current safeguards
@@ -396,6 +403,10 @@ views:
           - Actuation allowed by plan: **{{ p.actuation_allowed }}**
           - Confidence: {{ (p.confidence | float(0) * 100) | round(1) }}%
           - Current action: `{{ p.action }}`
+          - Replan trigger: `{{ p.trigger | default('periodic') }}`
+          - Price-to-plan latency: **{{ p.decision_latency_ms | float(0) | round(0) }} ms**
+          - Fast current-interval dispatch: **{{ p.fast_dispatch | default(false) }}**
+          - Full horizon recalculation pending: **{{ p.full_optimisation_pending | default(false) }}**
           - Battery target: {{ p.battery_power_target_kw }} kW
           - Site export target: {{ p.site_export_target_kw }} kW
           - Curtailment target: {{ p.pv_curtailment_target_kw }} kW

@@ -52,6 +52,94 @@ def raw_state(entity_id: str, state: str) -> dict[str, str]:
     return {"entity_id": entity_id, "state": state}
 
 
+def measured_state(entity_id: str, state: str, when: datetime) -> dict:
+    return {
+        "entity_id": entity_id,
+        "state": state,
+        "last_reported": when.isoformat(),
+    }
+
+
+def test_two_plane_poa_potential_corrects_near_term_forecast_and_detects_curtailment(tmp_path):
+    opt = optimizer(tmp_path)
+    now = datetime(2026, 8, 12, 12, 0, tzinfo=BRISBANE)
+    states = {
+        item["entity_id"]: item
+        for item in [
+            measured_state(ENTITY["solar_expected_north"], "5900", now),
+            measured_state(ENTITY["solar_expected_south"], "6195", now),
+            raw_state(ENTITY["solcast_power_now"], "18000"),
+            raw_state(ENTITY["pv_power"], "4000"),
+            raw_state(ENTITY["amber_fit"], "-0.03"),
+            raw_state(ENTITY["export_enabled"], "off"),
+        ]
+    }
+
+    potential, actual, curtailed, correction, source = opt._solar_potential_context(states, now)
+
+    assert potential == pytest.approx(12.095)
+    assert actual == pytest.approx(4.0)
+    assert curtailed == pytest.approx(8.095)
+    assert correction == pytest.approx(12.095 / 18.0)
+    assert source == "local_two_plane_poa"
+
+
+def test_two_plane_poa_signal_fails_safely_when_either_plane_is_stale(tmp_path):
+    opt = optimizer(tmp_path)
+    now = datetime(2026, 8, 12, 12, 0, tzinfo=BRISBANE)
+    old = now - timedelta(minutes=10)
+    states = {
+        item["entity_id"]: item
+        for item in [
+            measured_state(ENTITY["solar_expected_north"], "5900", now),
+            measured_state(ENTITY["solar_expected_south"], "6195", old),
+            raw_state(ENTITY["pv_power"], "4000"),
+        ]
+    }
+
+    potential, actual, curtailed, correction, source = opt._solar_potential_context(states, now)
+
+    assert (potential, actual, curtailed, correction, source) == (
+        4.0,
+        4.0,
+        0.0,
+        1.0,
+        "actual_fallback",
+    )
+
+
+def test_low_actual_pv_is_not_called_curtailment_while_export_is_allowed_at_positive_fit(tmp_path):
+    opt = optimizer(tmp_path)
+    now = datetime(2026, 8, 12, 12, 0, tzinfo=BRISBANE)
+    states = {
+        item["entity_id"]: item
+        for item in [
+            measured_state(ENTITY["solar_expected_north"], "5900", now),
+            measured_state(ENTITY["solar_expected_south"], "6195", now),
+            raw_state(ENTITY["solcast_power_now"], "18000"),
+            raw_state(ENTITY["pv_power"], "4000"),
+            raw_state(ENTITY["amber_fit"], "0.12"),
+            raw_state(ENTITY["export_enabled"], "on"),
+        ]
+    }
+
+    assert opt._solar_potential_context(states, now)[2] == 0.0
+
+
+def test_curtailment_independent_learning_integrates_available_power(tmp_path):
+    learning = LearningState(tmp_path / "state.json")
+    start = datetime(2026, 8, 12, 12, 0, tzinfo=BRISBANE)
+    learning.observe_solar_power(start, actual_kw=4.0, potential_kw=12.0, curtailed=True)
+    learning.observe_solar_power(
+        start + timedelta(minutes=5),
+        actual_kw=4.0,
+        potential_kw=12.0,
+        curtailed=True,
+    )
+
+    assert learning.data["daily"]["2026-08-12"]["curtailed_kwh"] == pytest.approx(2 / 3, abs=1e-5)
+
+
 def telemetry_health(
     *,
     heartbeat_age: float | None = 0.0,

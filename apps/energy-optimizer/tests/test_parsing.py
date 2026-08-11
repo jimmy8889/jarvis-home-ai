@@ -39,6 +39,38 @@ def test_signed_fit_and_solcast_are_preserved():
     assert slots[0].solar_low_kw == 6.3
 
 
+def test_local_irradiance_correction_fades_back_to_solcast_over_ninety_minutes():
+    now = datetime(2026, 8, 12, 10, 0, tzinfo=BRISBANE)
+    solar = {"attributes": {"detailedForecast": [
+        {
+            "period_start": (now + timedelta(minutes=30 * index)).isoformat(),
+            "pv_estimate": 10,
+            "pv_estimate10": 8,
+            "pv_estimate90": 12,
+        }
+        for index in range(4)
+    ]}}
+    result = build_slots(
+        now=now,
+        horizon_hours=2,
+        slot_minutes=30,
+        timezone=BRISBANE,
+        fit_entity={},
+        import_entity={},
+        solar_entities=[solar],
+        load_forecast=lambda _: 1.0,
+        calibration_ratio=1.0,
+        weather_condition="sunny",
+        live_solar_correction_factor=0.4,
+        live_solar_correction_minutes=90,
+    )
+
+    assert result[0].solar_kw == 4.0
+    assert result[1].solar_kw == 6.0
+    assert result[2].solar_kw == 8.0
+    assert result[3].solar_kw == 10.0
+
+
 def test_incomplete_amber_horizon_uses_historical_fallback():
     now = datetime(2026, 8, 11, 10, 0, tzinfo=BRISBANE)
     slots = build_slots(

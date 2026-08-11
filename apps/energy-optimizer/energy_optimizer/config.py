@@ -35,6 +35,16 @@ class Settings:
     hot_water_required_hours: float = 3.0
     hot_water_latest_hour: int = 16
 
+    # Two physical roof planes.  The azimuths are confirmed by the existing
+    # Solcast resources and the local POA model; tilt starts at the midpoint of
+    # the measured 10-15 degree roof pitch and can be refined by learning.
+    solar_north_capacity_kwp: float = 11.8
+    solar_north_azimuth_deg: float = 9.0
+    solar_south_capacity_kwp: float = 24.78
+    solar_south_azimuth_deg: float = 171.0
+    solar_tilt_deg: float = 12.5
+    solar_live_correction_minutes: int = 90
+
     ev_usable_capacity_kwh: float = 75.0
     ev_kwh_per_km: float = 0.18
     ev_trip_margin: float = 1.20
@@ -79,6 +89,13 @@ ENTITY = {
     "amber_import": "sensor.amber_express_trader_sheena_street_general_price",
     "solcast_today": "sensor.solcast_pv_forecast_forecast_today",
     "solcast_tomorrow": "sensor.solcast_pv_forecast_forecast_tomorrow",
+    "solcast_power_now": "sensor.solcast_pv_forecast_power_now",
+    "solar_radiation": "sensor.gw1100c_solar_radiation",
+    "solar_poa_north": "sensor.james_poa_irradiance_james_poa_10",
+    "solar_poa_south": "sensor.james_poa_irradiance_james_poa_190",
+    "solar_expected_north": "sensor.james_pv1_expected_power_from_poa",
+    "solar_expected_south": "sensor.james_pv2_plus_pv3_expected_power_from_poa",
+    "export_enabled": "input_boolean.export_power",
     "weather": "weather.geebung",
     "battery_soc": "sensor.saj_battery_1_soc",
     "battery_usable": "sensor.battery_usable_energy",

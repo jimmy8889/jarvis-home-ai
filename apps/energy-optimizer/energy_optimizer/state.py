@@ -17,6 +17,7 @@ class LearningState:
             "load_slots": {},
             "solar_ratios": [1.008],
             "daily": {},
+            "solar_power_observation": {},
         }
         self.load()
 
@@ -62,13 +63,49 @@ class LearningState:
         daily["forecast_kwh"] = forecast_kwh
         daily["actual_kwh"] = max(float(daily.get("actual_kwh", 0.0)), actual_kwh)
 
+    def observe_solar_power(
+        self,
+        when: datetime,
+        *,
+        actual_kw: float,
+        potential_kw: float,
+        curtailed: bool,
+    ) -> None:
+        """Integrate a curtailment-independent daily available-energy trace."""
+        date_key = when.date().isoformat()
+        daily = self.data["daily"].setdefault(date_key, {})
+        previous = self.data.get("solar_power_observation", {})
+        try:
+            previous_at = datetime.fromisoformat(str(previous.get("at")))
+        except (TypeError, ValueError):
+            previous_at = None
+        if previous_at and previous_at.tzinfo and previous_at.date() == when.date():
+            duration_h = (when - previous_at).total_seconds() / 3600
+            if 0 < duration_h <= 10 / 60:
+                previous_curtailed = max(0.0, float(previous.get("curtailed_kw", 0.0)))
+                curtailed_kw = max(0.0, potential_kw - actual_kw) if curtailed else 0.0
+                daily["curtailed_kwh"] = round(
+                    float(daily.get("curtailed_kwh", 0.0))
+                    + (previous_curtailed + curtailed_kw) * 0.5 * duration_h,
+                    5,
+                )
+        curtailed_kw = max(0.0, potential_kw - actual_kw) if curtailed else 0.0
+        self.data["solar_power_observation"] = {
+            "at": when.isoformat(),
+            "curtailed_kw": round(curtailed_kw, 4),
+            "curtailed": bool(curtailed),
+        }
+
     def finalize_previous_days(self, current_date_key: str) -> None:
         ratios = deque((float(item) for item in self.data.get("solar_ratios", [1.008])), maxlen=30)
         for date_key, record in self.data.get("daily", {}).items():
             if date_key >= current_date_key or record.get("finalized"):
                 continue
             forecast = float(record.get("forecast_kwh", 0.0))
-            actual = float(record.get("actual_kwh", 0.0))
+            actual = (
+                float(record.get("actual_kwh", 0.0))
+                + float(record.get("curtailed_kwh", 0.0))
+            )
             if forecast > 1 and actual > 0:
                 ratios.append(min(1.4, max(0.5, actual / forecast)))
                 record["finalized"] = True

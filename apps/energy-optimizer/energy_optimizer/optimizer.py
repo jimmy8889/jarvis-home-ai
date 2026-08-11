@@ -52,7 +52,8 @@ class EnergyOptimizer:
     ) -> Plan:
         now = (now or datetime.now(self.timezone)).astimezone(self.timezone)
         states = {item.get("entity_id", ""): item for item in raw_states}
-        self._update_learning(states, now)
+        solar_context = self._solar_potential_context(states, now)
+        self._update_learning(states, now, solar_context)
 
         fit_entity = states.get(ENTITY["amber_fit"], {})
         import_entity = states.get(ENTITY["amber_import"], {})
@@ -71,6 +72,8 @@ class EnergyOptimizer:
             load_forecast=self.learning.forecast_load,
             calibration_ratio=self.learning.solar_calibration_ratio,
             weather_condition=weather,
+            live_solar_correction_factor=solar_context[3],
+            live_solar_correction_minutes=self.settings.solar_live_correction_minutes,
         )
 
         morning, evening = self._detect_crossovers(slots, now)
@@ -194,6 +197,11 @@ class EnergyOptimizer:
             expected_wear_cost=expected_wear,
             warnings=warnings,
             intervals=intervals,
+            solar_potential_kw=solar_context[0],
+            solar_actual_kw=solar_context[1],
+            solar_curtailed_estimate_kw=solar_context[2],
+            solar_live_correction_factor=solar_context[3],
+            solar_potential_source=solar_context[4],
         )
 
     def build_fast_price_plan(
@@ -532,7 +540,71 @@ class EnergyOptimizer:
                 return f"{label} is stale ({age_seconds:.0f}s old)"
         return None
 
-    def _update_learning(self, states: dict[str, dict[str, Any]], now: datetime) -> None:
+    def _solar_potential_context(
+        self,
+        states: dict[str, dict[str, Any]],
+        now: datetime,
+    ) -> tuple[float, float, float, float, str]:
+        """Return potential, actual, curtailed estimate, correction, and source.
+
+        The two local expected-power entities are derived independently from
+        measured irradiance projected onto the 9-degree north and 171-degree
+        south roof planes.  They remain meaningful when the inverter has been
+        asked to curtail and are therefore safer than actual PV for cloud-now
+        correction and learning during those periods.
+        """
+        expected_entities = (
+            ENTITY["solar_expected_north"],
+            ENTITY["solar_expected_south"],
+        )
+
+        def fresh_watts(entity_id: str) -> float | None:
+            entity = states.get(entity_id, {})
+            value = numeric_state(states, entity_id, float("nan"))
+            timestamp = parse_datetime(
+                entity.get("last_reported")
+                or entity.get("last_updated")
+                or entity.get("last_changed"),
+                self.timezone,
+            )
+            if not math.isfinite(value) or value < 0 or timestamp is None:
+                return None
+            age = (now - timestamp.astimezone(self.timezone)).total_seconds()
+            if age < -60 or age > self.settings.fast_dispatch_state_max_age_seconds:
+                return None
+            return value
+
+        components = [fresh_watts(entity_id) for entity_id in expected_entities]
+        actual_w = numeric_state(states, ENTITY["pv_power"], 0.0)
+        actual_kw = max(0.0, actual_w / 1000) if math.isfinite(actual_w) else 0.0
+        if any(value is None for value in components):
+            return actual_kw, actual_kw, 0.0, 1.0, "actual_fallback"
+
+        potential_kw = sum(float(value) for value in components) / 1000
+        solcast_now_w = numeric_state(states, ENTITY["solcast_power_now"], float("nan"))
+        if math.isfinite(solcast_now_w) and solcast_now_w >= 250 and potential_kw >= 0.1:
+            correction = min(1.65, max(0.35, potential_kw / (solcast_now_w / 1000)))
+        else:
+            correction = 1.0
+
+        fit = numeric_state(states, ENTITY["amber_fit"], 0.0)
+        export_disabled = (
+            ENTITY["export_enabled"] in states
+            and not state_is_on(states, ENTITY["export_enabled"])
+        )
+        curtailment_likely = (
+            potential_kw > actual_kw + 0.3
+            and (export_disabled or fit <= 0.0)
+        )
+        curtailed_kw = max(0.0, potential_kw - actual_kw) if curtailment_likely else 0.0
+        return potential_kw, actual_kw, curtailed_kw, correction, "local_two_plane_poa"
+
+    def _update_learning(
+        self,
+        states: dict[str, dict[str, Any]],
+        now: datetime,
+        solar_context: tuple[float, float, float, float, str],
+    ) -> None:
         home = numeric_state(states, ENTITY["home_load"], 1670.0) / 1000
         hot_water = numeric_state(states, ENTITY["hot_water_power"], 0.0)
         ev = numeric_state(states, ENTITY["ev_power"], 0.0)
@@ -543,6 +615,14 @@ class EnergyOptimizer:
         actual = numeric_state(states, ENTITY["pv_energy_today"], 0.0)
         date_key = now.date().isoformat()
         self.learning.observe_solar_day(date_key, forecast, actual)
+        potential_kw, actual_kw, curtailed_kw, _, source = solar_context
+        if source == "local_two_plane_poa":
+            self.learning.observe_solar_power(
+                now,
+                actual_kw=actual_kw,
+                potential_kw=potential_kw,
+                curtailed=curtailed_kw > 0,
+            )
         self.learning.finalize_previous_days(date_key)
         self.learning.save()
 

@@ -97,6 +97,11 @@ class Plan:
     expected_wear_cost: float
     warnings: list[str] = field(default_factory=list)
     intervals: list[DispatchInterval] = field(default_factory=list)
+    solar_potential_kw: float = 0.0
+    solar_actual_kw: float = 0.0
+    solar_curtailed_estimate_kw: float = 0.0
+    solar_live_correction_factor: float = 1.0
+    solar_potential_source: str = "unavailable"
 
     def to_dict(self, *, interval_limit: int | None = None) -> dict[str, Any]:
         intervals = self.intervals if interval_limit is None else self.intervals[:interval_limit]
@@ -131,6 +136,11 @@ class Plan:
             "expected_cost": round(self.expected_cost, 3),
             "expected_revenue": round(self.expected_revenue, 3),
             "expected_wear_cost": round(self.expected_wear_cost, 3),
+            "solar_potential_kw": round(self.solar_potential_kw, 3),
+            "solar_actual_kw": round(self.solar_actual_kw, 3),
+            "solar_curtailed_estimate_kw": round(self.solar_curtailed_estimate_kw, 3),
+            "solar_live_correction_factor": round(self.solar_live_correction_factor, 3),
+            "solar_potential_source": self.solar_potential_source,
             "warnings": self.warnings,
             "intervals": [item.to_dict() for item in intervals],
         }

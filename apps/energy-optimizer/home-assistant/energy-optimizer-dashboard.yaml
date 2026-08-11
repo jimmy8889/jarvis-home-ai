@@ -204,6 +204,33 @@ views:
             entity: sensor.solcast_pv_forecast_forecast_tomorrow
             name: Solar Forecast Tomorrow
             icon: mdi:weather-partly-cloudy
+      - type: markdown
+        entity_id:
+          - sensor.energy_optimizer_solar_potential
+        content: |
+          {% set s = states.sensor.energy_optimizer_solar_potential %}
+          ## Local solar-potential model
+
+          | Signal | Current value |
+          |:--|--:|
+          | Measured irradiance | **{{ states('sensor.gw1100c_solar_radiation') | float(0) | round(0) }} W/m²** |
+          | Available PV potential | **{{ s.state | float(0) | round(2) }} kW** |
+          | Actual inverter PV | **{{ s.attributes.actual_pv_kw | float(0) | round(2) }} kW** |
+          | Estimated curtailed PV | **{{ s.attributes.estimated_curtailed_kw | float(0) | round(2) }} kW** |
+          | Live forecast correction | **{{ s.attributes.live_correction_factor | float(1) | round(2) }}×** |
+
+          Model: **11.8 kWp at 9° north + 24.78 kWp at 171° south**, nominal roof tilt **12.5°**.
+          The local correction influences the next 90 minutes and fades back into calibrated Solcast.
+      - type: history-graph
+        title: Solar potential vs actual — last 24 hours
+        hours_to_show: 24
+        entities:
+          - entity: sensor.energy_optimizer_solar_potential
+            name: Available potential
+          - entity: sensor.energy_optimizer_solar_actual
+            name: Actual PV
+          - entity: sensor.energy_optimizer_solar_curtailed
+            name: Curtailed estimate
       - type: entities
         title: Plan economics and outputs
         entities:

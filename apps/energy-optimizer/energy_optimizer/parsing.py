@@ -306,6 +306,8 @@ def build_slots(
     load_forecast: Callable[[datetime], float],
     calibration_ratio: float,
     weather_condition: str,
+    live_solar_correction_factor: float = 1.0,
+    live_solar_correction_minutes: int = 90,
 ) -> list[Slot]:
     fit_points = _price_points(fit_entity, timezone)
     import_points = _price_points(import_entity, timezone)
@@ -341,6 +343,13 @@ def build_slots(
             import_price = active_import[0]
             import_source = "amber_live"
         solar, low, high = _sample_solar(solar_points, when, calibration_ratio, low_weather_factor)
+        minutes_ahead = max(0.0, (when - now).total_seconds() / 60)
+        if live_solar_correction_minutes > 0:
+            weight = max(0.0, 1.0 - minutes_ahead / live_solar_correction_minutes)
+            correction = 1.0 + (live_solar_correction_factor - 1.0) * weight
+            solar *= correction
+            low *= correction
+            high *= correction
         price_sources = {fit_source, import_source}
         if price_sources == {"amber_live"}:
             price_source = "amber_live"

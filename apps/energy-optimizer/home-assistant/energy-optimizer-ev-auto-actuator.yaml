@@ -1,0 +1,92 @@
+- id: energy_optimizer_ev_auto_actuator
+  alias: Energy Optimizer - EV Auto Actuator
+  description: >-
+    Controls Tesla charging from the optimizer. Direct-solar charging is capped
+    to verified live solar surplus. Deadline fallback requires an explicitly
+    declared trip and is blocked whenever the stationary battery is discharging.
+  triggers:
+    - trigger: state
+      entity_id: sensor.energy_optimizer_ev
+    - trigger: state
+      entity_id: input_select.energy_optimizer_mode
+    - trigger: state
+      entity_id: input_boolean.energy_optimizer_ev_auto
+    - trigger: state
+      entity_id: input_boolean.energy_optimizer_rollout_approved
+    - trigger: state
+      entity_id: input_boolean.energy_optimizer_manual_override
+    - trigger: state
+      entity_id: input_boolean.battery_discharge
+      id: battery_mode
+    - trigger: state
+      entity_id: binary_sensor.tesla_plugged_in
+    - trigger: state
+      entity_id: device_tracker.tesla_location_2
+    - trigger: time_pattern
+      seconds: /30
+    - trigger: homeassistant
+      event: start
+  conditions: []
+  actions:
+    - variables:
+        gates_ok: >-
+          {{ is_state('input_select.energy_optimizer_mode', 'Active') and
+             is_state('input_boolean.energy_optimizer_ev_auto', 'on') and
+             is_state('input_boolean.energy_optimizer_rollout_approved', 'on') and
+             is_state('input_boolean.energy_optimizer_manual_override', 'off') }}
+        car_ready: >-
+          {{ is_state('binary_sensor.tesla_plugged_in', 'on') and
+             is_state('device_tracker.tesla_location_2', 'home') }}
+        plan_action: "{{ state_attr('sensor.energy_optimizer_ev', 'action') | default('idle', true) }}"
+        plan_source: "{{ state_attr('sensor.energy_optimizer_ev', 'source') | default('none', true) }}"
+        planned_amps: "{{ state_attr('sensor.energy_optimizer_ev', 'charge_amps_target') | int(0) }}"
+        trip_selection: "{{ states('input_select.energy_optimizer_ev_trip') | lower }}"
+        explicit_trip_required: >-
+          {{ trip_selection in ['local / 50 km', '100 km', '200 km'] or
+             ('custom' in trip_selection and
+              states('input_number.energy_optimizer_ev_custom_km') | float(0) > 0) }}
+        fallback_allowed: >-
+          {{ (plan_source in ['deadline_fallback', 'mixed']) and
+             (explicit_trip_required | bool) and
+             is_state('input_boolean.battery_discharge', 'off') }}
+        source_allowed: >-
+          {{ (plan_source == 'direct_solar') or (fallback_allowed | bool) }}
+        pv_kw: "{{ states('sensor.saj_total_load_power') | float(0) / 1000 }}"
+        load_kw: "{{ states('sensor.saj_total_load_power_2') | float(0) / 1000 }}"
+        direct_solar_kw: "{{ [0, pv_kw - load_kw] | max }}"
+        direct_solar_amps: "{{ (direct_solar_kw * 1000 / (1.732 * 247)) | int(0) }}"
+        target_amps: >-
+          {% if plan_source == 'direct_solar' %}
+            {{ [16, planned_amps, direct_solar_amps] | min }}
+          {% elif fallback_allowed | bool %}
+            {{ [16, planned_amps] | min }}
+          {% else %}
+            0
+          {% endif %}
+    - choose:
+        - conditions:
+            - condition: template
+              value_template: >-
+                {{ gates_ok | bool and car_ready | bool and source_allowed | bool
+                   and plan_action == 'charge' and target_amps | int(0) >= 6 }}
+          sequence:
+            - action: number.set_value
+              target:
+                entity_id: number.tesla_ble_039d9c_charging_amps
+              data:
+                value: "{{ target_amps | int }}"
+            - action: switch.turn_on
+              target:
+                entity_id: switch.tesla_ble_039d9c_charger
+        - conditions:
+            - condition: template
+              value_template: >-
+                {{ not (gates_ok | bool) or not (car_ready | bool) or
+                   not (source_allowed | bool) or plan_action != 'charge' or
+                   target_amps | int(0) < 6 }}
+          sequence:
+            - action: switch.turn_off
+              target:
+                entity_id: switch.tesla_ble_039d9c_charger
+  mode: single
+  max_exceeded: silent

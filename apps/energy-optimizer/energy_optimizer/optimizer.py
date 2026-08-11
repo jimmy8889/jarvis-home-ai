@@ -660,6 +660,10 @@ class EnergyOptimizer:
             distance = numeric_state(states, ENTITY["ev_custom_km"], 0.0)
         else:
             distance = distances.get(selection, 0.0)
+        explicit_trip_required = (
+            selection in {"local / 50 km", "100 km", "200 km"}
+            or ("custom" in selection and distance > 0)
+        )
         trip_energy = distance * self.settings.ev_kwh_per_km * self.settings.ev_trip_margin
         target = max(
             self.settings.ev_minimum_departure_soc_pct,
@@ -724,7 +728,12 @@ class EnergyOptimizer:
         # solar capacity may enter this tranche.  These slots can use grid (or
         # retained battery value) and are therefore labelled explicitly rather
         # than being presented as solar charging.
-        if remaining > 1e-9:
+        # An unanswered prompt or an explicit "No trip" response is never a
+        # departure mandate.  It may use genuine direct-solar surplus to reach
+        # the advisory minimum SOC, but it must not start a grid/deadline block
+        # that can displace valuable home-battery export.  Only a declared trip
+        # authorises the fallback tranche.
+        if remaining > 1e-9 and explicit_trip_required:
             for slot in sorted(candidates, key=lambda item: (item.import_price, item.start)):
                 if remaining <= 1e-9:
                     break
@@ -927,6 +936,18 @@ class EnergyOptimizer:
                     if full_feasible and index == evening_index and next_energy + 1e-6 < full_target:
                         continue
                     delta = next_energy - previous_energy
+                    # Deadline fallback is the explicit-trip exception to the
+                    # normal solar-only EV policy.  Even then, never discharge
+                    # the stationary battery into that flexible load: the
+                    # shortfall must be supplied by solar/grid.  Direct-solar
+                    # EV slots may still coincide with profitable battery
+                    # export because their EV power was capped to conservative
+                    # surplus before dispatch.
+                    if (
+                        slot.ev_charge_source in {"deadline_fallback", "mixed"}
+                        and delta < -1e-9
+                    ):
+                        continue
                     charge_input = max(0.0, delta) / self.settings.battery_charge_efficiency
                     discharge_output = max(0.0, -delta) * self.settings.battery_discharge_efficiency
                     base_grid = (slot.load_kw + slot.hot_water_kw + slot.ev_kw - slot.solar_kw) * slot.duration_h

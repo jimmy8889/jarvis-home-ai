@@ -32,9 +32,14 @@ def slots(now: datetime, *, fit: float, buy: float, solar: float = 0.0, load: fl
     ) for index in range(count)]
 
 
-def ev_states(*, soc: float, departure: datetime) -> dict[str, dict[str, str]]:
+def ev_states(
+    *,
+    soc: float,
+    departure: datetime,
+    trip: str = "No trip",
+) -> dict[str, dict[str, str]]:
     return {
-        ENTITY["ev_trip"]: {"state": "No trip"},
+        ENTITY["ev_trip"]: {"state": trip},
         ENTITY["ev_soc"]: {"state": str(soc)},
         ENTITY["ev_limit"]: {"state": "80"},
         ENTITY["ev_plugged"]: {"state": "on"},
@@ -565,7 +570,11 @@ def test_ev_adds_lowest_cost_deadline_fallback_only_after_solar_shortfall(tmp_pa
     plan_slots = slots(now, fit=0.0, buy=0.20, solar=0.0, load=1.0, count=3)
     plan_slots[0].solar_kw = plan_slots[0].solar_low_kw = plan_slots[0].solar_high_kw = 7.0
     plan_slots[2].import_price = 0.01
-    states = ev_states(soc=30.0, departure=now + timedelta(hours=2))
+    states = ev_states(
+        soc=30.0,
+        departure=now + timedelta(hours=2),
+        trip="Local / 50 km",
+    )
 
     schedule = opt._schedule_ev(plan_slots, states, now)
 
@@ -576,6 +585,45 @@ def test_ev_adds_lowest_cost_deadline_fallback_only_after_solar_shortfall(tmp_pa
     assert plan_slots[1].ev_kw == 0.0
     assert plan_slots[2].ev_charge_source == "deadline_fallback"
     assert schedule.solar_energy_kwh + schedule.fallback_energy_kwh == pytest.approx(schedule.required_kwh)
+
+
+@pytest.mark.parametrize("trip", ["Unanswered", "No trip"])
+def test_ev_without_declared_trip_never_schedules_deadline_fallback(tmp_path, trip):
+    opt = optimizer(tmp_path)
+    now = datetime(2026, 8, 12, 6, 40, tzinfo=BRISBANE)
+    plan_slots = slots(now, fit=0.31, buy=0.44, solar=1.3, load=1.0, count=2)
+    states = ev_states(
+        soc=35.0,
+        departure=now + timedelta(minutes=20),
+        trip=trip,
+    )
+
+    schedule = opt._schedule_ev(plan_slots, states, now)
+
+    assert schedule.required_kwh > 0
+    assert schedule.fallback_energy_kwh == 0.0
+    assert all(item.ev_kw == 0.0 for item in plan_slots)
+    assert all(item.ev_charge_source == "none" for item in plan_slots)
+
+
+def test_explicit_trip_deadline_fallback_cannot_discharge_house_battery(tmp_path):
+    opt = optimizer(tmp_path)
+    now = datetime(2026, 8, 12, 6, 40, tzinfo=BRISBANE)
+    plan_slots = slots(now, fit=0.31, buy=0.44, solar=1.3, load=1.0, count=2)
+    plan_slots[0].ev_kw = opt._ev_power_for_amps(16)
+    plan_slots[0].ev_charge_amps = 16
+    plan_slots[0].ev_power_target_kw = opt._ev_power_for_amps(16)
+    plan_slots[0].ev_charge_source = "deadline_fallback"
+
+    dispatch = opt._dispatch(
+        plan_slots,
+        initial_soc_pct=80.0,
+        capacity_kwh=47.0,
+        evening=None,
+    )
+
+    assert dispatch[0].battery_kw <= 0.0
+    assert dispatch[0].site_grid_kw > 0.0
 
 
 def test_fast_live_high_fit_immediately_requests_full_safe_discharge(tmp_path):

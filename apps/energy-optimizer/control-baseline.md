@@ -13,6 +13,6 @@ Captured before implementation on 11 August 2026.
 - Force-charge bridge automations: `1765837458603` and `1765837692266`.
 - Existing hot-water automation: `automation.hot_water_solar_driven_with_3hr_guarantee_by_3pm`.
 
-Earlier configuration analysis reported a plaintext EV recovery credential. A current scoped search of the active Node-RED flow and Home Assistant energy/Tesla automations found no SSH/password command, and the new EV actuator uses local Tesla BLE entities only. EV auto-control remains helper-disabled until the seven-day review and a final secret scan. The Home Assistant checkpoint and private raw backup are the authoritative rollback sources.
+The enabled legacy `Tesla Solar Charging` automation contained a plaintext SSH recovery credential and wrote to the same local Tesla BLE entities as the optimiser. During the production cutover it was replaced with an inert disabled stub, and the legacy Tesla grid/free-amps writers were disabled. The new EV actuator uses only the local Tesla BLE entities and contains no SSH recovery command. The Home Assistant checkpoint and private raw backup are the authoritative rollback sources for the retired configuration; secrets must not be restored to live YAML.
 
 After the guarded flow was deployed, Node-RED `leave_front_door_open` was changed from `true` to `false`. The direct LAN `/flows` and `/diagnostics` endpoints now return HTTP 401; protected Home Assistant ingress remains the administration path.

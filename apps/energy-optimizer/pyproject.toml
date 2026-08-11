@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "pilot-energy-optimizer"
 version = "0.1.0"
-description = "Forecast-aware, shadow-first home energy dispatch planner"
+description = "Forecast-aware production home energy dispatch optimiser"
 requires-python = ">=3.11"
 dependencies = [
   "fastapi>=0.116,<1",

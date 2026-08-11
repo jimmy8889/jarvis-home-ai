@@ -18,6 +18,9 @@ class Slot:
     price_source: str
     hot_water_kw: float = 0.0
     ev_kw: float = 0.0
+    ev_charge_amps: int = 0
+    ev_power_target_kw: float = 0.0
+    ev_charge_source: str = "none"
 
 
 @dataclass
@@ -64,6 +67,10 @@ class Plan:
     ev_target_soc_pct: float
     ev_required_kwh: float
     ev_charge_amps_target: int
+    ev_power_target_kw: float
+    ev_charge_source: str
+    ev_solar_energy_kwh: float
+    ev_fallback_energy_kwh: float
     ev_charge_start: datetime | None
     ev_charge_end: datetime | None
     ev_estimated_cost: float
@@ -96,6 +103,10 @@ class Plan:
             "ev_target_soc_pct": round(self.ev_target_soc_pct, 1),
             "ev_required_kwh": round(self.ev_required_kwh, 2),
             "ev_charge_amps_target": self.ev_charge_amps_target,
+            "ev_power_target_kw": round(self.ev_power_target_kw, 3),
+            "ev_charge_source": self.ev_charge_source,
+            "ev_solar_energy_kwh": round(self.ev_solar_energy_kwh, 2),
+            "ev_fallback_energy_kwh": round(self.ev_fallback_energy_kwh, 2),
             "ev_charge_start": self.ev_charge_start.isoformat() if self.ev_charge_start else None,
             "ev_charge_end": self.ev_charge_end.isoformat() if self.ev_charge_end else None,
             "ev_estimated_cost": round(self.ev_estimated_cost, 2),

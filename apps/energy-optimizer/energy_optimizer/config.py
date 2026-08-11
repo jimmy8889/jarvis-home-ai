@@ -27,8 +27,6 @@ class Settings:
     battery_discharge_efficiency: float = 0.90
     battery_wear_per_kwh: float = 0.08
     grid_charge_uncertainty_per_kwh: float = 0.02
-    shadow_discharge_cap_kw: float = 10.0
-
     hot_water_kw: float = 3.7
     hot_water_required_hours: float = 3.0
     hot_water_latest_hour: int = 16
@@ -38,7 +36,16 @@ class Settings:
     ev_trip_margin: float = 1.20
     ev_arrival_reserve_pct: float = 15.0
     ev_minimum_departure_soc_pct: float = 40.0
-    ev_max_charge_kw: float = 3.7
+    # The Tesla wall connector is three phase.  The observed phase voltages are
+    # approximately 243.4 V, 250.8 V and 246.9 V (247 V average), so 16 A is
+    # about 11.86 kW rather than the 3.7 kW assumed by the former single-phase
+    # model.  Keep these values configurable because voltage and the accepted
+    # charging-current range are installation-specific.
+    ev_phase_count: int = 3
+    ev_phase_voltage_v: float = 247.0
+    ev_min_charge_amps: int = 6
+    ev_max_charge_amps: int = 16
+    ev_max_charge_kw: float = 11.86
     ev_default_departure_hour: int = 7
 
     @classmethod

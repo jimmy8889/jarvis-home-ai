@@ -1,20 +1,26 @@
 [
   {
-    "id": "eop_guard_tab_001",
+    "id": "eop_guard_tab_002",
     "type": "tab",
-    "label": "Energy Optimizer Guarded Actuator",
+    "label": "Energy Optimizer Guarded Actuator (Production v2)",
     "disabled": false,
-    "info": "Shadow-first actuator. Commands are rejected unless mode=Active, battery control is enabled, manual override is off, and the plan is fresh and valid."
+    "info": "Production v2 guarded actuator. Every disarmed or rejected state actively cancels forced modes. Discharge translates the site-export target from live PV/load, ramps upward to the full verified 28 kW limit, disables PV charging while exporting, and confirms SAJ feedback. Grid charge is limited to 30 kW. The disabled v1 tab is retained for rollback."
   },
   {
-    "id": "eop_plan_changed_001",
+    "id": "eop_plan_changed_002",
     "type": "server-state-changed",
-    "z": "eop_guard_tab_001",
+    "z": "eop_guard_tab_002",
     "name": "New optimizer plan",
     "server": "srv_ha_001",
     "version": 6,
     "outputs": 1,
-    "entities": {"entity": ["sensor.energy_optimizer_plan"], "substring": [], "regex": []},
+    "entities": {
+      "entity": [
+        "sensor.energy_optimizer_plan"
+      ],
+      "substring": [],
+      "regex": []
+    },
     "outputInitially": true,
     "stateType": "str",
     "ifState": "",
@@ -29,17 +35,86 @@
     "ignorePrevStateUnavailable": true,
     "ignoreCurrentStateUnknown": true,
     "ignoreCurrentStateUnavailable": true,
-    "outputProperties": [{"property": "payload", "propertyType": "msg", "value": "", "valueType": "entityState"}],
-    "x": 140,
-    "y": 100,
-    "wires": [["eop_read_live_state_001"]]
+    "outputProperties": [
+      {
+        "property": "payload",
+        "propertyType": "msg",
+        "value": "",
+        "valueType": "entityState"
+      }
+    ],
+    "x": 150,
+    "y": 80,
+    "wires": [
+      [
+        "eop_read_live_state_002"
+      ]
+    ]
   },
   {
-    "id": "eop_watchdog_001",
+    "id": "eop_control_changed_002",
+    "type": "server-state-changed",
+    "z": "eop_guard_tab_002",
+    "name": "Control or safety gate changed",
+    "server": "srv_ha_001",
+    "version": 6,
+    "outputs": 1,
+    "entities": {
+      "entity": [
+        "input_select.energy_optimizer_mode",
+        "input_boolean.energy_optimizer_rollout_approved",
+        "input_boolean.energy_optimizer_battery_control",
+        "input_boolean.energy_optimizer_manual_override",
+        "input_number.energy_optimizer_max_discharge_kw",
+        "sensor.saj_battery_discharge_soc_lower_limit"
+      ],
+      "substring": [],
+      "regex": []
+    },
+    "outputInitially": true,
+    "stateType": "str",
+    "ifState": "",
+    "ifStateType": "str",
+    "ifStateOperator": "is",
+    "outputOnlyOnStateChange": true,
+    "for": "0",
+    "forType": "num",
+    "forUnits": "minutes",
+    "ignorePrevStateNull": false,
+    "ignorePrevStateUnknown": false,
+    "ignorePrevStateUnavailable": false,
+    "ignoreCurrentStateUnknown": false,
+    "ignoreCurrentStateUnavailable": false,
+    "outputProperties": [
+      {
+        "property": "payload",
+        "propertyType": "msg",
+        "value": "",
+        "valueType": "entityState"
+      }
+    ],
+    "x": 170,
+    "y": 140,
+    "wires": [
+      [
+        "eop_read_live_state_002"
+      ]
+    ]
+  },
+  {
+    "id": "eop_watchdog_002",
     "type": "inject",
-    "z": "eop_guard_tab_001",
+    "z": "eop_guard_tab_002",
     "name": "Stale-plan watchdog",
-    "props": [{"p": "payload"}, {"p": "topic", "vt": "str"}],
+    "props": [
+      {
+        "p": "payload"
+      },
+      {
+        "p": "topic",
+        "vt": "str"
+      }
+    ],
     "repeat": "60",
     "crontab": "",
     "once": true,
@@ -47,204 +122,383 @@
     "topic": "watchdog",
     "payload": "",
     "payloadType": "date",
-    "x": 140,
-    "y": 160,
-    "wires": [["eop_read_live_state_001"]]
+    "x": 150,
+    "y": 200,
+    "wires": [
+      [
+        "eop_read_live_state_002"
+      ]
+    ]
   },
   {
-    "id": "eop_read_live_state_001",
+    "id": "eop_read_live_state_002",
     "type": "function",
-    "z": "eop_guard_tab_001",
+    "z": "eop_guard_tab_002",
     "name": "Read guarded HA state",
-    "func": "const ha=global.get('homeassistant');\nconst states=ha?.homeAssistant?.states || ha?.states || {};\nfunction raw(entityId) { return states[entityId]?.state; }\nmsg.planEntity=states['sensor.energy_optimizer_plan'] || {};\nmsg.mode=raw('input_select.energy_optimizer_mode');\nmsg.batteryControl=raw('input_boolean.energy_optimizer_battery_control');\nmsg.manualOverride=raw('input_boolean.energy_optimizer_manual_override');\nmsg.soc=raw('sensor.saj_battery_1_soc');\nmsg.maxDischargeCapKw=raw('input_number.energy_optimizer_max_discharge_kw');\nreturn msg;",
+    "func": "const ha=global.get('homeassistant');\nconst states=ha?.homeAssistant?.states || ha?.states || {};\nfunction entity(entityId) { return states[entityId] || {}; }\nfunction raw(entityId) { return entity(entityId).state; }\nfunction finite(value) { if (value===null || value===undefined || (typeof value==='string' && (!value.trim() || ['unknown','unavailable','none','null'].includes(value.trim().toLowerCase())))) return null; const parsed=Number(value); return Number.isFinite(parsed)?parsed:null; }\nfunction powerKw(entityId) { const value=finite(raw(entityId)); if (value===null) return null; const unit=String(entity(entityId).attributes?.unit_of_measurement || '').trim().toLowerCase(); if (unit==='w') return value/1000; if (unit==='kw') return value; if (unit==='mw') return value*1000; return null; }\nmsg.planEntity=entity('sensor.energy_optimizer_plan');\nmsg.mode=raw('input_select.energy_optimizer_mode');\nmsg.rolloutApproved=raw('input_boolean.energy_optimizer_rollout_approved');\nmsg.batteryControl=raw('input_boolean.energy_optimizer_battery_control');\nmsg.manualOverride=raw('input_boolean.energy_optimizer_manual_override');\nmsg.soc=raw('sensor.saj_battery_1_soc');\nmsg.minSocPct=raw('sensor.saj_battery_discharge_soc_lower_limit');\nmsg.maxDischargeCapKw=raw('input_number.energy_optimizer_max_discharge_kw');\nmsg.pvPowerKw=powerKw('sensor.pv_power_mqtt_abs');\nmsg.homeLoadKw=powerKw('sensor.saj_home_load');\nreturn msg;",
     "outputs": 1,
     "noerr": 0,
     "initialize": "",
     "finalize": "",
     "libs": [],
-    "x": 390,
-    "y": 120,
-    "wires": [["eop_validate_001"]]
+    "x": 430,
+    "y": 140,
+    "wires": [
+      [
+        "eop_validate_002"
+      ]
+    ]
   },
   {
-    "id": "eop_validate_001",
+    "id": "eop_validate_002",
     "type": "function",
-    "z": "eop_guard_tab_001",
-    "name": "Validate and route plan",
-    "func": "function finite(value) { const parsed = Number(value); return Number.isFinite(parsed) ? parsed : null; }\nfunction on(value) { return String(value || '').toLowerCase() === 'on'; }\nfunction validatePlan(input) {\n  const nowMs = Date.now(); const entity = input.planEntity || {}; const plan = entity.attributes || {};\n  const mode = String(input.mode || plan.mode || 'shadow').toLowerCase();\n  const armed = mode === 'active' && on(input.batteryControl) && !on(input.manualOverride);\n  let r = {actuate:false,safeStop:false,status:'shadow',action:'none',targetKw:0,pvExportCommand:String(plan.pv_export_command||'allow'),planId:String(plan.plan_id || entity.state || 'unknown')};\n  if (!armed) { r.status = on(input.manualOverride) ? 'manual_override' : mode === 'active' ? 'battery_control_off' : mode; return r; }\n  r.actuate = true; const validUntil=Date.parse(plan.valid_until||''); const generatedAt=Date.parse(plan.generated_at||'');\n  if (plan.schema_version !== 1 || !Number.isFinite(validUntil) || !Number.isFinite(generatedAt)) return {...r,safeStop:true,status:'rejected_schema'};\n  if (nowMs>validUntil || nowMs-generatedAt>600000 || generatedAt>nowMs+60000) return {...r,safeStop:true,status:'rejected_stale'};\n  if (plan.actuation_allowed !== true || String(plan.mode).toLowerCase() !== 'active') return {...r,safeStop:true,status:'rejected_not_allowed'};\n  if (!['allow','curtail'].includes(r.pvExportCommand)) return {...r,safeStop:true,pvExportCommand:'allow',status:'rejected_pv_command'};\n  const target=finite(plan.battery_power_target_kw), siteExport=finite(plan.site_export_target_kw), soc=finite(input.soc), configuredCap=finite(input.maxDischargeCapKw);\n  if (target===null || siteExport===null || soc===null) return {...r,safeStop:true,status:'rejected_invalid_numeric'};\n  if (soc<4.5 || soc>100.5 || Math.abs(target)>30.01 || siteExport<-.01 || siteExport>40) return {...r,safeStop:true,status:'rejected_bounds'};\n  const action=String(plan.action||'idle');\n  if (action==='discharge_export') { if (soc<=6 || target<=0 || siteExport<=0) return {...r,safeStop:true,status:'rejected_discharge_guard'}; const cap=Math.min(28,configuredCap===null?10:Math.max(0,configuredCap)); return {...r,status:'accepted_discharge',action,targetKw:Math.min(target,cap)}; }\n  if (action==='grid_charge') { if (soc>=99 || target>=0) return {...r,safeStop:true,status:'rejected_charge_guard'}; return {...r,status:'accepted_grid_charge',action,targetKw:Math.min(30,Math.abs(target))}; }\n  return {...r,safeStop:true,status:'accepted_normal_'+action,action};\n}\nconst r=validatePlan(msg); if (String(r.status).startsWith('rejected_')) r.pvExportCommand='allow'; const audit={payload:r.status+' | '+r.planId,optimizer:r};\nif (!r.actuate) return [audit,null,null,null,null,null];\nconst curtail=r.pvExportCommand==='curtail'?{payload:0}:null; const allow=r.pvExportCommand==='curtail'?null:{payload:1};\nif (r.action==='discharge_export' && !r.safeStop) return [audit,null,{payload:r.targetKw},null,curtail,allow];\nif (r.action==='grid_charge' && !r.safeStop) return [audit,null,null,{payload:r.targetKw},curtail,allow];\nreturn [audit,{payload:0},null,null,curtail,allow];",
+    "z": "eop_guard_tab_002",
+    "name": "Validate, translate and ramp plan",
+    "func": "const MAX_DISCHARGE_KW=28, MAX_CHARGE_KW=30, DEFAULT_DISCHARGE_CAP_KW=28, RAMP_UP_STEP_KW=14;\nfunction finite(value) { if (value===null || value===undefined || (typeof value==='string' && (!value.trim() || ['unknown','unavailable','none','null'].includes(value.trim().toLowerCase())))) return null; const parsed=Number(value); return Number.isFinite(parsed)?parsed:null; }\nfunction on(value) { return String(value||'').toLowerCase()==='on'; }\nfunction rejected(result,status) { return {...result,actuate:false,safeStop:true,stopForced:true,status,action:'none',targetKw:0,requestedTargetKw:0,pvExportCommand:'allow'}; }\nfunction validatePlan(input) {\n  const nowMs=input.nowMs??Date.now(), entity=input.planEntity||{}, plan=entity.attributes||{}, mode=String(input.mode||plan.mode||'shadow').toLowerCase();\n  const result={actuate:false,safeStop:true,stopForced:true,status:'shadow',action:'none',targetKw:0,requestedTargetKw:0,plannedBatteryTargetKw:null,siteExportTargetKw:null,livePvKw:null,liveLoadKw:null,pvExportCommand:'allow',planId:String(plan.plan_id||entity.state||'unknown')};\n  if (on(input.manualOverride)) return {...result,status:'manual_override'};\n  if (mode!=='active') return {...result,status:mode||'disabled'};\n  if (!on(input.rolloutApproved)) return {...result,status:'rollout_not_approved'};\n  if (!on(input.batteryControl)) return {...result,status:'battery_control_off'};\n  const validUntil=Date.parse(plan.valid_until||''), generatedAt=Date.parse(plan.generated_at||'');\n  if (plan.schema_version!==1 || !Number.isFinite(validUntil) || !Number.isFinite(generatedAt)) return rejected(result,'rejected_schema');\n  if (nowMs>validUntil || nowMs-generatedAt>600000 || generatedAt>nowMs+60000) return rejected(result,'rejected_stale');\n  if (plan.actuation_allowed!==true || String(plan.mode).toLowerCase()!=='active') return rejected(result,'rejected_not_allowed');\n  const pvExportCommand=String(plan.pv_export_command||'allow').toLowerCase();\n  if (!['allow','curtail'].includes(pvExportCommand)) return rejected(result,'rejected_pv_command');\n  const target=finite(plan.battery_power_target_kw), siteExport=finite(plan.site_export_target_kw), soc=finite(input.soc), inverterFloor=finite(input.minSocPct), livePvKw=finite(input.pvPowerKw), liveLoadKw=finite(input.homeLoadKw);\n  if ([target,siteExport,soc,inverterFloor,livePvKw,liveLoadKw].some(value=>value===null)) return rejected(result,'rejected_invalid_numeric');\n  const liveFloor=Math.max(5,inverterFloor);\n  if (soc<liveFloor-.5 || soc>100.5 || inverterFloor<5 || inverterFloor>100 || Math.abs(target)>MAX_CHARGE_KW+.01 || siteExport<-.01 || siteExport>40 || livePvKw<0 || livePvKw>100 || liveLoadKw<0 || liveLoadKw>100) return rejected(result,'rejected_bounds');\n  const action=String(plan.action||'idle').toLowerCase();\n  if (!['discharge_export','grid_charge','curtail_pv','self_consumption','pv_charge','idle'].includes(action)) return rejected(result,'rejected_conflicting_action');\n  const active={...result,actuate:true,safeStop:false,stopForced:false,action,plannedBatteryTargetKw:target,siteExportTargetKw:siteExport,livePvKw,liveLoadKw,pvExportCommand};\n  if (action==='discharge_export') {\n    if (pvExportCommand!=='allow' || soc<=liveFloor+1 || target<=0 || target>MAX_DISCHARGE_KW+.01 || siteExport<=0) return rejected(active,'rejected_discharge_guard');\n    const configuredCap=finite(input.maxDischargeCapKw), cap=Math.min(MAX_DISCHARGE_KW,configuredCap===null?DEFAULT_DISCHARGE_CAP_KW:Math.max(0,configuredCap));\n    const requestedTargetKw=Math.min(Math.max(0,siteExport+liveLoadKw-livePvKw),cap);\n    if (requestedTargetKw<=.05) return {...active,status:'accepted_discharge_pv_meets_target',stopForced:true,targetKw:0,requestedTargetKw:0};\n    return {...active,status:'accepted_discharge',targetKw:requestedTargetKw,requestedTargetKw};\n  }\n  if (action==='grid_charge') {\n    if (soc>=99 || target>=0) return rejected(active,'rejected_charge_guard');\n    const requestedTargetKw=Math.min(MAX_CHARGE_KW,Math.abs(target));\n    return {...active,status:'accepted_grid_charge',targetKw:requestedTargetKw,requestedTargetKw};\n  }\n  if (action==='curtail_pv' && pvExportCommand!=='curtail') return rejected(active,'rejected_conflicting_action');\n  if (['self_consumption','pv_charge','idle'].includes(action) && pvExportCommand!=='allow') return rejected(active,'rejected_conflicting_action');\n  return {...active,stopForced:true,status:'accepted_normal_'+action};\n}\nfunction rampTarget(previousKw,requestedKw,maxIncreaseKw=RAMP_UP_STEP_KW) { const previous=Math.max(0,finite(previousKw)??0), requested=Math.max(0,finite(requestedKw)??0), step=Math.max(0,finite(maxIncreaseKw)??RAMP_UP_STEP_KW); return requested<=previous?requested:Math.min(requested,previous+step); }\nconst r=validatePlan(msg);\nif ((r.action==='discharge_export' || r.action==='grid_charge') && !r.safeStop && !r.stopForced) {\n  const last=flow.get('energyOptimizerLastCommand')||{}, previous=last.action===r.action?last.targetKw:0;\n  r.requestedTargetKw=r.targetKw; r.targetKw=rampTarget(previous,r.targetKw); r.ramped=r.targetKw+0.001<r.requestedTargetKw;\n  flow.set('energyOptimizerLastCommand',{action:r.action,targetKw:r.targetKw,planId:r.planId});\n} else {\n  flow.set('energyOptimizerLastCommand',{action:'none',targetKw:0,planId:r.planId});\n}\nlet detail='';\nif (r.action==='discharge_export') detail=' | site='+Number(r.siteExportTargetKw).toFixed(1)+' pv='+Number(r.livePvKw).toFixed(1)+' load='+Number(r.liveLoadKw).toFixed(1)+' request='+Number(r.requestedTargetKw).toFixed(1)+' apply='+Number(r.targetKw).toFixed(1)+'kW';\nelse if (r.action==='grid_charge') detail=' | request='+Number(r.requestedTargetKw).toFixed(1)+' apply='+Number(r.targetKw).toFixed(1)+'kW';\nconst command={action:r.action,targetKw:r.targetKw,requestedTargetKw:r.requestedTargetKw,planId:r.planId};\nconst base={optimizer:r,command};\nconst audit={...base,payload:r.status+' | '+r.planId+detail};\nconst stop=r.stopForced?{...base,payload:0}:null;\nconst curtail=!r.safeStop && r.pvExportCommand==='curtail'?{...base,payload:0}:null;\nconst allow=r.safeStop || r.pvExportCommand==='allow'?{...base,payload:1}:null;\nif (r.action==='discharge_export' && !r.safeStop && !r.stopForced) return [audit,null,{...base,payload:r.targetKw},null,curtail,allow];\nif (r.action==='grid_charge' && !r.safeStop && !r.stopForced) return [audit,null,null,{...base,payload:r.targetKw},curtail,allow];\nreturn [audit,stop,null,null,curtail,allow];",
     "outputs": 6,
     "noerr": 0,
     "initialize": "",
     "finalize": "",
     "libs": [],
-    "x": 650,
-    "y": 120,
-    "wires": [["eop_audit_001"], ["eop_stop_forced_001"], ["eop_set_discharge_001"], ["eop_set_charge_001"], ["eop_curtail_001"], ["eop_allow_export_001"]]
+    "x": 710,
+    "y": 140,
+    "wires": [
+      [
+        "eop_audit_002"
+      ],
+      [
+        "eop_stop_forced_002"
+      ],
+      [
+        "eop_set_discharge_002"
+      ],
+      [
+        "eop_set_charge_002"
+      ],
+      [
+        "eop_curtail_002"
+      ],
+      [
+        "eop_allow_export_002"
+      ]
+    ]
   },
   {
-    "id": "eop_audit_001",
+    "id": "eop_audit_002",
     "type": "api-call-service",
-    "z": "eop_guard_tab_001",
+    "z": "eop_guard_tab_002",
     "name": "Publish actuator status",
     "server": "srv_ha_001",
     "version": 7,
     "action": "input_text.set_value",
-    "entityId": ["input_text.energy_optimizer_actuator_status"],
+    "entityId": [
+      "input_text.energy_optimizer_actuator_status"
+    ],
     "data": "{\"value\":\"{{payload}}\"}",
     "dataType": "json",
     "blockInputOverrides": false,
-    "x": 1850,
+    "x": 1780,
     "y": 40,
-    "wires": [[]]
+    "wires": [
+      []
+    ]
   },
   {
-    "id": "eop_stop_forced_001",
+    "id": "eop_stop_forced_002",
     "type": "api-call-service",
-    "z": "eop_guard_tab_001",
-    "name": "Stop forced battery modes",
+    "z": "eop_guard_tab_002",
+    "name": "Stop both forced battery modes",
     "server": "srv_ha_001",
     "version": 7,
     "action": "input_boolean.turn_off",
-    "entityId": ["input_boolean.battery_charge", "input_boolean.battery_discharge"],
+    "entityId": [
+      "input_boolean.battery_charge",
+      "input_boolean.battery_discharge"
+    ],
     "data": "{}",
     "dataType": "json",
-    "x": 1850,
+    "x": 1780,
     "y": 100,
-    "wires": [["eop_allow_pv_001"]]
+    "wires": [
+      [
+        "eop_reset_charge_rate_002"
+      ]
+    ]
   },
   {
-    "id": "eop_allow_pv_001",
+    "id": "eop_reset_charge_rate_002",
     "type": "api-call-service",
-    "z": "eop_guard_tab_001",
+    "z": "eop_guard_tab_002",
+    "name": "Restore normal 30 kW PV charge limit",
+    "server": "srv_ha_001",
+    "version": 7,
+    "action": "input_number.set_value",
+    "entityId": [
+      "input_number.battery_charge_rate"
+    ],
+    "data": "{\"value\":30}",
+    "dataType": "json",
+    "blockInputOverrides": false,
+    "x": 2050,
+    "y": 100,
+    "wires": [
+      [
+        "eop_allow_pv_002"
+      ]
+    ]
+  },
+  {
+    "id": "eop_allow_pv_002",
+    "type": "api-call-service",
+    "z": "eop_guard_tab_002",
     "name": "Allow normal PV charging",
     "server": "srv_ha_001",
     "version": 7,
     "action": "input_boolean.turn_on",
-    "entityId": ["input_boolean.battery_pv_charge"],
+    "entityId": [
+      "input_boolean.battery_pv_charge"
+    ],
     "data": "{}",
     "dataType": "json",
-    "x": 2090,
+    "x": 2310,
     "y": 100,
-    "wires": [[]]
+    "wires": [
+      []
+    ]
   },
   {
-    "id": "eop_set_discharge_001",
+    "id": "eop_set_discharge_002",
     "type": "api-call-service",
-    "z": "eop_guard_tab_001",
+    "z": "eop_guard_tab_002",
     "name": "Set guarded discharge rate",
     "server": "srv_ha_001",
     "version": 7,
     "action": "input_number.set_value",
-    "entityId": ["input_number.battery_discharge_rate"],
+    "entityId": [
+      "input_number.battery_discharge_rate"
+    ],
     "data": "{\"value\":{{payload}}}",
     "dataType": "json",
-    "x": 1850,
+    "x": 1770,
     "y": 160,
-    "wires": [["eop_discharge_chargeoff_001"]]
+    "wires": [
+      [
+        "eop_discharge_chargeoff_002"
+      ]
+    ]
   },
   {
-    "id": "eop_discharge_chargeoff_001",
+    "id": "eop_discharge_chargeoff_002",
     "type": "api-call-service",
-    "z": "eop_guard_tab_001",
+    "z": "eop_guard_tab_002",
     "name": "Stop force charge",
     "server": "srv_ha_001",
     "version": 7,
     "action": "input_boolean.turn_off",
-    "entityId": ["input_boolean.battery_charge"],
+    "entityId": [
+      "input_boolean.battery_charge"
+    ],
     "data": "{}",
     "dataType": "json",
-    "x": 2090,
+    "x": 2030,
     "y": 160,
-    "wires": [["eop_discharge_on_001"]]
+    "wires": [
+      [
+        "eop_discharge_pvoff_002"
+      ]
+    ]
   },
   {
-    "id": "eop_discharge_on_001",
+    "id": "eop_discharge_pvoff_002",
     "type": "api-call-service",
-    "z": "eop_guard_tab_001",
+    "z": "eop_guard_tab_002",
+    "name": "Stop PV charging during FIT export",
+    "server": "srv_ha_001",
+    "version": 7,
+    "action": "input_boolean.turn_off",
+    "entityId": [
+      "input_boolean.battery_pv_charge"
+    ],
+    "data": "{}",
+    "dataType": "json",
+    "x": 2260,
+    "y": 160,
+    "wires": [
+      [
+        "eop_discharge_on_002"
+      ]
+    ]
+  },
+  {
+    "id": "eop_discharge_on_002",
+    "type": "api-call-service",
+    "z": "eop_guard_tab_002",
     "name": "Enable force discharge",
     "server": "srv_ha_001",
     "version": 7,
     "action": "input_boolean.turn_on",
-    "entityId": ["input_boolean.battery_discharge"],
+    "entityId": [
+      "input_boolean.battery_discharge"
+    ],
     "data": "{}",
     "dataType": "json",
-    "x": 2310,
+    "x": 2510,
     "y": 160,
-    "wires": [[]]
+    "wires": [
+      [
+        "eop_feedback_delay_002"
+      ]
+    ]
   },
   {
-    "id": "eop_set_charge_001",
+    "id": "eop_set_charge_002",
     "type": "api-call-service",
-    "z": "eop_guard_tab_001",
+    "z": "eop_guard_tab_002",
     "name": "Set guarded charge rate",
     "server": "srv_ha_001",
     "version": 7,
     "action": "input_number.set_value",
-    "entityId": ["input_number.battery_charge_rate"],
+    "entityId": [
+      "input_number.battery_charge_rate"
+    ],
     "data": "{\"value\":{{payload}}}",
     "dataType": "json",
-    "x": 1840,
+    "x": 1760,
     "y": 220,
-    "wires": [["eop_charge_dischargeoff_001"]]
+    "wires": [
+      [
+        "eop_charge_dischargeoff_002"
+      ]
+    ]
   },
   {
-    "id": "eop_charge_dischargeoff_001",
+    "id": "eop_charge_dischargeoff_002",
     "type": "api-call-service",
-    "z": "eop_guard_tab_001",
+    "z": "eop_guard_tab_002",
     "name": "Stop force discharge",
     "server": "srv_ha_001",
     "version": 7,
     "action": "input_boolean.turn_off",
-    "entityId": ["input_boolean.battery_discharge"],
+    "entityId": [
+      "input_boolean.battery_discharge"
+    ],
     "data": "{}",
     "dataType": "json",
-    "x": 2090,
+    "x": 2030,
     "y": 220,
-    "wires": [["eop_charge_on_001"]]
+    "wires": [
+      [
+        "eop_charge_on_002"
+      ]
+    ]
   },
   {
-    "id": "eop_charge_on_001",
+    "id": "eop_charge_on_002",
     "type": "api-call-service",
-    "z": "eop_guard_tab_001",
+    "z": "eop_guard_tab_002",
     "name": "Enable force charge",
     "server": "srv_ha_001",
     "version": 7,
     "action": "input_boolean.turn_on",
-    "entityId": ["input_boolean.battery_charge"],
+    "entityId": [
+      "input_boolean.battery_charge"
+    ],
     "data": "{}",
     "dataType": "json",
-    "x": 2310,
+    "x": 2270,
     "y": 220,
-    "wires": [[]]
+    "wires": [
+      [
+        "eop_feedback_delay_002"
+      ]
+    ]
   },
   {
-    "id": "eop_curtail_001",
+    "id": "eop_feedback_delay_002",
+    "type": "delay",
+    "z": "eop_guard_tab_002",
+    "name": "Wait for SAJ feedback",
+    "pauseType": "delay",
+    "timeout": "12",
+    "timeoutUnits": "seconds",
+    "rate": "1",
+    "nbRateUnits": "1",
+    "rateUnits": "second",
+    "randomFirst": "1",
+    "randomLast": "5",
+    "randomUnits": "seconds",
+    "drop": false,
+    "allowrate": false,
+    "outputs": 1,
+    "x": 2760,
+    "y": 190,
+    "wires": [
+      [
+        "eop_feedback_confirm_002"
+      ]
+    ]
+  },
+  {
+    "id": "eop_feedback_confirm_002",
+    "type": "function",
+    "z": "eop_guard_tab_002",
+    "name": "Confirm exclusive SAJ feedback",
+    "func": "const ha=global.get('homeassistant');\nconst states=ha?.homeAssistant?.states || ha?.states || {};\nfunction entity(entityId) { return states[entityId]||{}; }\nfunction raw(entityId) { return entity(entityId).state; }\nfunction finite(value) { if (value===null || value===undefined || (typeof value==='string' && (!value.trim() || ['unknown','unavailable','none','null'].includes(value.trim().toLowerCase())))) return null; const parsed=Number(value); return Number.isFinite(parsed)?parsed:null; }\nfunction on(value) { return String(value||'').toLowerCase()==='on'; }\nfunction powerKw(entityId) { const value=finite(raw(entityId)); if (value===null) return null; const unit=String(entity(entityId).attributes?.unit_of_measurement||'').trim().toLowerCase(); if (unit==='w') return value/1000; if (unit==='kw') return value; if (unit==='mw') return value*1000; return null; }\nconst command=msg.command||{}, last=flow.get('energyOptimizerLastCommand')||{};\nif (last.action!==command.action || Math.abs(Number(last.targetKw||0)-Number(command.targetKw||0))>.01) return [{payload:'feedback_superseded | '+String(command.planId||'unknown'),command},null,null];\nconst discharge=command.action==='discharge_export', charge=command.action==='grid_charge';\nlet ok=false, status='feedback_invalid_command', currentSet=null;\nif (discharge || charge) {\n  const modeOk=discharge?(on(raw('input_boolean.battery_discharge'))&&!on(raw('input_boolean.battery_charge'))):(on(raw('input_boolean.battery_charge'))&&!on(raw('input_boolean.battery_discharge')));\n  currentSet=finite(raw(discharge?'sensor.saj_battery_discharge_current_set':'sensor.saj_battery_charge_current_set'));\n  if (currentSet===null) status='feedback_unavailable_'+(discharge?'discharge':'charge');\n  else if (!modeOk || currentSet<=0) status='feedback_mismatch_'+(discharge?'discharge':'charge');\n  else { ok=true; status='feedback_confirmed_'+(discharge?'discharge':'charge'); }\n}\nconst batteryKw=powerKw('sensor.saj_battery_power_2'), observed=batteryKw===null?'unavailable':batteryKw.toFixed(1)+'kW';\nconst audit={payload:status+' | '+String(command.planId||'unknown')+' | target='+Number(command.targetKw||0).toFixed(1)+'kW saj='+(currentSet===null?'unavailable':currentSet)+' battery='+observed,command};\nif (ok) return [audit,null,null];\nflow.set('energyOptimizerLastCommand',{action:'none',targetKw:0,planId:command.planId});\nreturn [audit,{payload:0,command},{payload:1,command}];",
+    "outputs": 3,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 3020,
+    "y": 190,
+    "wires": [
+      [
+        "eop_audit_002"
+      ],
+      [
+        "eop_stop_forced_002"
+      ],
+      [
+        "eop_allow_export_002"
+      ]
+    ]
+  },
+  {
+    "id": "eop_curtail_002",
     "type": "api-call-service",
-    "z": "eop_guard_tab_001",
+    "z": "eop_guard_tab_002",
     "name": "Curtail negative-FIT export",
     "server": "srv_ha_001",
     "version": 7,
     "action": "input_boolean.turn_off",
-    "entityId": ["input_boolean.export_power"],
+    "entityId": [
+      "input_boolean.export_power"
+    ],
     "data": "{}",
     "dataType": "json",
-    "x": 1850,
+    "x": 1770,
     "y": 280,
-    "wires": [[]]
+    "wires": [
+      []
+    ]
   },
   {
-    "id": "eop_allow_export_001",
+    "id": "eop_allow_export_002",
     "type": "api-call-service",
-    "z": "eop_guard_tab_001",
+    "z": "eop_guard_tab_002",
     "name": "Allow normal export",
     "server": "srv_ha_001",
     "version": 7,
     "action": "input_boolean.turn_on",
-    "entityId": ["input_boolean.export_power"],
+    "entityId": [
+      "input_boolean.export_power"
+    ],
     "data": "{}",
     "dataType": "json",
-    "x": 1840,
+    "x": 1760,
     "y": 340,
-    "wires": [[]]
+    "wires": [
+      []
+    ]
   }
 ]

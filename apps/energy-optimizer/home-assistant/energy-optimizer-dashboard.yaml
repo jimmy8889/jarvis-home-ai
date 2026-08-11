@@ -24,9 +24,15 @@ views:
           Fresh until **{{ as_timestamp(until, 0) | timestamp_custom('%-I:%M %p') }}** ·
           Actuator: **{{ states('input_text.energy_optimizer_actuator_status') }}**
 
-          {% if status != 'active' %}
+          {% if status == 'active' %}
+          > ✅ **Production control is active.** Battery, hot water and EV commands are
+          still independently guarded by their enable switches, fresh-plan checks and live safety limits.
+          {% elif status == 'shadow' %}
           > 🛡️ **Shadow mode:** recommendations are being recorded, but this optimiser
           cannot operate the battery, hot water or car.
+          {% else %}
+          > ⏸️ **Optimizer control is disabled or unavailable.** Forced battery modes
+          and automatic flexible-load commands should be in their safe state.
           {% endif %}
       - type: grid
         columns: 4
@@ -90,9 +96,13 @@ views:
           | Solar takes over | **{{ as_timestamp(p.morning_takeover, 0) | timestamp_custom('%a %-I:%M %p') }}** |
           | Solar falls below load | **{{ as_timestamp(p.evening_crossover, 0) | timestamp_custom('%a %-I:%M %p') }}** |
           | Forecast confidence | **{{ (p.confidence | float(0) * 100) | round(0) }}%** |
-          | Forecast grid import (36h) | **{{ grid.import_kwh | round(2) }} kWh / ${{ p.expected_cost | float(0) | round(2) }}** |
+          | Forecast grid purchase (36h) | **{{ grid.import_kwh | round(2) }} kWh / ${{ p.expected_cost | float(0) | round(2) }}** |
           | Expected export revenue | **${{ p.expected_revenue | float(0) | round(2) }}** |
           | Battery wear allowance | **${{ p.expected_wear_cost | float(0) | round(2) }}** |
+
+          Grid purchase is planned only when demand cannot be covered locally, or when
+          charging from the grid is forecast to be worth more later after losses, wear
+          and the uncertainty margin. It is not a target to import electricity.
 
           {% if p.warnings %}
           ### Current safeguards
@@ -221,8 +231,10 @@ views:
           Recommendation: **{{ states('sensor.energy_optimizer_ev') | replace('_',' ') | title }}**  
           Current SOC: **{{ states('sensor.tesla_battery_level') }}%** · charge limit: **{{ states('sensor.tesla_charge_limit_soc') }}%**  
           Required energy: **{{ p.ev_required_kwh | float(0) | round(1) }} kWh** · target SOC: **{{ p.ev_target_soc_pct | float(0) | round(0) }}%**  
+          Current plan: **{{ p.ev_charge_source | default('none') | replace('_',' ') | title }}** · **{{ p.ev_charge_amps_target | int(0) }} A three-phase / {{ p.ev_power_target_kw | float(0) | round(1) }} kW**
+          Planned energy: **{{ p.ev_solar_energy_kwh | float(0) | round(1) }} kWh direct solar** · **{{ p.ev_fallback_energy_kwh | float(0) | round(1) }} kWh deadline fallback**
           Best window: **{{ as_timestamp(p.ev_charge_start, 0) | timestamp_custom('%a %-I:%M %p') }} – {{ as_timestamp(p.ev_charge_end, 0) | timestamp_custom('%a %-I:%M %p') }}**  
-          Estimated cost: **${{ p.ev_estimated_cost | float(0) | round(2) }}**
+          Estimated purchase/opportunity cost: **${{ p.ev_estimated_cost | float(0) | round(2) }}**
       - type: entities
         title: Tomorrow’s EV requirement
         state_color: true
@@ -281,7 +293,15 @@ views:
           - entity: switch.tesla_ble_039d9c_charger
             name: Local charger command
           - entity: number.tesla_ble_039d9c_charging_amps
-            name: Charge current
+            name: Three-phase charge current
+          - entity: sensor.tesla_charging_power
+            name: Actual charging power
+          - entity: sensor.saj_meter_a_voltage_1
+            name: Phase 1 voltage
+          - entity: sensor.saj_meter_a_voltage_2
+            name: Phase 2 voltage
+          - entity: sensor.saj_meter_a_voltage_3
+            name: Phase 3 voltage
 
   - title: Safety & controls
     path: controls
@@ -296,8 +316,13 @@ views:
         content: |
           # 🛡️ Safety and rollout controls
 
-          > **Do not enable rollout approval or battery control during the seven-day shadow period.**  
-          > Before first activation, the legacy FIT/fixed-reserve battery authority must be disabled so only one controller can command the inverter.
+          > **Production control requires all three battery gates:** Active mode, rollout
+          > approval and battery actuation. Manual override immediately disarms commands
+          > and restores the inverter's normal PV/self-consumption state.
+
+          The guarded production limits are **28 kW discharge**, **30 kW charge** and the
+          inverter's independent **5% SOC floor**. Legacy FIT/fixed-reserve controllers
+          must remain disabled so this is the only dispatch authority.
 
           Current mode: **{{ states('input_select.energy_optimizer_mode') }}**  
           Rollout approval: **{{ states('input_boolean.energy_optimizer_rollout_approved') }}**  
@@ -322,7 +347,7 @@ views:
           - entity: input_number.energy_optimizer_max_discharge_kw
             name: Discharge safety cap
           - entity: input_datetime.energy_optimizer_shadow_started
-            name: Shadow period began
+            name: Original commissioning timestamp
       - type: entities
         title: Actuator and inverter feedback
         state_color: true
@@ -330,9 +355,9 @@ views:
           - entity: input_text.energy_optimizer_actuator_status
             name: Guarded actuator status
           - entity: input_boolean.battery_charge
-            name: Legacy forced charge
+            name: Forced charge mode
           - entity: input_boolean.battery_discharge
-            name: Legacy forced discharge
+            name: Forced discharge mode
           - entity: input_boolean.battery_pv_charge
             name: PV charging enabled
           - entity: input_boolean.export_power

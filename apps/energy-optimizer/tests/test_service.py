@@ -47,6 +47,10 @@ def test_dashboard_plan_attributes_contains_full_compact_horizon() -> None:
         ev_target_soc_pct=40.0,
         ev_required_kwh=0.0,
         ev_charge_amps_target=0,
+        ev_power_target_kw=0.0,
+        ev_charge_source="none",
+        ev_solar_energy_kwh=0.0,
+        ev_fallback_energy_kwh=0.0,
         ev_charge_start=None,
         ev_charge_end=None,
         ev_estimated_cost=0.0,
@@ -76,3 +80,7 @@ def test_dashboard_plan_attributes_contains_full_compact_horizon() -> None:
     }
     assert "duration_minutes" not in attributes["intervals"][0]
     assert "pv_curtailment_kw" not in attributes["intervals"][0]
+    assert attributes["ev_power_target_kw"] == 0.0
+    assert attributes["ev_charge_source"] == "none"
+    assert attributes["ev_solar_energy_kwh"] == 0.0
+    assert attributes["ev_fallback_energy_kwh"] == 0.0

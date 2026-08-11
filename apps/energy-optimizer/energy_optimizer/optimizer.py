@@ -25,6 +25,18 @@ class _Transition:
     curtailed_kwh: float
 
 
+@dataclass
+class _EVSchedule:
+    target_soc_pct: float
+    required_kwh: float
+    action: str
+    charge_start: datetime | None
+    charge_end: datetime | None
+    estimated_cost: float
+    solar_energy_kwh: float
+    fallback_energy_kwh: float
+
+
 class EnergyOptimizer:
     def __init__(self, settings: Settings, learning: LearningState):
         self.settings = settings
@@ -55,7 +67,7 @@ class EnergyOptimizer:
 
         morning, evening = self._detect_crossovers(slots, now)
         self._schedule_hot_water(slots, states, now, evening)
-        ev_target, ev_required, ev_action, ev_start, ev_end, ev_cost = self._schedule_ev(slots, states, now)
+        ev = self._schedule_ev(slots, states, now)
 
         soc = numeric_state(states, ENTITY["battery_soc"], 50.0)
         capacity = numeric_state(states, ENTITY["battery_usable"], self.settings.battery_capacity_kwh)
@@ -87,13 +99,10 @@ class EnergyOptimizer:
         manual_override = state_is_on(states, ENTITY["manual_override"])
         battery_enabled = state_is_on(states, ENTITY["battery_control"])
         rollout_approved = state_is_on(states, ENTITY["rollout_approved"])
-        shadow_started = parse_datetime(states.get(ENTITY["shadow_started"], {}).get("state"), self.timezone)
-        shadow_mature = shadow_started is not None and now >= shadow_started + timedelta(days=7)
         actuation_allowed = (
             mode == "active"
             and battery_enabled
             and rollout_approved
-            and shadow_mature
             and not manual_override
         )
         warnings: list[str] = []
@@ -103,12 +112,12 @@ class EnergyOptimizer:
             warnings.append("Solcast detailed forecast is unavailable")
         if manual_override:
             warnings.append("Manual override is enabled")
-        if not shadow_mature:
-            warnings.append("Seven-day shadow validation gate is not yet mature")
         if not rollout_approved:
             warnings.append("Rollout approval is off")
+        if not battery_enabled:
+            warnings.append("Battery control is off")
         if mode != "active":
-            warnings.append("Shadow mode: no optimiser command may be actuated")
+            warnings.append(f"{mode.title()} mode: no optimiser battery command may be actuated")
 
         confidence = self.learning.solar_confidence
         if warnings:
@@ -134,13 +143,21 @@ class EnergyOptimizer:
             pv_export_command="curtail" if first.pv_curtailment_kw > 0.5 else "allow",
             pv_curtailment_target_kw=first.pv_curtailment_kw,
             hot_water_command="on" if first.hot_water_kw > 0 else "off",
-            ev_action=ev_action if first.ev_kw <= 0 else ("charge" if state_is_on(states, ENTITY["ev_plugged"]) else "recommend_charge"),
-            ev_target_soc_pct=ev_target,
-            ev_required_kwh=ev_required,
-            ev_charge_amps_target=(max(5, min(16, round(first.ev_kw * 1000 / 230))) if first.ev_kw > 0 else 0),
-            ev_charge_start=ev_start,
-            ev_charge_end=ev_end,
-            ev_estimated_cost=ev_cost,
+            ev_action=ev.action if first.ev_kw <= 0 else (
+                "charge"
+                if state_is_on(states, ENTITY["ev_plugged"]) and state_is_on(states, ENTITY["ev_home"])
+                else "recommend_charge"
+            ),
+            ev_target_soc_pct=ev.target_soc_pct,
+            ev_required_kwh=ev.required_kwh,
+            ev_charge_amps_target=slots[0].ev_charge_amps if first.ev_kw > 0 else 0,
+            ev_power_target_kw=slots[0].ev_power_target_kw if first.ev_kw > 0 else 0.0,
+            ev_charge_source=slots[0].ev_charge_source if first.ev_kw > 0 else "none",
+            ev_solar_energy_kwh=ev.solar_energy_kwh,
+            ev_fallback_energy_kwh=ev.fallback_energy_kwh,
+            ev_charge_start=ev.charge_start,
+            ev_charge_end=ev.charge_end,
+            ev_estimated_cost=ev.estimated_cost,
             morning_takeover=morning,
             evening_crossover=evening,
             expected_cost=expected_cost,
@@ -228,7 +245,7 @@ class EnergyOptimizer:
         slots: list[Slot],
         states: dict[str, dict[str, Any]],
         now: datetime,
-    ) -> tuple[float, float, str, datetime | None, datetime | None, float]:
+    ) -> _EVSchedule:
         selection = str(states.get(ENTITY["ev_trip"], {}).get("state", "Unanswered")).lower()
         distances = {"no trip": 0.0, "local / 50 km": 50.0, "100 km": 100.0, "200 km": 200.0}
         if "custom" in selection:
@@ -245,36 +262,146 @@ class EnergyOptimizer:
         required = max(0.0, (target - current) / 100 * self.settings.ev_usable_capacity_kwh / 0.90)
         departure = self._departure(states, now)
         connected = state_is_on(states, ENTITY["ev_plugged"]) and state_is_on(states, ENTITY["ev_home"])
-        selected: list[tuple[Slot, float, float]] = []
-        if required > 0:
-            candidates = [slot for slot in slots if slot.start < departure and slot.start >= now - timedelta(minutes=self.settings.slot_minutes)]
+        candidates = [
+            slot for slot in slots
+            if slot.start < departure
+            and slot.start >= now - timedelta(minutes=self.settings.slot_minutes)
+        ]
+        planned_energy: dict[int, float] = {}
+        planned_amps: dict[int, int] = {}
+        planned_source: dict[int, str] = {}
+        estimated_cost = 0.0
+        solar_energy = 0.0
+        fallback_energy = 0.0
+        remaining = required
 
-            def opportunity_cost(slot: Slot) -> tuple[float, datetime]:
-                surplus = slot.solar_low_kw - slot.load_kw - slot.hot_water_kw
-                return (max(0.0, slot.export_price) if surplus > 0 else slot.import_price, slot.start)
+        # Tranche one is strictly direct solar.  Its commanded three-phase
+        # power can never exceed the calibrated low-solar surplus after house
+        # load and hot water, so the battery or grid cannot silently make up a
+        # shortfall.  Signed FIT is deliberately used for ordering: consuming
+        # solar during the most-negative FIT periods is preferred first.
+        solar_candidates: list[tuple[Slot, int]] = []
+        for slot in candidates:
+            surplus_kw = max(0.0, slot.solar_low_kw - slot.load_kw - slot.hot_water_kw)
+            available_amps = self._ev_amps_for_power(surplus_kw, round_up=False)
+            if available_amps >= self.settings.ev_min_charge_amps:
+                solar_candidates.append((slot, available_amps))
 
-            remaining = required
-            for slot in sorted(candidates, key=opportunity_cost):
-                if remaining <= 0:
+        for slot, available_amps in sorted(
+            solar_candidates,
+            key=lambda item: (item[0].export_price, item[0].start),
+        ):
+            if remaining <= 1e-9:
+                break
+            index = id(slot)
+            maximum_power = self._ev_power_for_amps(available_amps)
+            desired_power = min(maximum_power, remaining / slot.duration_h)
+            amps = max(
+                self.settings.ev_min_charge_amps,
+                min(available_amps, self._ev_amps_for_power(desired_power, round_up=True)),
+            )
+            commanded_power = self._ev_power_for_amps(amps)
+            # The optimiser replans every five minutes, so a partial final block
+            # can stop early even though the instantaneous command stays at the
+            # production-safe minimum current.
+            allocated = min(remaining, commanded_power * slot.duration_h)
+            planned_energy[index] = allocated
+            planned_amps[index] = amps
+            planned_source[index] = "direct_solar"
+            solar_energy += allocated
+            estimated_cost += allocated * max(0.0, slot.export_price)
+            remaining -= allocated
+
+        # Only a deadline shortfall after exhausting all conservative direct
+        # solar capacity may enter this tranche.  These slots can use grid (or
+        # retained battery value) and are therefore labelled explicitly rather
+        # than being presented as solar charging.
+        if remaining > 1e-9:
+            for slot in sorted(candidates, key=lambda item: (item.import_price, item.start)):
+                if remaining <= 1e-9:
                     break
-                maximum = self.settings.ev_max_charge_kw * slot.duration_h
-                allocated = min(maximum, remaining)
-                price = opportunity_cost(slot)[0]
-                selected.append((slot, allocated, price))
-                if connected:
-                    slot.ev_kw = allocated / slot.duration_h
+                index = id(slot)
+                existing = planned_energy.get(index, 0.0)
+                capacity = max(
+                    0.0,
+                    self._ev_power_for_amps(self.settings.ev_max_charge_amps)
+                    * slot.duration_h
+                    - existing,
+                )
+                allocated = min(remaining, capacity)
+                if allocated <= 1e-9:
+                    continue
+                total_energy = existing + allocated
+                total_average_power = total_energy / slot.duration_h
+                amps = min(
+                    self.settings.ev_max_charge_amps,
+                    max(
+                        self.settings.ev_min_charge_amps,
+                        self._ev_amps_for_power(total_average_power, round_up=True),
+                    ),
+                )
+                planned_energy[index] = total_energy
+                planned_amps[index] = amps
+                planned_source[index] = "mixed" if existing > 0 else "deadline_fallback"
+                fallback_energy += allocated
+                estimated_cost += allocated * slot.import_price
                 remaining -= allocated
+
+        selected_slots = [slot for slot in candidates if planned_energy.get(id(slot), 0.0) > 1e-9]
+        if connected:
+            for slot in selected_slots:
+                index = id(slot)
+                slot.ev_charge_amps = planned_amps[index]
+                slot.ev_power_target_kw = self._ev_power_for_amps(slot.ev_charge_amps)
+                # Dispatch must model the instantaneous power that the actuator
+                # will actually request, not a lower block-average for a partial
+                # final charge.  This keeps direct-solar slots conservative and
+                # prevents the battery plan from spending phantom surplus.
+                slot.ev_kw = slot.ev_power_target_kw
+                slot.ev_charge_source = planned_source[index]
         if "unanswered" in selection:
             action = "prompt_trip"
         elif required <= 0:
             action = "ready"
         else:
             action = "recommend_charge"
-        selected_times = sorted(item[0].start for item in selected)
+        selected_times = sorted(item.start for item in selected_slots)
         charge_start = selected_times[0] if selected_times else None
         charge_end = selected_times[-1] + timedelta(minutes=self.settings.slot_minutes) if selected_times else None
-        estimated_cost = sum(allocated * price for _, allocated, price in selected)
-        return target, required, action, charge_start, charge_end, estimated_cost
+        return _EVSchedule(
+            target_soc_pct=target,
+            required_kwh=required,
+            action=action,
+            charge_start=charge_start,
+            charge_end=charge_end,
+            estimated_cost=estimated_cost,
+            solar_energy_kwh=solar_energy,
+            fallback_energy_kwh=fallback_energy,
+        )
+
+    def _ev_power_for_amps(self, amps: int) -> float:
+        """Return measured-style three-phase input power for a current setting."""
+        clamped = max(0, min(self.settings.ev_max_charge_amps, int(amps)))
+        phase_power = (
+            clamped
+            * self.settings.ev_phase_count
+            * self.settings.ev_phase_voltage_v
+            / 1000
+        )
+        return min(self.settings.ev_max_charge_kw, phase_power)
+
+    def _ev_amps_for_power(self, power_kw: float, *, round_up: bool) -> int:
+        """Convert three-phase power to the integer current accepted by Tesla BLE."""
+        kw_per_amp = (
+            self.settings.ev_phase_count
+            * self.settings.ev_phase_voltage_v
+            / 1000
+        )
+        if power_kw <= 0 or kw_per_amp <= 0:
+            return 0
+        raw = min(self.settings.ev_max_charge_kw, power_kw) / kw_per_amp
+        amps = math.ceil(raw - 1e-9) if round_up else math.floor(raw + 1e-9)
+        return max(0, min(self.settings.ev_max_charge_amps, amps))
 
     def _dispatch(
         self,

@@ -124,3 +124,22 @@ def test_morning_target_does_not_destroy_value_on_poor_price_day(tmp_path):
     at_takeover = next(item for item in result if item.start + timedelta(minutes=30) >= morning)
 
     assert at_takeover.soc_end_pct > 10.0
+
+
+def test_terminal_reserve_does_not_create_false_import_tail(tmp_path):
+    opt = EnergyOptimizer(
+        Settings(data_dir=tmp_path, battery_capacity_kwh=47.0),
+        LearningState(tmp_path / "state.json"),
+    )
+    now = datetime(2026, 8, 11, 15, 0, tzinfo=BRISBANE)
+    plan_slots = slots(now, fit=0.0, buy=0.36, load=1.67, count=72)
+    for item in plan_slots[12:]:
+        item.import_price = 0.16
+    for item in plan_slots[32:50]:
+        item.solar_kw = item.solar_low_kw = item.solar_high_kw = 10.0
+
+    result = opt._dispatch(plan_slots, 100, 47, None, now + timedelta(hours=16))
+    imported_kwh = sum(max(0.0, item.site_grid_kw) * 0.5 for item in result)
+
+    assert imported_kwh < 0.25
+    assert 15.0 <= result[-1].soc_end_pct <= 60.0

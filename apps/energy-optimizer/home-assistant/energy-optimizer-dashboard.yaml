@@ -1,0 +1,392 @@
+title: Energy Optimizer
+views:
+  - title: Overview
+    path: overview
+    icon: mdi:home-lightning-bolt
+    badges: []
+    cards:
+      - type: markdown
+        entity_id:
+          - sensor.energy_optimizer_status
+          - sensor.energy_optimizer_plan
+          - input_text.energy_optimizer_actuator_status
+        content: |
+          {% set status = states('sensor.energy_optimizer_status') %}
+          {% set action = state_attr('sensor.energy_optimizer_status','action') or 'unknown' %}
+          {% set reason = state_attr('sensor.energy_optimizer_status','reason') or 'No reason published' %}
+          {% set until = state_attr('sensor.energy_optimizer_status','valid_until') %}
+          # ⚡ Energy Optimizer
+          ## {{ status | title }} · {{ action | replace('_',' ') | title }}
+
+          **{{ reason }}**
+
+          Plan **{{ states('sensor.energy_optimizer_plan') }}**  
+          Fresh until **{{ as_timestamp(until, 0) | timestamp_custom('%-I:%M %p') }}** ·
+          Actuator: **{{ states('input_text.energy_optimizer_actuator_status') }}**
+
+          {% if status != 'active' %}
+          > 🛡️ **Shadow mode:** recommendations are being recorded, but this optimiser
+          cannot operate the battery, hot water or car.
+          {% endif %}
+      - type: grid
+        columns: 4
+        square: false
+        cards:
+          - type: gauge
+            entity: sensor.saj_battery_1_soc
+            name: Home Battery
+            min: 0
+            max: 100
+            needle: true
+            severity:
+              green: 50
+              yellow: 10
+              red: 0
+          - type: tile
+            entity: sensor.energy_optimizer_battery_power_target
+            name: Planned Battery
+            icon: mdi:battery-sync
+          - type: tile
+            entity: sensor.energy_optimizer_site_export_target
+            name: Site Export Target
+            icon: mdi:transmission-tower-export
+          - type: tile
+            entity: sensor.energy_optimizer_pv_export
+            name: PV Export Decision
+            icon: mdi:solar-power-variant
+      - type: grid
+        columns: 4
+        square: false
+        cards:
+          - type: tile
+            entity: sensor.pv_power_mqtt_abs
+            name: Solar Now
+            icon: mdi:solar-power
+          - type: tile
+            entity: sensor.saj_home_load
+            name: Home Load
+            icon: mdi:home-lightning-bolt
+          - type: tile
+            entity: sensor.saj_ct_grid_power_total
+            name: Grid Power
+            icon: mdi:transmission-tower
+          - type: tile
+            entity: sensor.saj_battery_power_2
+            name: Battery Power
+            icon: mdi:battery-charging
+      - type: markdown
+        entity_id:
+          - sensor.energy_optimizer_plan
+        content: |
+          {% set p = states.sensor.energy_optimizer_plan.attributes %}
+          {% set grid = namespace(import_kwh=0) %}
+          {% for r in (p.intervals or []) %}
+          {% if r.site_grid_kw > 0 %}{% set grid.import_kwh = grid.import_kwh + r.site_grid_kw * 0.5 %}{% endif %}
+          {% endfor %}
+          ## Today’s plan
+
+          | Milestone | Time |
+          |:--|:--|
+          | Solar takes over | **{{ as_timestamp(p.morning_takeover, 0) | timestamp_custom('%a %-I:%M %p') }}** |
+          | Solar falls below load | **{{ as_timestamp(p.evening_crossover, 0) | timestamp_custom('%a %-I:%M %p') }}** |
+          | Forecast confidence | **{{ (p.confidence | float(0) * 100) | round(0) }}%** |
+          | Forecast grid import (36h) | **{{ grid.import_kwh | round(2) }} kWh / ${{ p.expected_cost | float(0) | round(2) }}** |
+          | Expected export revenue | **${{ p.expected_revenue | float(0) | round(2) }}** |
+          | Battery wear allowance | **${{ p.expected_wear_cost | float(0) | round(2) }}** |
+
+          {% if p.warnings %}
+          ### Current safeguards
+          {% for warning in p.warnings %}- {{ warning }}
+          {% endfor %}
+          {% endif %}
+      - type: history-graph
+        title: Power flow — last 12 hours
+        hours_to_show: 12
+        entities:
+          - entity: sensor.pv_power_mqtt_abs
+            name: Solar
+          - entity: sensor.saj_home_load
+            name: Home load
+          - entity: sensor.saj_ct_grid_power_total
+            name: Grid (+ import / − export)
+          - entity: sensor.saj_battery_power_2
+            name: Battery
+      - type: history-graph
+        title: Amber prices — last 12 hours
+        hours_to_show: 12
+        entities:
+          - entity: sensor.amber_express_trader_sheena_street_feed_in_price
+            name: Feed-in tariff
+          - entity: sensor.amber_express_trader_sheena_street_general_price
+            name: Import price
+      - type: entities
+        title: Flexible loads now
+        state_color: true
+        entities:
+          - entity: sensor.energy_optimizer_hot_water
+            name: Hot-water recommendation
+          - entity: sensor.hot_water_runtime_today
+            name: Hot-water runtime delivered
+          - entity: sensor.energy_optimizer_ev
+            name: EV recommendation
+          - entity: sensor.tesla_battery_level
+            name: Car SOC
+          - entity: binary_sensor.tesla_plugged_in
+            name: Car plugged in
+
+  - title: 36-hour plan
+    path: plan
+    icon: mdi:chart-timeline-variant-shimmer
+    badges: []
+    cards:
+      - type: markdown
+        entity_id:
+          - sensor.energy_optimizer_plan
+        content: |
+          {% set p = states.sensor.energy_optimizer_plan.attributes %}
+          # Rolling 36-hour dispatch plan
+
+          Generated **{{ as_timestamp(p.generated_at, 0) | timestamp_custom('%a %-I:%M:%S %p') }}** ·
+          valid until **{{ as_timestamp(p.valid_until, 0) | timestamp_custom('%-I:%M:%S %p') }}**
+
+          **Battery sign:** positive = discharge; negative = charge.  
+          **Grid sign:** positive = import; negative = export.
+
+          | Time | Solar | Load | Battery | Grid | SOC | FIT | Buy | HW | EV |
+          |:--|--:|--:|--:|--:|--:|--:|--:|:--:|:--:|
+          {% for r in (p.intervals or [])[:24] %}| {{ as_timestamp(r.start) | timestamp_custom('%a %H:%M') }} | {{ r.solar_kw | round(1) }} | {{ r.load_kw | round(1) }} | {{ r.battery_kw | round(1) }} | {{ r.site_grid_kw | round(1) }} | {{ r.soc_end_pct | round(0) }}% | {{ (r.export_price * 100) | round(1) }}¢ | {{ (r.import_price * 100) | round(1) }}¢ | {{ '●' if r.hot_water_kw > 0 else '–' }} | {{ '●' if r.ev_kw > 0 else '–' }} |
+          {% endfor %}
+      - type: markdown
+        entity_id:
+          - sensor.energy_optimizer_plan
+        content: |
+          {% set p = states.sensor.energy_optimizer_plan.attributes %}
+          ## Following 24 hours
+
+          | Time | Solar | Low solar | Load | Battery | Grid | SOC | FIT | Buy |
+          |:--|--:|--:|--:|--:|--:|--:|--:|--:|
+          {% for r in (p.intervals or [])[24:] %}| {{ as_timestamp(r.start) | timestamp_custom('%a %H:%M') }} | {{ r.solar_kw | round(1) }} | {{ r.solar_low_kw | round(1) }} | {{ r.load_kw | round(1) }} | {{ r.battery_kw | round(1) }} | {{ r.site_grid_kw | round(1) }} | {{ r.soc_end_pct | round(0) }}% | {{ (r.export_price * 100) | round(1) }}¢ | {{ (r.import_price * 100) | round(1) }}¢ |
+          {% endfor %}
+      - type: grid
+        columns: 3
+        square: false
+        cards:
+          - type: tile
+            entity: sensor.solcast_pv_forecast_forecast_remaining_today
+            name: Solar Remaining Today
+            icon: mdi:weather-sunset-up
+          - type: tile
+            entity: sensor.solcast_pv_forecast_forecast_today
+            name: Solar Forecast Today
+            icon: mdi:solar-power
+          - type: tile
+            entity: sensor.solcast_pv_forecast_forecast_tomorrow
+            name: Solar Forecast Tomorrow
+            icon: mdi:weather-partly-cloudy
+      - type: entities
+        title: Plan economics and outputs
+        entities:
+          - entity: sensor.energy_optimizer_status
+            name: Mode / health
+          - entity: sensor.energy_optimizer_battery_power_target
+            name: Battery target
+          - entity: sensor.energy_optimizer_site_export_target
+            name: Site export target
+          - entity: sensor.energy_optimizer_pv_export
+            name: PV export command
+          - entity: input_text.energy_optimizer_actuator_status
+            name: Node-RED decision
+
+  - title: Hot water & EV
+    path: flexible-loads
+    icon: mdi:water-boiler-auto
+    badges: []
+    cards:
+      - type: markdown
+        entity_id:
+          - sensor.energy_optimizer_hot_water
+          - sensor.energy_optimizer_ev
+          - sensor.energy_optimizer_plan
+        content: |
+          {% set p = states.sensor.energy_optimizer_plan.attributes %}
+          # Flexible loads
+
+          ## 🚿 Hot water
+          Recommendation: **{{ states('sensor.energy_optimizer_hot_water') | title }}**  
+          Runtime delivered today: **{{ states('sensor.hot_water_runtime_today') }} h / 3 h**  
+          Planned command: **{{ p.hot_water_command | default('unknown') | title }}**  
+          Deadline: **before solar crossover, never later than 4:00 PM**
+
+          ## 🚗 Car
+          Recommendation: **{{ states('sensor.energy_optimizer_ev') | replace('_',' ') | title }}**  
+          Current SOC: **{{ states('sensor.tesla_battery_level') }}%** · charge limit: **{{ states('sensor.tesla_charge_limit_soc') }}%**  
+          Required energy: **{{ p.ev_required_kwh | float(0) | round(1) }} kWh** · target SOC: **{{ p.ev_target_soc_pct | float(0) | round(0) }}%**  
+          Best window: **{{ as_timestamp(p.ev_charge_start, 0) | timestamp_custom('%a %-I:%M %p') }} – {{ as_timestamp(p.ev_charge_end, 0) | timestamp_custom('%a %-I:%M %p') }}**  
+          Estimated cost: **${{ p.ev_estimated_cost | float(0) | round(2) }}**
+      - type: entities
+        title: Tomorrow’s EV requirement
+        state_color: true
+        entities:
+          - entity: input_select.energy_optimizer_ev_trip
+            name: Trip distance
+          - entity: input_number.energy_optimizer_ev_custom_km
+            name: Custom distance
+          - entity: input_datetime.energy_optimizer_ev_departure
+            name: Departure
+          - entity: sensor.tesla_battery_level
+            name: Current SOC
+          - entity: sensor.tesla_charge_limit_soc
+            name: Configured limit
+          - entity: binary_sensor.tesla_plugged_in
+            name: Plugged in
+          - entity: device_tracker.tesla_location_2
+            name: Location
+      - type: grid
+        columns: 3
+        square: false
+        cards:
+          - type: tile
+            entity: sensor.energy_optimizer_hot_water
+            name: HW Plan
+            icon: mdi:water-boiler
+          - type: tile
+            entity: sensor.hot_water_runtime_today
+            name: Delivered Today
+            icon: mdi:timer-check
+          - type: tile
+            entity: switch.hot_water
+            name: Element State
+            icon: mdi:water-boiler
+      - type: history-graph
+        title: Hot water — last 24 hours
+        hours_to_show: 24
+        entities:
+          - entity: sensor.hot_water_power
+            name: Element power
+          - entity: sensor.hot_water_runtime_today
+            name: Runtime
+      - type: history-graph
+        title: EV — last 24 hours
+        hours_to_show: 24
+        entities:
+          - entity: sensor.tesla_battery_level
+            name: Car SOC
+          - entity: sensor.tesla_charging_power
+            name: Charging power
+      - type: entities
+        title: EV control status
+        entities:
+          - entity: input_boolean.energy_optimizer_ev_auto
+            name: Automatic charging gate
+          - entity: switch.tesla_ble_039d9c_charger
+            name: Local charger command
+          - entity: number.tesla_ble_039d9c_charging_amps
+            name: Charge current
+
+  - title: Safety & controls
+    path: controls
+    icon: mdi:shield-lock
+    badges: []
+    cards:
+      - type: markdown
+        entity_id:
+          - input_select.energy_optimizer_mode
+          - input_boolean.energy_optimizer_rollout_approved
+          - input_boolean.energy_optimizer_battery_control
+        content: |
+          # 🛡️ Safety and rollout controls
+
+          > **Do not enable rollout approval or battery control during the seven-day shadow period.**  
+          > Before first activation, the legacy FIT/fixed-reserve battery authority must be disabled so only one controller can command the inverter.
+
+          Current mode: **{{ states('input_select.energy_optimizer_mode') }}**  
+          Rollout approval: **{{ states('input_boolean.energy_optimizer_rollout_approved') }}**  
+          Battery control: **{{ states('input_boolean.energy_optimizer_battery_control') }}**  
+          Manual override: **{{ states('input_boolean.energy_optimizer_manual_override') }}**
+      - type: entities
+        title: Master safety gates
+        state_color: true
+        entities:
+          - entity: input_boolean.energy_optimizer_manual_override
+            name: Immediate manual override
+          - entity: input_select.energy_optimizer_mode
+            name: Optimizer mode
+          - entity: input_boolean.energy_optimizer_rollout_approved
+            name: Rollout approved
+          - entity: input_boolean.energy_optimizer_battery_control
+            name: Battery actuation
+          - entity: input_boolean.energy_optimizer_hot_water_control
+            name: Hot-water actuation
+          - entity: input_boolean.energy_optimizer_ev_auto
+            name: EV automatic actuation
+          - entity: input_number.energy_optimizer_max_discharge_kw
+            name: Discharge safety cap
+          - entity: input_datetime.energy_optimizer_shadow_started
+            name: Shadow period began
+      - type: entities
+        title: Actuator and inverter feedback
+        state_color: true
+        entities:
+          - entity: input_text.energy_optimizer_actuator_status
+            name: Guarded actuator status
+          - entity: input_boolean.battery_charge
+            name: Legacy forced charge
+          - entity: input_boolean.battery_discharge
+            name: Legacy forced discharge
+          - entity: input_boolean.battery_pv_charge
+            name: PV charging enabled
+          - entity: input_boolean.export_power
+            name: Export enabled
+          - entity: sensor.saj_battery_1_soc
+            name: Live SOC
+          - entity: sensor.saj_battery_charge_current_set
+            name: SAJ charge current
+          - entity: sensor.saj_battery_discharge_current_set
+            name: SAJ discharge current
+          - entity: sensor.saj_battery_discharge_soc_lower_limit
+            name: SAJ hard floor
+      - type: entities
+        title: Optimizer automations
+        state_color: true
+        entities:
+          - automation.energy_optimizer_hot_water_plan_actuator
+          - automation.energy_optimizer_hot_water_deadline_fallback
+          - automation.energy_optimizer_ev_daily_trip_prompt
+          - automation.energy_optimizer_ev_trip_response
+          - automation.energy_optimizer_ev_cheap_window
+          - automation.energy_optimizer_ev_auto_actuator
+      - type: markdown
+        entity_id:
+          - sensor.energy_optimizer_status
+          - sensor.energy_optimizer_plan
+        content: |
+          {% set s = states.sensor.energy_optimizer_status.attributes %}
+          {% set p = states.sensor.energy_optimizer_plan.attributes %}
+          ## Diagnostics
+
+          - Plan ID: `{{ p.plan_id }}`
+          - Generated: {{ p.generated_at }}
+          - Valid until: {{ p.valid_until }}
+          - Schema: {{ p.schema_version }}
+          - Actuation allowed by plan: **{{ p.actuation_allowed }}**
+          - Confidence: {{ (p.confidence | float(0) * 100) | round(1) }}%
+          - Current action: `{{ p.action }}`
+          - Battery target: {{ p.battery_power_target_kw }} kW
+          - Site export target: {{ p.site_export_target_kw }} kW
+          - Curtailment target: {{ p.pv_curtailment_target_kw }} kW
+
+          {% if s.warnings %}
+          ### Warnings
+          {% for warning in s.warnings %}- {{ warning }}
+          {% endfor %}
+          {% else %}
+          ✅ No optimiser warning is currently published.
+          {% endif %}
+      - type: history-graph
+        title: Optimizer commands — last 24 hours
+        hours_to_show: 24
+        entities:
+          - entity: sensor.energy_optimizer_battery_power_target
+            name: Battery target
+          - entity: sensor.energy_optimizer_site_export_target
+            name: Export target

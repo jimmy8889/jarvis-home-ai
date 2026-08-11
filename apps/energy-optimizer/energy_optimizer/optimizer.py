@@ -425,9 +425,45 @@ class EnergyOptimizer:
             costs = next_costs
             parents.append(next_parents)
 
-        maximum_import = max((slot.import_price for slot in slots), default=0.20)
-        terminal_value = max(0.0, min(0.30, maximum_import) - self.settings.battery_wear_per_kwh) * self.settings.battery_discharge_efficiency
-        final_level = min(costs, key=lambda level: costs[level] - energy(level) * terminal_value)
+        # End the rolling horizon with only the energy needed to reach the next
+        # solar takeover. Valuing every terminal kWh at the highest price seen
+        # anywhere in the horizon caused a false tail: the model imported cheap
+        # power on the second night while preserving an 80%+ battery for value
+        # beyond the 36-hour window. The next five-minute plan would never
+        # actually make that trade, but it made the published forecast misleading.
+        horizon_end = slots[-1].start + timedelta(hours=slots[-1].duration_h)
+        horizon_hours = (horizon_end - slots[0].start).total_seconds() / 3600
+        if horizon_hours >= 24:
+            takeover_clock = morning.timetz().replace(tzinfo=None) if morning else time(7, 0)
+            terminal_takeover = datetime.combine(horizon_end.date(), takeover_clock, self.timezone)
+            if terminal_takeover <= horizon_end:
+                terminal_takeover += timedelta(days=1)
+            tail_slots = slots[-min(6, len(slots)):]
+            tail_deficit_kw = sum(
+                max(0.0, slot.load_kw + slot.hot_water_kw + slot.ev_kw - slot.solar_low_kw)
+                for slot in tail_slots
+            ) / len(tail_slots)
+            terminal_gap_h = max(0.0, (terminal_takeover - horizon_end).total_seconds() / 3600)
+            terminal_reserve = min(
+                max_energy,
+                morning_target
+                + tail_deficit_kw * terminal_gap_h / self.settings.battery_discharge_efficiency,
+            )
+            terminal_levels = [
+                level for level in costs
+                if energy(level) + step >= terminal_reserve
+            ]
+            final_level = min(terminal_levels or list(costs), key=costs.__getitem__)
+        else:
+            maximum_import = max((slot.import_price for slot in slots), default=0.20)
+            terminal_value = max(
+                0.0,
+                min(0.30, maximum_import) - self.settings.battery_wear_per_kwh,
+            ) * self.settings.battery_discharge_efficiency
+            final_level = min(
+                costs,
+                key=lambda level: costs[level] - energy(level) * terminal_value,
+            )
         levels = [final_level]
         transitions: list[_Transition] = []
         for index in range(len(slots) - 1, -1, -1):

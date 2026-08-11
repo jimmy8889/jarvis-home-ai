@@ -5,6 +5,9 @@ Local, shadow-first, forecast-aware dispatch planning for Amber prices, SAJ batt
 ## Current rollout state
 
 - Deployed on `10.0.1.204` as the isolated `energy-optimizer` Docker service.
+- Home Assistant exposes the versioned four-view dashboard at
+  `/energy-optimizer-dashboard/overview` using
+  `home-assistant/energy-optimizer-dashboard.yaml`.
 - Replans a timezone-aware 36-hour horizon every five minutes and journals every plan under `/opt/energy-optimizer/data/plans`.
 - Mode is `Shadow`; rollout approval, battery control, hot-water control and EV auto-control all default off.
 - The guarded Node-RED actuator is installed as a separate flow and reports its decision to `input_text.energy_optimizer_actuator_status`.

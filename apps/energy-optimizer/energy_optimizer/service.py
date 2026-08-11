@@ -18,6 +18,28 @@ from .state import LearningState
 LOG = logging.getLogger(__name__)
 
 
+def dashboard_plan_attributes(plan: Plan) -> dict[str, Any]:
+    """Return the full dispatch horizon in a compact Home Assistant payload."""
+    attributes = plan.to_dict(interval_limit=0)
+    attributes["intervals"] = [
+        {
+            "start": item.start.isoformat(),
+            "solar_kw": item.solar_kw,
+            "solar_low_kw": item.solar_low_kw,
+            "load_kw": item.load_kw,
+            "hot_water_kw": item.hot_water_kw,
+            "ev_kw": item.ev_kw,
+            "import_price": item.import_price,
+            "export_price": item.export_price,
+            "battery_kw": item.battery_kw,
+            "site_grid_kw": item.site_grid_kw,
+            "soc_end_pct": item.soc_end_pct,
+        }
+        for item in plan.intervals
+    ]
+    return attributes
+
+
 class Coordinator:
     def __init__(self, settings: Settings):
         self.settings = settings
@@ -82,7 +104,7 @@ class Coordinator:
             handle.write(json.dumps(full, separators=(",", ":")) + "\n")
 
     async def _publish_plan(self, plan: Plan) -> None:
-        summary = plan.to_dict(interval_limit=12)
+        summary = dashboard_plan_attributes(plan)
         common = {"plan_id": plan.plan_id, "generated_at": plan.generated_at.isoformat(), "valid_until": plan.valid_until.isoformat()}
         publishes = [
             self.ha.publish_state("sensor.energy_optimizer_status", plan.mode, {

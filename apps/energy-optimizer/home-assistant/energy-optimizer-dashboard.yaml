@@ -404,7 +404,8 @@ views:
           - Confidence: {{ (p.confidence | float(0) * 100) | round(1) }}%
           - Current action: `{{ p.action }}`
           - Replan trigger: `{{ p.trigger | default('periodic') }}`
-          - Price-to-plan latency: **{{ p.decision_latency_ms | float(0) | round(0) }} ms**
+          - Current plan calculation latency: **{{ p.decision_latency_ms | float(0) | round(0) }} ms**
+          - Last fast Amber response: **{{ p.last_fast_dispatch_latency_ms | float(0) | round(0) }} ms**
           - Fast current-interval dispatch: **{{ p.fast_dispatch | default(false) }}**
           - Full horizon recalculation pending: **{{ p.full_optimisation_pending | default(false) }}**
           - Battery target: {{ p.battery_power_target_kw }} kW

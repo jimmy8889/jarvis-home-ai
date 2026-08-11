@@ -74,6 +74,7 @@ class Coordinator:
         self.last_error: str | None = None
         self.last_trigger: str | None = None
         self.last_decision_latency_ms: float | None = None
+        self.last_fast_dispatch_latency_ms: float | None = None
         self.last_cycle_ms: float | None = None
         self.last_price_event_at: datetime | None = None
         self.last_control_event_at: datetime | None = None
@@ -172,6 +173,11 @@ class Coordinator:
             "trigger": trigger,
             "trigger_received_at": trigger_received_at.isoformat() if trigger_received_at else None,
             "decision_latency_ms": round(decision_latency_ms, 1),
+            "last_fast_dispatch_latency_ms": (
+                round(self.last_fast_dispatch_latency_ms, 1)
+                if self.last_fast_dispatch_latency_ms is not None
+                else None
+            ),
         }
         published = await self._publish_plan(
             plan,
@@ -401,6 +407,7 @@ class Coordinator:
                         "trigger": f"fast_state_changed:{entity_id}",
                         "trigger_received_at": received_at.isoformat(),
                         "decision_latency_ms": round(decision_latency_ms, 1),
+                        "last_fast_dispatch_latency_ms": round(decision_latency_ms, 1),
                         "fast_dispatch": True,
                         "full_optimisation_pending": True,
                     },
@@ -415,6 +422,7 @@ class Coordinator:
                 self.fast_dispatch_error = None
                 self.last_trigger = f"fast_state_changed:{entity_id}"
                 self.last_decision_latency_ms = decision_latency_ms
+                self.last_fast_dispatch_latency_ms = decision_latency_ms
                 self.last_cycle_ms = (
                     asyncio.get_running_loop().time() - received_monotonic
                 ) * 1000
@@ -579,6 +587,7 @@ class Coordinator:
             "mode": self.last_plan.mode if self.last_plan else None,
             "last_trigger": self.last_trigger,
             "last_decision_latency_ms": round(self.last_decision_latency_ms, 1) if self.last_decision_latency_ms is not None else None,
+            "last_fast_dispatch_latency_ms": round(self.last_fast_dispatch_latency_ms, 1) if self.last_fast_dispatch_latency_ms is not None else None,
             "last_cycle_ms": round(self.last_cycle_ms, 1) if self.last_cycle_ms is not None else None,
             "last_price_event_at": self.last_price_event_at.isoformat() if self.last_price_event_at else None,
             "last_control_event_at": self.last_control_event_at.isoformat() if self.last_control_event_at else None,

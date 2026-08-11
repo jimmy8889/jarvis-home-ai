@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pilot-energy-optimizer"
+version = "0.1.0"
+description = "Forecast-aware, shadow-first home energy dispatch planner"
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi>=0.116,<1",
+  "httpx>=0.28,<1",
+  "uvicorn>=0.35,<1",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=8.3,<9"]
+
+[project.scripts]
+pilot-energy-optimizer = "energy_optimizer.main:main"
+pilot-energy-replay = "energy_optimizer.replay:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["energy_optimizer*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

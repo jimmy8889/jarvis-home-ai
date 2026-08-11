@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+target_host="root@10.0.1.204"
+target_root="/opt/jarvis-home-ai"
+apply=false
+
+while (($#)); do
+  case "$1" in
+    --host) target_host="$2"; shift 2 ;;
+    --path) target_root="$2"; shift 2 ;;
+    --apply) apply=true; shift ;;
+    *) echo "Unknown argument: $1" >&2; exit 2 ;;
+  esac
+done
+
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+repo_root="$(cd "$script_dir/../.." && pwd)"
+rsync_args=(
+  --archive
+  --delete
+  --itemize-changes
+  --exclude .venv/
+  --exclude .pytest_cache/
+  --exclude __pycache__/
+  --exclude '*.egg-info/'
+  --exclude '*.pyc'
+)
+if [[ "$apply" != true ]]; then
+  rsync_args+=(--dry-run)
+fi
+
+ssh -o BatchMode=yes "$target_host" "install -d -m 0755 '$target_root/apps/energy-optimizer' '$target_root/infra/energy-optimizer'; install -d -o 10003 -g 10003 -m 0750 /opt/energy-optimizer/data; install -d -o 10003 -g 10003 -m 0700 /opt/energy-optimizer/secrets; install -o 10003 -g 10003 -m 0400 '$target_root/infra/secrets/home_assistant_token' /opt/energy-optimizer/secrets/home_assistant_token"
+rsync "${rsync_args[@]}" "$repo_root/apps/energy-optimizer/" "$target_host:$target_root/apps/energy-optimizer/"
+rsync "${rsync_args[@]}" "$repo_root/infra/energy-optimizer/" "$target_host:$target_root/infra/energy-optimizer/"
+
+if [[ "$apply" == true ]]; then
+  ssh -o BatchMode=yes "$target_host" "cd '$target_root' && docker compose -f infra/energy-optimizer/docker-compose.yml up -d --build"
+else
+  echo "Dry run only. Re-run with --apply to sync and deploy."
+fi

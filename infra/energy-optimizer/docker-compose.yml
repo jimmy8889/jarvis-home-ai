@@ -1,0 +1,52 @@
+services:
+  energy-optimizer:
+    image: "jarvis-home-ai/energy-optimizer:${ENERGY_OPTIMIZER_IMAGE_TAG:-local}"
+    build:
+      context: ../../apps/energy-optimizer
+      dockerfile: Dockerfile
+    container_name: energy-optimizer
+    restart: unless-stopped
+    init: true
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=32m
+    ports:
+      - "127.0.0.1:${ENERGY_OPTIMIZER_PORT:-8785}:8785"
+    environment:
+      ENERGY_OPTIMIZER_HA_URL: "${ENERGY_OPTIMIZER_HA_URL:-http://10.0.2.72:8123}"
+      ENERGY_OPTIMIZER_HA_TOKEN_FILE: /run/secrets/home_assistant_token
+      ENERGY_OPTIMIZER_DATA_DIR: /data
+      ENERGY_OPTIMIZER_INTERVAL_SECONDS: "300"
+      ENERGY_OPTIMIZER_HORIZON_HOURS: "36"
+      ENERGY_OPTIMIZER_BATTERY_WEAR_PER_KWH: "0.08"
+      ENERGY_OPTIMIZER_GRID_CHARGE_UNCERTAINTY_PER_KWH: "0.02"
+    secrets:
+      - home_assistant_token
+    volumes:
+      - /opt/energy-optimizer/data:/data
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - >-
+          import urllib.request;
+          urllib.request.urlopen('http://127.0.0.1:8785/readyz', timeout=3)
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
+secrets:
+  home_assistant_token:
+    file: /opt/energy-optimizer/secrets/home_assistant_token

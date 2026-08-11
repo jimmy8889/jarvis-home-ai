@@ -9,7 +9,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from .config import ENTITY, Settings
-from .models import DispatchInterval, Plan, Slot
+from .models import DispatchInterval, Plan, Slot, TelemetryHealth
 from .parsing import active_price_pair, build_slots, numeric_state, parse_datetime, state_is_on
 from .state import LearningState
 
@@ -43,7 +43,13 @@ class EnergyOptimizer:
         self.learning = learning
         self.timezone = ZoneInfo(settings.timezone)
 
-    def build_plan(self, raw_states: list[dict[str, Any]], now: datetime | None = None) -> Plan:
+    def build_plan(
+        self,
+        raw_states: list[dict[str, Any]],
+        now: datetime | None = None,
+        *,
+        telemetry_health: TelemetryHealth | None = None,
+    ) -> Plan:
         now = (now or datetime.now(self.timezone)).astimezone(self.timezone)
         states = {item.get("entity_id", ""): item for item in raw_states}
         self._update_learning(states, now)
@@ -71,7 +77,8 @@ class EnergyOptimizer:
         self._schedule_hot_water(slots, states, now, evening)
         ev = self._schedule_ev(slots, states, now)
 
-        soc = numeric_state(states, ENTITY["battery_soc"], 50.0)
+        raw_soc = numeric_state(states, ENTITY["battery_soc"], float("nan"))
+        soc = raw_soc if math.isfinite(raw_soc) and 0.0 <= raw_soc <= 100.0 else 50.0
         capacity = numeric_state(states, ENTITY["battery_usable"], self.settings.battery_capacity_kwh)
         capacity = min(60.0, max(35.0, capacity))
         intervals = self._dispatch(slots, soc, capacity, evening, morning)
@@ -102,14 +109,18 @@ class EnergyOptimizer:
         battery_enabled = state_is_on(states, ENTITY["battery_control"])
         rollout_approved = state_is_on(states, ENTITY["rollout_approved"])
         current_price_valid = bool(slots) and slots[0].price_source == "amber_live"
+        telemetry_issue = self._actuation_telemetry_issue(states, telemetry_health)
         actuation_allowed = (
             mode == "active"
             and battery_enabled
             and rollout_approved
             and not manual_override
             and current_price_valid
+            and telemetry_issue is None
         )
         warnings: list[str] = []
+        if telemetry_issue:
+            warnings.append(f"{telemetry_issue}; battery actuation is disabled")
         if not current_price_valid:
             warnings.append(
                 "Current Amber five-minute FIT/import interval is invalid; battery actuation is disabled"
@@ -191,8 +202,7 @@ class EnergyOptimizer:
         raw_states: list[dict[str, Any]],
         *,
         now: datetime | None = None,
-        state_age_seconds: float = 0.0,
-        soc_age_seconds: float = 0.0,
+        telemetry_health: TelemetryHealth | None = None,
         force_safe_reason: str | None = None,
     ) -> Plan:
         """Refresh only the live five-minute command from a retained full plan.
@@ -225,15 +235,15 @@ class EnergyOptimizer:
             self.settings.amber_interval_minutes,
         )
         fit_live, import_live = active_pair if active_pair else (None, None)
-        safe_reason = force_safe_reason
-        if plan_age_seconds > self.settings.fast_dispatch_plan_max_age_seconds:
-            safe_reason = "cached horizon is stale"
-        elif state_age_seconds > self.settings.fast_dispatch_state_max_age_seconds:
-            safe_reason = "cached safety state is stale"
-        elif not fit_live or not import_live:
-            safe_reason = "live Amber interval is unavailable or stale"
-        elif not gates_allowed or not base_plan.actuation_allowed:
-            safe_reason = "production battery gates are not all enabled"
+        telemetry_issue = self._actuation_telemetry_issue(states, telemetry_health)
+        safe_reason = force_safe_reason or telemetry_issue
+        if safe_reason is None:
+            if plan_age_seconds > self.settings.fast_dispatch_plan_max_age_seconds:
+                safe_reason = "cached horizon is stale"
+            elif not fit_live or not import_live:
+                safe_reason = "live Amber interval is unavailable or stale"
+            elif not gates_allowed or not base_plan.actuation_allowed:
+                safe_reason = "production battery gates are not all enabled"
 
         active_end = min(
             fit_live[2] if fit_live else now + timedelta(minutes=self.settings.amber_interval_minutes),
@@ -262,11 +272,18 @@ class EnergyOptimizer:
         if not math.isfinite(live_pv_w) or not math.isfinite(live_load_w):
             safe_reason = "live PV or household load telemetry is unavailable"
 
-        # A stale SOC snapshot is reduced by the maximum energy the inverter
-        # could have discharged since it was observed.  This makes the fast
-        # command conservative even if telemetry pauses between price events.
+        # Reduce SOC by the maximum energy the inverter could have discharged
+        # since the last same-source heartbeat.  This remains conservative
+        # without mistaking an unchanged SOC value for a failed integration.
         unobserved_discharge_kwh = (
-            max(0.0, soc_age_seconds)
+            max(
+                0.0,
+                telemetry_health.soc_source_heartbeat_age_seconds
+                if telemetry_health
+                and telemetry_health.soc_source_heartbeat_age_seconds is not None
+                and math.isfinite(telemetry_health.soc_source_heartbeat_age_seconds)
+                else self.settings.fast_dispatch_state_max_age_seconds,
+            )
             / 3600
             * self.settings.battery_max_discharge_kw
             / self.settings.battery_discharge_efficiency
@@ -300,11 +317,28 @@ class EnergyOptimizer:
             self.settings.battery_max_discharge_kw,
             available_output_kwh / duration_h,
         )
-        future_allocated_values = [
-            max(item.export_price, item.import_price)
-            for item in reserve_intervals
-            if item.start >= active_end and item.battery_kw > 0.5
-        ]
+        future_allocated_values: list[float] = []
+        for item in reserve_intervals:
+            if item.start < active_end or item.battery_kw <= 0.5:
+                continue
+            # Reconstruct demand before battery dispatch.  The household
+            # portion of future battery output avoids the import tariff; only
+            # output beyond that demand earns FIT.  Taking max(import, FIT) for
+            # every future kW can materially overstate its retained value when
+            # the planned interval is already exporting.
+            pre_battery_grid_kw = item.site_grid_kw + item.battery_kw
+            future_household_kw = min(
+                item.battery_kw,
+                max(0.0, pre_battery_grid_kw),
+            )
+            future_export_kw = max(
+                0.0,
+                item.battery_kw - future_household_kw,
+            )
+            if future_household_kw > 1e-6:
+                future_allocated_values.append(item.import_price)
+            if future_export_kw > 1e-6:
+                future_allocated_values.append(item.export_price)
         retained_value = max(
             self.settings.battery_wear_per_kwh,
             max(future_allocated_values, default=0.0),
@@ -329,21 +363,52 @@ class EnergyOptimizer:
             reason = f"Immediate negative-FIT stop/curtail at ${fit:.3f}/kWh"
         elif safe_reason is None:
             economically_positive = fit > self.settings.battery_wear_per_kwh
-            exceptional_now = fit >= (
+            exceptional_export_now = fit >= (
+                retained_value + self.settings.grid_charge_uncertainty_per_kwh
+            )
+            exceptional_household_now = import_price >= (
                 retained_value + self.settings.grid_charge_uncertainty_per_kwh
             )
             planned_discharge_kw = max(0.0, matching.battery_kw)
-            if economically_positive:
-                battery_kw = min(available_discharge_kw, planned_discharge_kw)
-                if exceptional_now:
-                    battery_kw = available_discharge_kw
-            elif import_price > self.settings.battery_wear_per_kwh:
-                # A low FIT must never inherit an old export command.  It may
-                # retain only enough planned discharge to cover live demand.
+            if exceptional_export_now:
+                battery_kw = available_discharge_kw
+            else:
+                # A live price revision must revalue the two marginal uses of
+                # cached discharge independently.  Supplying the house avoids
+                # the live import price; exporting earns the live FIT.  Retain
+                # either portion only when its current value both covers wear
+                # and is at least as valuable as battery energy already
+                # allocated to a later interval.  This prevents a formerly
+                # profitable cached export from consuming energy reserved for
+                # a subsequent higher-price window after FIT moves down.
+                planned_household_kw = min(
+                    planned_discharge_kw,
+                    household_deficit_kw,
+                )
+                planned_export_kw = max(
+                    0.0,
+                    planned_discharge_kw - planned_household_kw,
+                )
+                household_value_positive = (
+                    import_price > self.settings.battery_wear_per_kwh
+                    and import_price >= retained_value
+                )
+                export_value_positive = (
+                    economically_positive and fit >= retained_value
+                )
+                household_kw = (
+                    min(available_discharge_kw, household_deficit_kw)
+                    if exceptional_household_now
+                    else (
+                        planned_household_kw
+                        if household_value_positive
+                        else 0.0
+                    )
+                )
                 battery_kw = min(
                     available_discharge_kw,
-                    household_deficit_kw,
-                    planned_discharge_kw,
+                    household_kw
+                    + (planned_export_kw if export_value_positive else 0.0),
                 )
             predicted_grid_kw = live_load_kw - live_pv_kw - battery_kw
             site_export_kw = max(0.0, -predicted_grid_kw)
@@ -423,6 +488,49 @@ class EnergyOptimizer:
             warnings=warnings,
             intervals=[fast_interval, *future_intervals],
         )
+
+    def _actuation_telemetry_issue(
+        self,
+        states: dict[str, dict[str, Any]],
+        health: TelemetryHealth | None,
+    ) -> str | None:
+        """Return the first fail-closed source-health or value error."""
+        soc = numeric_state(states, ENTITY["battery_soc"], float("nan"))
+        if not math.isfinite(soc) or not 0.0 <= soc <= 100.0:
+            return "Battery SOC is unavailable or outside 0-100%"
+
+        heartbeat = numeric_state(
+            states,
+            ENTITY["battery_soc_heartbeat"],
+            float("nan"),
+        )
+        if not math.isfinite(heartbeat):
+            return "SAJ SOC-source heartbeat is unavailable"
+
+        pv_power = numeric_state(states, ENTITY["pv_power"], float("nan"))
+        load_power = numeric_state(states, ENTITY["home_load"], float("nan"))
+        if not math.isfinite(pv_power):
+            return "Live PV telemetry is unavailable"
+        if not 0.0 <= pv_power <= 100_000.0:
+            return "Live PV telemetry is outside 0-100 kW"
+        if not math.isfinite(load_power):
+            return "Live household-load telemetry is unavailable"
+        if not 0.0 <= load_power <= 100_000.0:
+            return "Live household-load telemetry is outside 0-100 kW"
+
+        if health is None:
+            return "Actuation telemetry freshness is unavailable"
+        freshness = (
+            ("SAJ SOC-source heartbeat", health.soc_source_heartbeat_age_seconds),
+            ("Live PV telemetry", health.pv_age_seconds),
+            ("Live household-load telemetry", health.load_age_seconds),
+        )
+        for label, age_seconds in freshness:
+            if age_seconds is None or not math.isfinite(age_seconds):
+                return f"{label} freshness is unavailable"
+            if age_seconds > self.settings.fast_dispatch_state_max_age_seconds:
+                return f"{label} is stale ({age_seconds:.0f}s old)"
+        return None
 
     def _update_learning(self, states: dict[str, dict[str, Any]], now: datetime) -> None:
         home = numeric_state(states, ENTITY["home_load"], 1670.0) / 1000

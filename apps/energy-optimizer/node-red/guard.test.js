@@ -3,7 +3,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
-const {evaluateFeedback, validatePlan} = require("./guard.js");
+const {validatePlan} = require("./guard.js");
 
 const nodeRedFlow = JSON.parse(fs.readFileSync(`${__dirname}/energy-optimizer-flow.json`, "utf8"));
 
@@ -18,6 +18,18 @@ function upstreamNodeIds(targetId) {
     .sort();
 }
 
+function runFeedback(command, states, nowMs = Date.parse("2026-08-11T02:00:00Z"), lastCommand = null) {
+  const run = new Function("msg", "flow", "global", flowNode("eop_feedback_confirm_002").func);
+  const stampedCommand = {issuedAtMs: nowMs - 12_000, ...command};
+  const stampedLastCommand = lastCommand === null
+    ? stampedCommand
+    : {issuedAtMs: nowMs - 1_000, ...lastCommand};
+  const context = new Map([["energyOptimizerLastCommand", stampedLastCommand]]);
+  const flow = {get: (key) => context.get(key), set: (key, value) => context.set(key, value)};
+  const outputs = run({command: stampedCommand, nowMs}, flow, {get: () => ({homeAssistant: {states}})});
+  return {command: stampedCommand, context, lastCommand: stampedLastCommand, outputs};
+}
+
 function input(overrides = {}) {
   const now = Date.parse("2026-08-11T02:00:00Z");
   return {
@@ -30,7 +42,7 @@ function input(overrides = {}) {
     minSocPct: 5,
     pvPowerKw: 8,
     homeLoadKw: 3,
-    socMeasuredAtMs: now - 60 * 1000,
+    socHeartbeatMeasuredAtMs: now - 60 * 1000,
     pvMeasuredAtMs: now - 60 * 1000,
     homeLoadMeasuredAtMs: now - 60 * 1000,
     planEntity: {state: "plan", attributes: {
@@ -137,21 +149,22 @@ test("unavailable live PV, load, SOC or floor rejects the plan", () => {
 
 test("telemetry older than 330 seconds or missing measurement time safe-stops", () => {
   const now = Date.parse("2026-08-11T02:00:00Z");
-  for (const timestampField of ["socMeasuredAtMs", "pvMeasuredAtMs", "homeLoadMeasuredAtMs"]) {
+  for (const timestampField of ["socHeartbeatMeasuredAtMs", "pvMeasuredAtMs", "homeLoadMeasuredAtMs"]) {
     const stale = validatePlan(input({[timestampField]: now - 330001}));
     assert.equal(stale.status, "rejected_telemetry_stale", timestampField);
     assert.equal(stale.safeStop, true, timestampField);
     assert.equal(stale.stopForced, true, timestampField);
   }
-  assert.equal(validatePlan(input({socMeasuredAtMs: null})).status, "rejected_telemetry_timestamp");
+  assert.equal(validatePlan(input({socHeartbeatMeasuredAtMs: null})).status, "rejected_telemetry_timestamp");
   assert.equal(validatePlan(input({pvMeasuredAtMs: "unknown"})).status, "rejected_telemetry_timestamp");
 
   const exactBoundary = validatePlan(input({
-    socMeasuredAtMs: now - 330000,
+    socHeartbeatMeasuredAtMs: now - 330000,
     pvMeasuredAtMs: now - 330000,
     homeLoadMeasuredAtMs: now - 330000,
   }));
   assert.equal(exactBoundary.status, "accepted_discharge");
+  assert.equal(exactBoundary.telemetryAgeSeconds.socHeartbeat, 330);
 });
 
 test("static inverter floor needs no measurement timestamp", () => {
@@ -197,33 +210,6 @@ test("unknown and contradictory actions are rejected", () => {
   assert.equal(validatePlan(contradictory).status, "rejected_discharge_guard");
 });
 
-test("SAJ feedback confirms exclusive mode plus a non-zero device current setpoint", () => {
-  assert.deepEqual(
-    evaluateFeedback({
-      action: "discharge_export",
-      targetKw: 14,
-      dischargeMode: "on",
-      chargeMode: "off",
-      dischargeCurrentSet: 28.5,
-    }),
-    {ok: true, status: "feedback_confirmed_discharge", currentSet: 28.5},
-  );
-  assert.equal(evaluateFeedback({
-    action: "grid_charge",
-    targetKw: 14,
-    dischargeMode: "off",
-    chargeMode: "on",
-    chargeCurrentSet: "unavailable",
-  }).status, "feedback_unavailable_charge");
-  assert.equal(evaluateFeedback({
-    action: "grid_charge",
-    targetKw: 14,
-    dischargeMode: "on",
-    chargeMode: "on",
-    chargeCurrentSet: 20,
-  }).status, "feedback_mismatch_charge");
-});
-
 test("all exported Node-RED function nodes compile", () => {
   for (const node of nodeRedFlow.filter((candidate) => candidate.type === "function")) {
     assert.doesNotThrow(() => new Function("msg", "flow", "global", node.func), node.name);
@@ -250,7 +236,9 @@ test("Node-RED router applies the full translated 28 kW target on its first invo
     action: "discharge_export",
     targetKw: 28,
     planId: "plan",
+    issuedAtMs: value.nowMs,
   });
+  assert.equal(outputs[2].command.issuedAtMs, value.nowMs);
 });
 
 test("accepted plans arm a replaceable dynamic one-shot without delaying command output", () => {
@@ -364,16 +352,22 @@ test("Node-RED live-state reader normalizes W to kW and rejects unknown units", 
   assert.equal(run({}, {}, {get: () => ({homeAssistant: {states}})}).homeLoadKw, null);
 });
 
-test("live reader prefers fresh last_reported so unchanged 100 percent SOC remains actionable", () => {
+test("stale unchanged SOC uses the fresh SAJ battery-power heartbeat", () => {
   const now = Date.parse("2026-08-11T02:00:00Z");
-  const freshReported = "2026-08-11T01:59:50Z";
-  const staleUpdated = "2026-08-11T01:00:00Z";
+  const freshHeartbeat = "2026-08-11T01:59:50Z";
+  const staleSocTimestamp = "2026-08-11T01:00:00Z";
   const states = {
     "sensor.saj_battery_1_soc": {
       state: "100",
       attributes: {unit_of_measurement: "%"},
-      last_reported: freshReported,
-      last_updated: staleUpdated,
+      last_reported: staleSocTimestamp,
+      last_updated: staleSocTimestamp,
+    },
+    "sensor.saj_battery_power": {
+      state: "0",
+      attributes: {unit_of_measurement: "W"},
+      last_reported: freshHeartbeat,
+      last_updated: staleSocTimestamp,
     },
     "sensor.pv_power_mqtt_abs": {
       state: "20000",
@@ -389,8 +383,8 @@ test("live reader prefers fresh last_reported so unchanged 100 percent SOC remai
   };
   const read = new Function("msg", "flow", "global", flowNode("eop_read_live_state_002").func);
   const live = read({}, {}, {get: () => ({homeAssistant: {states}})});
-  assert.equal(live.socMeasuredAtMs, Date.parse(freshReported));
-  assert.notEqual(live.socMeasuredAtMs, Date.parse(staleUpdated));
+  assert.equal(live.socHeartbeatMeasuredAtMs, Date.parse(freshHeartbeat));
+  assert.notEqual(live.socHeartbeatMeasuredAtMs, Date.parse(staleSocTimestamp));
   assert.equal(live.pvMeasuredAtMs, Date.parse("2026-08-11T01:59:45Z"));
   assert.equal(live.homeLoadMeasuredAtMs, Date.parse("2026-08-11T01:59:40Z"));
 
@@ -399,7 +393,7 @@ test("live reader prefers fresh last_reported so unchanged 100 percent SOC remai
     soc: live.soc,
     pvPowerKw: live.pvPowerKw,
     homeLoadKw: live.homeLoadKw,
-    socMeasuredAtMs: live.socMeasuredAtMs,
+    socHeartbeatMeasuredAtMs: live.socHeartbeatMeasuredAtMs,
     pvMeasuredAtMs: live.pvMeasuredAtMs,
     homeLoadMeasuredAtMs: live.homeLoadMeasuredAtMs,
   });
@@ -408,24 +402,202 @@ test("live reader prefers fresh last_reported so unchanged 100 percent SOC remai
   const accepted = validatePlan(value);
   assert.equal(accepted.status, "accepted_discharge");
   assert.equal(accepted.targetKw, 28);
+  assert.equal(accepted.telemetryAgeSeconds.socHeartbeat, 10);
 });
 
-test("feedback failure path cancels force modes and restores export", () => {
-  const run = new Function("msg", "flow", "global", flowNode("eop_feedback_confirm_002").func);
-  const command = {action: "discharge_export", targetKw: 14, planId: "plan"};
-  const context = new Map([["energyOptimizerLastCommand", command]]);
-  const flow = {get: (key) => context.get(key), set: (key, value) => context.set(key, value)};
-  const states = {
-    "input_boolean.battery_discharge": {state: "off", attributes: {}},
-    "input_boolean.battery_charge": {state: "off", attributes: {}},
-    "sensor.saj_battery_discharge_current_set": {state: "25", attributes: {unit_of_measurement: "A"}},
-    "sensor.saj_battery_power_2": {state: "0", attributes: {unit_of_measurement: "W"}},
+test("missing, unavailable or stale SAJ battery-power heartbeat safe-stops", () => {
+  const now = Date.parse("2026-08-11T02:00:00Z");
+  const baseStates = {
+    "sensor.saj_battery_1_soc": {
+      state: "100",
+      attributes: {unit_of_measurement: "%"},
+      last_reported: "2026-08-11T01:00:00Z",
+    },
+    "sensor.pv_power_mqtt_abs": {
+      state: "8000",
+      attributes: {unit_of_measurement: "W"},
+      last_reported: "2026-08-11T01:59:45Z",
+    },
+    "sensor.saj_home_load": {
+      state: "1",
+      attributes: {unit_of_measurement: "kW"},
+      last_reported: "2026-08-11T01:59:40Z",
+    },
   };
-  const outputs = run({command}, flow, {get: () => ({homeAssistant: {states}})});
-  assert.match(outputs[0].payload, /^feedback_mismatch_discharge/);
-  assert.equal(outputs[1].payload, 0);
-  assert.equal(outputs[2].payload, 1);
-  assert.equal(context.get("energyOptimizerLastCommand").action, "none");
+  const read = new Function("msg", "flow", "global", flowNode("eop_read_live_state_002").func);
+  const readStates = (states) => read({}, {}, {get: () => ({homeAssistant: {states}})});
+  const validateRead = (live) => validatePlan(input({
+    nowMs: now,
+    soc: live.soc,
+    pvPowerKw: live.pvPowerKw,
+    homeLoadKw: live.homeLoadKw,
+    socHeartbeatMeasuredAtMs: live.socHeartbeatMeasuredAtMs,
+    pvMeasuredAtMs: live.pvMeasuredAtMs,
+    homeLoadMeasuredAtMs: live.homeLoadMeasuredAtMs,
+  }));
+
+  const missing = readStates(baseStates);
+  assert.equal(missing.socHeartbeatMeasuredAtMs, null);
+  assert.equal(validateRead(missing).status, "rejected_telemetry_timestamp");
+
+  const unavailable = readStates({...baseStates, "sensor.saj_battery_power": {
+    state: "unavailable",
+    attributes: {unit_of_measurement: "W"},
+    last_reported: "2026-08-11T01:59:50Z",
+  }});
+  assert.equal(unavailable.socHeartbeatMeasuredAtMs, null);
+  assert.equal(validateRead(unavailable).status, "rejected_telemetry_timestamp");
+
+  const stale = readStates({...baseStates, "sensor.saj_battery_power": {
+    state: "0",
+    attributes: {unit_of_measurement: "W"},
+    last_reported: "2026-08-11T01:54:29.999Z",
+  }});
+  assert.equal(validateRead(stale).status, "rejected_telemetry_stale");
+
+  const boundary = readStates({...baseStates, "sensor.saj_battery_power": {
+    state: "0",
+    attributes: {unit_of_measurement: "W"},
+    last_reported: "2026-08-11T01:54:30.000Z",
+  }});
+  assert.equal(validateRead(boundary).status, "accepted_discharge");
+});
+
+test("fresh signed physical battery power confirms discharge and charge", () => {
+  const now = Date.parse("2026-08-11T02:00:00Z");
+  const discharge = {action: "discharge_export", targetKw: 28, planId: "discharge"};
+  const dischargeResult = runFeedback(discharge, {
+    "input_boolean.battery_discharge": {state: "on", attributes: {}},
+    "input_boolean.battery_charge": {state: "off", attributes: {}},
+    "sensor.saj_battery_power": {
+      state: "3400",
+      attributes: {unit_of_measurement: "W"},
+      last_reported: "2026-08-11T01:59:50Z",
+    },
+  }, now);
+  assert.match(dischargeResult.outputs[0].payload, /^feedback_confirmed_discharge/);
+  assert.match(dischargeResult.outputs[0].payload, /battery=3\.40kW min=1\.00kW age=10000ms after_issue=2000ms mode=exclusive/);
+  assert.equal(dischargeResult.outputs[1], null);
+  assert.equal(dischargeResult.outputs[2], null);
+  assert.deepEqual(dischargeResult.context.get("energyOptimizerLastCommand"), dischargeResult.command);
+
+  const charge = {action: "grid_charge", targetKw: 30, planId: "charge"};
+  const chargeResult = runFeedback(charge, {
+    "input_boolean.battery_discharge": {state: "off", attributes: {}},
+    "input_boolean.battery_charge": {state: "on", attributes: {}},
+    "sensor.saj_battery_power": {
+      state: "-6.8",
+      attributes: {unit_of_measurement: "kW"},
+      last_reported: "invalid",
+      last_updated: "2026-08-11T01:59:50Z",
+    },
+  }, now);
+  assert.match(chargeResult.outputs[0].payload, /^feedback_confirmed_charge/);
+  assert.match(chargeResult.outputs[0].payload, /battery=-6\.80kW min=1\.00kW age=10000ms after_issue=2000ms mode=exclusive/);
+  assert.equal(chargeResult.outputs[1], null);
+  assert.equal(chargeResult.outputs[2], null);
+});
+
+test("missing, stale, future, pre-command, wrong-sign and too-small physical feedback safe-stop", () => {
+  const now = Date.parse("2026-08-11T02:00:00Z");
+  const discharge = {action: "discharge_export", targetKw: 14, planId: "plan"};
+  const base = {
+    "input_boolean.battery_discharge": {state: "on", attributes: {}},
+    "input_boolean.battery_charge": {state: "off", attributes: {}},
+  };
+  const cases = [
+    {name: "missing entity", states: base, expected: "feedback_unavailable_discharge"},
+    {name: "unavailable state", states: {...base, "sensor.saj_battery_power": {
+      state: "unavailable", attributes: {unit_of_measurement: "W"}, last_reported: "2026-08-11T01:59:50Z",
+    }}, expected: "feedback_unavailable_discharge"},
+    {name: "invalid unit", states: {...base, "sensor.saj_battery_power": {
+      state: "3400", attributes: {unit_of_measurement: "VA"}, last_reported: "2026-08-11T01:59:50Z",
+    }}, expected: "feedback_unavailable_discharge"},
+    {name: "missing timestamp", states: {...base, "sensor.saj_battery_power": {
+      state: "3400", attributes: {unit_of_measurement: "W"},
+    }}, expected: "feedback_unavailable_discharge"},
+    {name: "stale timestamp", states: {...base, "sensor.saj_battery_power": {
+      state: "3400", attributes: {unit_of_measurement: "W"}, last_reported: "2026-08-11T01:58:59.999Z",
+    }}, expected: "feedback_stale_discharge"},
+    {name: "future timestamp", states: {...base, "sensor.saj_battery_power": {
+      state: "3400", attributes: {unit_of_measurement: "W"}, last_reported: "2026-08-11T02:00:00.001Z",
+    }}, expected: "feedback_stale_discharge"},
+    {name: "sample predates command", states: {...base, "sensor.saj_battery_power": {
+      state: "3400", attributes: {unit_of_measurement: "W"}, last_reported: "2026-08-11T01:59:47.999Z",
+    }}, expected: "feedback_precommand_discharge"},
+    {name: "missing command issuance", command: {
+      action: "discharge_export", targetKw: 14, planId: "missing-issued", issuedAtMs: null,
+    }, states: {...base, "sensor.saj_battery_power": {
+      state: "3400", attributes: {unit_of_measurement: "W"}, last_reported: "2026-08-11T01:59:50Z",
+    }}, expected: "feedback_invalid_command"},
+    {name: "wrong discharge sign", states: {...base, "sensor.saj_battery_power": {
+      state: "-3400", attributes: {unit_of_measurement: "W"}, last_reported: "2026-08-11T01:59:50Z",
+    }}, expected: "feedback_wrong_sign_discharge"},
+    {name: "too little achieved power", states: {...base, "sensor.saj_battery_power": {
+      state: "100", attributes: {unit_of_measurement: "W"}, last_reported: "2026-08-11T01:59:50Z",
+    }}, expected: "feedback_too_small_discharge"},
+    {name: "non-exclusive helper mode", states: {...base,
+      "input_boolean.battery_charge": {state: "on", attributes: {}},
+      "sensor.saj_battery_power": {
+        state: "3400", attributes: {unit_of_measurement: "W"}, last_reported: "2026-08-11T01:59:50Z",
+      },
+    }, expected: "feedback_mode_mismatch_discharge"},
+    {name: "wrong charge sign", command: {action: "grid_charge", targetKw: 30, planId: "charge"}, states: {
+      "input_boolean.battery_discharge": {state: "off", attributes: {}},
+      "input_boolean.battery_charge": {state: "on", attributes: {}},
+      "sensor.saj_battery_power": {
+        state: "6800", attributes: {unit_of_measurement: "W"}, last_reported: "2026-08-11T01:59:50Z",
+      },
+    }, expected: "feedback_wrong_sign_charge"},
+  ];
+
+  for (const scenario of cases) {
+    const command = scenario.command || discharge;
+    const {context, outputs} = runFeedback(command, scenario.states, now);
+    assert.match(outputs[0].payload, new RegExp(`^${scenario.expected}`), scenario.name);
+    assert.equal(outputs[1].payload, 0, scenario.name);
+    assert.equal(outputs[2].payload, 1, scenario.name);
+    assert.deepEqual(context.get("energyOptimizerLastCommand"), {
+      action: "none",
+      targetKw: 0,
+      planId: command.planId,
+    }, scenario.name);
+  }
+});
+
+test("same-target delayed feedback cannot supersede a newer plan or command issuance", () => {
+  const now = Date.parse("2026-08-11T02:00:00Z");
+  const states = {
+    "input_boolean.battery_discharge": {state: "on", attributes: {}},
+    "input_boolean.battery_charge": {state: "off", attributes: {}},
+    "sensor.saj_battery_power": {
+      state: "3400",
+      attributes: {unit_of_measurement: "W"},
+      last_reported: "2026-08-11T01:59:59Z",
+    },
+  };
+  const delayed = {action: "discharge_export", targetKw: 28, planId: "old-plan"};
+  const newerPlan = {action: "discharge_export", targetKw: 28, planId: "new-plan"};
+  const planResult = runFeedback(delayed, states, now, newerPlan);
+  assert.match(planResult.outputs[0].payload, /^feedback_superseded \| old-plan/);
+  assert.equal(planResult.outputs[1], null);
+  assert.equal(planResult.outputs[2], null);
+  assert.deepEqual(planResult.context.get("energyOptimizerLastCommand"), planResult.lastCommand);
+
+  const samePlan = {action: "discharge_export", targetKw: 28, planId: "same-plan"};
+  const issuanceResult = runFeedback(samePlan, states, now, samePlan);
+  assert.match(issuanceResult.outputs[0].payload, /^feedback_superseded \| same-plan/);
+  assert.equal(issuanceResult.outputs[1], null);
+  assert.equal(issuanceResult.outputs[2], null);
+  assert.deepEqual(issuanceResult.context.get("energyOptimizerLastCommand"), issuanceResult.lastCommand);
+});
+
+test("physical feedback uses a 15-second post-command observation window", () => {
+  const delay = flowNode("eop_feedback_delay_002");
+  assert.equal(delay.pauseType, "delay");
+  assert.equal(delay.timeout, "15");
+  assert.equal(delay.timeoutUnits, "seconds");
+  assert.deepEqual(delay.wires, [["eop_feedback_confirm_002"]]);
 });
 
 test("safe-stop chain resets charge to 30 kW before restoring PV charging", () => {

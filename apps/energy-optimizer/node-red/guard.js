@@ -100,20 +100,23 @@ function validatePlan(input) {
     return rejected(result, "rejected_invalid_numeric");
   }
 
-  // SOC, PV and load are live measurements. A frozen numeric value is unsafe
-  // to actuate against, so require HA's measurement timestamps as well. Static
-  // limits/helpers such as the inverter floor deliberately have no age check.
-  const socMeasuredAtMs = finite(input.socMeasuredAtMs);
+  // The SAJ SOC entity only reports when its integer value changes, so its own
+  // timestamp can be old while the inverter is polling normally. Keep the SOC
+  // value itself bounded below, but establish its source liveness from the
+  // fresh battery-power poll produced by the same SAJ Modbus integration. PV
+  // and load retain their own freshness checks. Static limits/helpers such as
+  // the inverter floor deliberately have no age check.
+  const socHeartbeatMeasuredAtMs = finite(input.socHeartbeatMeasuredAtMs);
   const pvMeasuredAtMs = finite(input.pvMeasuredAtMs);
   const homeLoadMeasuredAtMs = finite(input.homeLoadMeasuredAtMs);
-  if ([socMeasuredAtMs, pvMeasuredAtMs, homeLoadMeasuredAtMs].some((value) => value === null)) {
+  if ([socHeartbeatMeasuredAtMs, pvMeasuredAtMs, homeLoadMeasuredAtMs].some((value) => value === null)) {
     return rejected(result, "rejected_telemetry_timestamp");
   }
-  const socAgeMs = nowMs - socMeasuredAtMs;
+  const socHeartbeatAgeMs = nowMs - socHeartbeatMeasuredAtMs;
   const pvAgeMs = nowMs - pvMeasuredAtMs;
   const homeLoadAgeMs = nowMs - homeLoadMeasuredAtMs;
   if (
-    [socAgeMs, pvAgeMs, homeLoadAgeMs].some(
+    [socHeartbeatAgeMs, pvAgeMs, homeLoadAgeMs].some(
       (ageMs) => ageMs > MAX_TELEMETRY_AGE_MS || ageMs < -MAX_TELEMETRY_FUTURE_SKEW_MS,
     )
   ) {
@@ -151,7 +154,7 @@ function validatePlan(input) {
     validUntilMs: validUntil,
     evaluatedAtMs: nowMs,
     telemetryAgeSeconds: {
-      soc: socAgeMs / 1000,
+      socHeartbeat: socHeartbeatAgeMs / 1000,
       pv: pvAgeMs / 1000,
       homeLoad: homeLoadAgeMs / 1000,
     },

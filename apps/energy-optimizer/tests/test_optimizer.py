@@ -5,7 +5,7 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from energy_optimizer.config import ENTITY, Settings
-from energy_optimizer.models import DispatchInterval, Plan, Slot
+from energy_optimizer.models import DispatchInterval, Plan, Slot, TelemetryHealth
 from energy_optimizer.optimizer import EnergyOptimizer
 from energy_optimizer.state import LearningState
 
@@ -45,6 +45,28 @@ def ev_states(*, soc: float, departure: datetime) -> dict[str, dict[str, str]]:
 
 def raw_state(entity_id: str, state: str) -> dict[str, str]:
     return {"entity_id": entity_id, "state": state}
+
+
+def telemetry_health(
+    *,
+    heartbeat_age: float | None = 0.0,
+    pv_age: float | None = 0.0,
+    load_age: float | None = 0.0,
+) -> TelemetryHealth:
+    return TelemetryHealth(
+        soc_source_heartbeat_age_seconds=heartbeat_age,
+        pv_age_seconds=pv_age,
+        load_age_seconds=load_age,
+    )
+
+
+def live_telemetry_states(*, soc: str = "80") -> list[dict[str, str]]:
+    return [
+        raw_state(ENTITY["battery_soc"], soc),
+        raw_state(ENTITY["battery_soc_heartbeat"], "0"),
+        raw_state(ENTITY["pv_power"], "0"),
+        raw_state(ENTITY["home_load"], "1000"),
+    ]
 
 
 def fast_base_plan(now: datetime, *, future_fit: float = 0.08) -> Plan:
@@ -109,6 +131,7 @@ def fast_states(now: datetime, *, fit: str, soc: str = "80") -> list[dict]:
         {"entity_id": ENTITY["amber_fit"], "state": fit, "attributes": price_attributes},
         {"entity_id": ENTITY["amber_import"], "state": "0.16", "attributes": price_attributes},
         raw_state(ENTITY["battery_soc"], soc),
+        raw_state(ENTITY["battery_soc_heartbeat"], "0"),
         raw_state(ENTITY["battery_usable"], "47"),
         raw_state(ENTITY["pv_power"], "0"),
         raw_state(ENTITY["home_load"], "1000"),
@@ -133,6 +156,54 @@ def test_high_fit_exports_but_never_crosses_five_percent_floor(tmp_path):
     assert result[0].battery_kw > 0
     assert min(item.soc_end_pct for item in result) >= 5.0
     assert max(item.soc_end_pct for item in result) <= 100.0
+
+
+def test_limited_battery_is_price_shaped_then_live_high_fit_uses_full_output(tmp_path):
+    opt = optimizer(tmp_path)
+    now = datetime(2026, 8, 11, 17, 0, tzinfo=BRISBANE)
+    plan_slots = [
+        Slot(
+            start=now + timedelta(minutes=5 * index),
+            duration_h=5 / 60,
+            solar_kw=0.0,
+            solar_low_kw=0.0,
+            solar_high_kw=0.0,
+            load_kw=0.0,
+            import_price=0.0,
+            export_price=fit,
+            price_source="amber",
+        )
+        for index, fit in enumerate((0.12, 0.55))
+    ]
+
+    dispatch = opt._dispatch(
+        plan_slots,
+        initial_soc_pct=12.6,
+        capacity_kwh=47.0,
+        evening=None,
+    )
+    low_fit_export_kw = max(0.0, -dispatch[0].site_grid_kw)
+    high_fit_export_kw = max(0.0, -dispatch[1].site_grid_kw)
+
+    assert low_fit_export_kw < high_fit_export_kw
+    assert high_fit_export_kw > 0.9 * opt.settings.battery_max_discharge_kw
+    assert dispatch[-1].soc_end_pct >= opt.settings.battery_min_soc_pct
+
+    # Once that high-value interval is live, the fast path is not constrained
+    # by the dynamic-programming energy grid and can request the verified SAJ
+    # output immediately, while still preserving the trajectory reserve.
+    live_now = now + timedelta(minutes=5)
+    live_plan = opt.build_fast_price_plan(
+        fast_base_plan(live_now),
+        fast_states(live_now, fit="0.55", soc="12.6"),
+        now=live_now,
+        telemetry_health=telemetry_health(),
+    )
+
+    assert live_plan.actuation_allowed is True
+    assert live_plan.action == "discharge_export"
+    assert live_plan.battery_power_target_kw == opt.settings.battery_max_discharge_kw
+    assert live_plan.site_export_target_kw == opt.settings.battery_max_discharge_kw - 1.0
 
 
 def test_negative_fit_curtails_excess_solar(tmp_path):
@@ -288,9 +359,10 @@ def test_active_approved_battery_control_is_authorized_without_shadow_wait(tmp_p
         raw_state(ENTITY["ev_trip"], "No trip"),
         raw_state(ENTITY["ev_soc"], "40"),
         raw_state(ENTITY["ev_limit"], "80"),
+        *live_telemetry_states(),
     ]
 
-    plan = opt.build_plan(base_states, now)
+    plan = opt.build_plan(base_states, now, telemetry_health=telemetry_health())
 
     assert plan.actuation_allowed is True
     assert not any("shadow validation gate" in warning.lower() for warning in plan.warnings)
@@ -304,7 +376,99 @@ def test_active_approved_battery_control_is_authorized_without_shadow_wait(tmp_p
     for entity_id, value in gated_states:
         states = [item.copy() for item in base_states]
         next(item for item in states if item["entity_id"] == entity_id)["state"] = value
-        assert opt.build_plan(states, now).actuation_allowed is False
+        assert opt.build_plan(
+            states,
+            now,
+            telemetry_health=telemetry_health(),
+        ).actuation_allowed is False
+
+
+def test_full_plan_accepts_unchanged_soc_with_fresh_saj_source_heartbeat(tmp_path):
+    opt = optimizer(tmp_path)
+    now = datetime(2026, 8, 11, 18, 0, tzinfo=BRISBANE)
+    price_attributes = {
+        "start_time": now.isoformat(),
+        "end_time": (now + timedelta(minutes=5)).isoformat(),
+    }
+    states = [
+        {"entity_id": ENTITY["amber_fit"], "state": "0.30", "attributes": price_attributes},
+        {"entity_id": ENTITY["amber_import"], "state": "0.16", "attributes": price_attributes},
+        {
+            "entity_id": ENTITY["battery_soc"],
+            "state": "100",
+            "last_reported": (now - timedelta(minutes=90)).isoformat(),
+        },
+        raw_state(ENTITY["battery_soc_heartbeat"], "0"),
+        raw_state(ENTITY["pv_power"], "0"),
+        raw_state(ENTITY["home_load"], "1000"),
+        raw_state(ENTITY["mode"], "Active"),
+        raw_state(ENTITY["battery_control"], "on"),
+        raw_state(ENTITY["rollout_approved"], "on"),
+        raw_state(ENTITY["manual_override"], "off"),
+        raw_state(ENTITY["ev_trip"], "No trip"),
+        raw_state(ENTITY["ev_soc"], "40"),
+        raw_state(ENTITY["ev_limit"], "80"),
+    ]
+
+    plan = opt.build_plan(states, now, telemetry_health=telemetry_health())
+
+    assert plan.actuation_allowed is True
+    assert not any("soc-source" in warning.lower() for warning in plan.warnings)
+
+
+def test_full_plan_is_non_actuating_when_source_heartbeat_or_live_telemetry_is_invalid(
+    tmp_path,
+):
+    opt = optimizer(tmp_path)
+    now = datetime(2026, 8, 11, 18, 0, tzinfo=BRISBANE)
+    price_attributes = {
+        "start_time": now.isoformat(),
+        "end_time": (now + timedelta(minutes=5)).isoformat(),
+    }
+    states = [
+        {"entity_id": ENTITY["amber_fit"], "state": "0.30", "attributes": price_attributes},
+        {"entity_id": ENTITY["amber_import"], "state": "0.16", "attributes": price_attributes},
+        *live_telemetry_states(),
+        raw_state(ENTITY["mode"], "Active"),
+        raw_state(ENTITY["battery_control"], "on"),
+        raw_state(ENTITY["rollout_approved"], "on"),
+        raw_state(ENTITY["manual_override"], "off"),
+        raw_state(ENTITY["ev_trip"], "No trip"),
+        raw_state(ENTITY["ev_soc"], "40"),
+        raw_state(ENTITY["ev_limit"], "80"),
+    ]
+
+    stale_heartbeat = opt.build_plan(
+        states,
+        now,
+        telemetry_health=telemetry_health(heartbeat_age=331),
+    )
+    next(item for item in states if item["entity_id"] == ENTITY["home_load"])[
+        "state"
+    ] = "unavailable"
+    invalid_load = opt.build_plan(
+        states,
+        now,
+        telemetry_health=telemetry_health(),
+    )
+    next(item for item in states if item["entity_id"] == ENTITY["home_load"])[
+        "state"
+    ] = "1000"
+    next(item for item in states if item["entity_id"] == ENTITY["pv_power"])[
+        "state"
+    ] = "-1"
+    out_of_bounds_pv = opt.build_plan(
+        states,
+        now,
+        telemetry_health=telemetry_health(),
+    )
+
+    assert stale_heartbeat.actuation_allowed is False
+    assert any("soc-source heartbeat is stale" in warning.lower() for warning in stale_heartbeat.warnings)
+    assert invalid_load.actuation_allowed is False
+    assert any("household-load telemetry is unavailable" in warning.lower() for warning in invalid_load.warnings)
+    assert out_of_bounds_pv.actuation_allowed is False
+    assert any("pv telemetry is outside" in warning.lower() for warning in out_of_bounds_pv.warnings)
 
 
 def test_full_plan_cannot_actuate_without_valid_current_amber_interval(tmp_path):
@@ -322,9 +486,12 @@ def test_full_plan_cannot_actuate_without_valid_current_amber_interval(tmp_path)
         raw_state(ENTITY["ev_trip"], "No trip"),
         raw_state(ENTITY["ev_soc"], "40"),
         raw_state(ENTITY["ev_limit"], "80"),
+        raw_state(ENTITY["battery_soc_heartbeat"], "0"),
+        raw_state(ENTITY["pv_power"], "0"),
+        raw_state(ENTITY["home_load"], "1000"),
     ]
 
-    plan = opt.build_plan(states, now)
+    plan = opt.build_plan(states, now, telemetry_health=telemetry_health())
 
     assert plan.actuation_allowed is False
     assert plan.intervals[0].price_source != "amber_live"
@@ -352,9 +519,12 @@ def test_full_plan_expires_at_current_settlement_interval_end(tmp_path):
         raw_state(ENTITY["ev_trip"], "No trip"),
         raw_state(ENTITY["ev_soc"], "40"),
         raw_state(ENTITY["ev_limit"], "80"),
+        raw_state(ENTITY["battery_soc_heartbeat"], "0"),
+        raw_state(ENTITY["pv_power"], "0"),
+        raw_state(ENTITY["home_load"], "1000"),
     ]
 
-    plan = opt.build_plan(states, now)
+    plan = opt.build_plan(states, now, telemetry_health=telemetry_health())
 
     assert plan.actuation_allowed is True
     assert plan.valid_until == interval_end
@@ -416,6 +586,7 @@ def test_fast_live_high_fit_immediately_requests_full_safe_discharge(tmp_path):
         fast_base_plan(now),
         fast_states(now, fit="0.55"),
         now=now,
+        telemetry_health=telemetry_health(),
     )
 
     assert plan.plan_id.startswith("eop-fast-")
@@ -429,7 +600,7 @@ def test_fast_live_high_fit_immediately_requests_full_safe_discharge(tmp_path):
 
 
 @pytest.mark.parametrize("fit", ["0.05", "-0.05", "unavailable"])
-def test_fast_low_negative_or_malformed_fit_never_forces_discharge(tmp_path, fit):
+def test_fast_low_negative_or_malformed_fit_never_forces_export(tmp_path, fit):
     opt = optimizer(tmp_path)
     now = datetime(2026, 8, 11, 17, 0, tzinfo=BRISBANE)
 
@@ -437,10 +608,16 @@ def test_fast_low_negative_or_malformed_fit_never_forces_discharge(tmp_path, fit
         fast_base_plan(now),
         fast_states(now, fit=fit),
         now=now,
+        telemetry_health=telemetry_health(),
     )
 
-    assert plan.battery_power_target_kw == 0.0
+    assert plan.site_export_target_kw == 0.0
     assert plan.action != "discharge_export"
+    if fit == "0.05":
+        assert plan.battery_power_target_kw == 1.0
+        assert plan.action == "self_consumption"
+    else:
+        assert plan.battery_power_target_kw == 0.0
     if fit == "-0.05":
         assert plan.action == "curtail_pv"
     if fit == "unavailable":
@@ -456,19 +633,82 @@ def test_fast_stale_state_and_near_floor_soc_are_fail_safe(tmp_path):
         base,
         fast_states(now, fit="0.55"),
         now=now,
-        state_age_seconds=331,
+        telemetry_health=telemetry_health(pv_age=331),
     )
     near_floor = opt.build_fast_price_plan(
         base,
         fast_states(now, fit="0.55", soc="5.2"),
         now=now,
-        soc_age_seconds=30,
+        telemetry_health=telemetry_health(heartbeat_age=30),
     )
 
     assert stale.actuation_allowed is False
     assert stale.battery_power_target_kw == 0.0
     assert near_floor.battery_power_target_kw == 0.0
     assert near_floor.intervals[0].soc_end_pct >= 5.0
+
+
+@pytest.mark.parametrize(
+    ("entity_id", "value"),
+    [
+        (ENTITY["pv_power"], "-1"),
+        (ENTITY["pv_power"], "100001"),
+        (ENTITY["home_load"], "-1"),
+        (ENTITY["home_load"], "100001"),
+    ],
+)
+def test_fast_rejects_out_of_bounds_pv_or_load_telemetry(
+    tmp_path,
+    entity_id,
+    value,
+):
+    opt = optimizer(tmp_path)
+    now = datetime(2026, 8, 11, 17, 0, tzinfo=BRISBANE)
+    states = fast_states(now, fit="0.55")
+    next(item for item in states if item["entity_id"] == entity_id)["state"] = value
+
+    plan = opt.build_fast_price_plan(
+        fast_base_plan(now),
+        states,
+        now=now,
+        telemetry_health=telemetry_health(),
+    )
+
+    assert plan.actuation_allowed is False
+    assert plan.battery_power_target_kw == 0.0
+    assert "outside 0-100 kw" in plan.reason.lower()
+
+
+@pytest.mark.parametrize(
+    ("heartbeat_age", "include_heartbeat"),
+    [(331.0, True), (0.0, False)],
+    ids=["stale", "missing"],
+)
+def test_fast_rejects_stale_or_missing_soc_source_heartbeat(
+    tmp_path,
+    heartbeat_age,
+    include_heartbeat,
+):
+    opt = optimizer(tmp_path)
+    now = datetime(2026, 8, 11, 17, 0, tzinfo=BRISBANE)
+    states = fast_states(now, fit="0.55")
+    if not include_heartbeat:
+        states = [
+            item
+            for item in states
+            if item["entity_id"] != ENTITY["battery_soc_heartbeat"]
+        ]
+
+    plan = opt.build_fast_price_plan(
+        fast_base_plan(now),
+        states,
+        now=now,
+        telemetry_health=telemetry_health(heartbeat_age=heartbeat_age),
+    )
+
+    assert plan.actuation_allowed is False
+    assert plan.battery_power_target_kw == 0.0
+    assert "heartbeat" in plan.reason.lower()
 
 
 def test_fast_missing_or_stale_price_window_metadata_cannot_discharge(tmp_path):
@@ -487,8 +727,18 @@ def test_fast_missing_or_stale_price_window_metadata_cannot_discharge(tmp_path):
                 "end_time": (now - timedelta(minutes=5)).isoformat(),
             }
 
-    missing_plan = opt.build_fast_price_plan(base, missing, now=now)
-    stale_plan = opt.build_fast_price_plan(base, stale, now=now)
+    missing_plan = opt.build_fast_price_plan(
+        base,
+        missing,
+        now=now,
+        telemetry_health=telemetry_health(),
+    )
+    stale_plan = opt.build_fast_price_plan(
+        base,
+        stale,
+        now=now,
+        telemetry_health=telemetry_health(),
+    )
 
     for plan in (missing_plan, stale_plan):
         assert plan.actuation_allowed is False
@@ -507,10 +757,57 @@ def test_fast_dispatch_preserves_more_valuable_allocated_future_fit(tmp_path):
         base,
         fast_states(now, fit="0.55"),
         now=now,
+        telemetry_health=telemetry_health(),
     )
 
     assert plan.battery_power_target_kw == 0.0
     assert plan.action != "discharge_export"
+
+
+def test_fast_downward_fit_revision_drops_cached_export_for_more_valuable_future_fit(
+    tmp_path,
+):
+    opt = optimizer(tmp_path)
+    now = datetime(2026, 8, 11, 17, 0, tzinfo=BRISBANE)
+    base = fast_base_plan(now, future_fit=0.80)
+    base.intervals[0].battery_kw = 10.0
+    base.intervals[0].site_grid_kw = -9.0
+    base.intervals[2].battery_kw = 28.0
+    base.intervals[2].site_grid_kw = -27.0
+
+    plan = opt.build_fast_price_plan(
+        base,
+        fast_states(now, fit="0.09"),
+        now=now,
+        telemetry_health=telemetry_health(),
+    )
+
+    assert plan.battery_power_target_kw == 0.0
+    assert plan.site_export_target_kw == 0.0
+    assert plan.action != "discharge_export"
+
+
+def test_fast_cached_household_supply_uses_live_import_value_against_future_fit(
+    tmp_path,
+):
+    opt = optimizer(tmp_path)
+    now = datetime(2026, 8, 11, 17, 0, tzinfo=BRISBANE)
+    base = fast_base_plan(now, future_fit=0.15)
+    base.intervals[0].battery_kw = 10.0
+    base.intervals[0].site_grid_kw = -9.0
+    base.intervals[2].battery_kw = 28.0
+    base.intervals[2].site_grid_kw = -27.0
+
+    plan = opt.build_fast_price_plan(
+        base,
+        fast_states(now, fit="0.09"),
+        now=now,
+        telemetry_health=telemetry_health(),
+    )
+
+    assert plan.battery_power_target_kw == 1.0
+    assert plan.site_export_target_kw == 0.0
+    assert plan.action == "self_consumption"
 
 
 def test_fast_dispatch_keeps_already_planned_export_above_wear_cost(tmp_path):
@@ -524,7 +821,58 @@ def test_fast_dispatch_keeps_already_planned_export_above_wear_cost(tmp_path):
         base,
         fast_states(now, fit="0.09"),
         now=now,
+        telemetry_health=telemetry_health(),
     )
 
     assert plan.battery_power_target_kw == 10.0
     assert plan.action == "discharge_export"
+
+
+def test_fast_cached_export_continues_when_live_fit_is_still_best_allocated_value(
+    tmp_path,
+):
+    opt = optimizer(tmp_path)
+    now = datetime(2026, 8, 11, 17, 0, tzinfo=BRISBANE)
+    base = fast_base_plan(now, future_fit=0.085)
+    base.intervals[0].battery_kw = 10.0
+    base.intervals[0].site_grid_kw = -9.0
+    base.intervals[2].import_price = 0.80
+    base.intervals[2].battery_kw = 28.0
+    base.intervals[2].site_grid_kw = -28.0
+
+    plan = opt.build_fast_price_plan(
+        base,
+        fast_states(now, fit="0.09"),
+        now=now,
+        telemetry_health=telemetry_health(),
+    )
+
+    assert plan.battery_power_target_kw == 10.0
+    assert plan.site_export_target_kw == 9.0
+    assert plan.action == "discharge_export"
+
+
+def test_fast_live_import_spike_immediately_supplies_house_without_weak_fit_export(
+    tmp_path,
+):
+    opt = optimizer(tmp_path)
+    now = datetime(2026, 8, 11, 17, 0, tzinfo=BRISBANE)
+    base = fast_base_plan(now, future_fit=0.15)
+    base.intervals[2].import_price = 0.80
+    base.intervals[2].battery_kw = 28.0
+    base.intervals[2].site_grid_kw = -28.0
+    states = fast_states(now, fit="0.05")
+    next(item for item in states if item["entity_id"] == ENTITY["amber_import"])[
+        "state"
+    ] = "0.30"
+
+    plan = opt.build_fast_price_plan(
+        base,
+        states,
+        now=now,
+        telemetry_health=telemetry_health(),
+    )
+
+    assert plan.battery_power_target_kw == 1.0
+    assert plan.site_export_target_kw == 0.0
+    assert plan.action == "self_consumption"

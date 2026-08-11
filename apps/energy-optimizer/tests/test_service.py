@@ -251,7 +251,9 @@ def test_amber_interval_rollover_is_relevant_even_when_numeric_price_is_unchange
     ) != Coordinator._price_fingerprint(event, "new_state")
 
 
-def test_fast_freshness_uses_ha_measurement_time_not_get_receipt(tmp_path: Path) -> None:
+def test_soc_freshness_uses_same_integration_heartbeat_not_unchanged_soc_timestamp(
+    tmp_path: Path,
+) -> None:
     class FakeHA:
         async def close(self) -> None:
             return None
@@ -261,30 +263,141 @@ def test_fast_freshness_uses_ha_measurement_time_not_get_receipt(tmp_path: Path)
         observed_at = datetime(2026, 8, 11, 2, 0, tzinfo=timezone.utc)
         observed_monotonic = 1_000.0
         for entity_id in FAST_FRESHNESS_ENTITIES:
-            reported = observed_at
-            if entity_id == ENTITY["battery_soc"]:
-                reported -= timedelta(minutes=10)
             coordinator._cache_state(
                 entity_id,
                 {
                     "entity_id": entity_id,
                     "state": "50",
-                    "last_reported": reported.isoformat(),
-                    # A stable value can remain unchanged for hours even while
-                    # the integration is reporting it normally.
+                    "last_reported": observed_at.isoformat(),
                     "last_updated": (observed_at - timedelta(hours=1)).isoformat(),
                 },
                 received_at=observed_at,
                 received_monotonic=observed_monotonic,
             )
-
-        age = coordinator._cached_state_age(
-            FAST_FRESHNESS_ENTITIES,
-            observed_monotonic,
+        coordinator._cache_state(
+            ENTITY["battery_soc"],
+            {
+                "entity_id": ENTITY["battery_soc"],
+                "state": "100",
+                # An unchanged SOC value can retain an old report time even
+                # while the same SAJ integration continues polling normally.
+                "last_reported": (observed_at - timedelta(minutes=90)).isoformat(),
+            },
+            received_at=observed_at,
+            received_monotonic=observed_monotonic,
         )
-        assert age == 600.0
-        assert age > coordinator.settings.fast_dispatch_state_max_age_seconds
+
+        health = coordinator._actuation_telemetry_health(observed_monotonic)
+        soc_entity_age = coordinator._cached_state_age(
+            {ENTITY["battery_soc"]}, observed_monotonic
+        )
+
+        assert health.soc_source_heartbeat_age_seconds == 0.0
+        assert health.pv_age_seconds == 0.0
+        assert health.load_age_seconds == 0.0
+        assert soc_entity_age == 90 * 60
+        assert ENTITY["battery_soc"] not in FAST_FRESHNESS_ENTITIES
+        assert ENTITY["battery_soc_heartbeat"] in FAST_FRESHNESS_ENTITIES
         assert ENTITY["battery_usable"] not in FAST_FRESHNESS_ENTITIES
+
+    asyncio.run(scenario())
+
+
+def test_full_plan_uses_newer_websocket_value_with_its_cache_freshness(
+    tmp_path: Path,
+) -> None:
+    observed_at = datetime.now(timezone.utc)
+    interval_start = observed_at.replace(
+        minute=observed_at.minute - observed_at.minute % 5,
+        second=0,
+        microsecond=0,
+    )
+    price_attributes = {
+        "start_time": interval_start.isoformat(),
+        "end_time": (interval_start + timedelta(minutes=5)).isoformat(),
+    }
+    reported = observed_at.isoformat()
+    get_states = [
+        {
+            "entity_id": ENTITY["amber_fit"],
+            "state": "0.30",
+            "attributes": price_attributes,
+            "last_reported": reported,
+        },
+        {
+            "entity_id": ENTITY["amber_import"],
+            "state": "0.16",
+            "attributes": price_attributes,
+            "last_reported": reported,
+        },
+        {
+            "entity_id": ENTITY["battery_soc"],
+            "state": "80",
+            "last_reported": reported,
+        },
+        {
+            "entity_id": ENTITY["battery_soc_heartbeat"],
+            "state": "0",
+            "last_reported": reported,
+        },
+        {
+            "entity_id": ENTITY["pv_power"],
+            "state": "0",
+            "last_reported": reported,
+        },
+        {
+            "entity_id": ENTITY["home_load"],
+            "state": "1000",
+            "last_reported": reported,
+        },
+        {"entity_id": ENTITY["battery_usable"], "state": "47"},
+        {"entity_id": ENTITY["mode"], "state": "Active"},
+        {"entity_id": ENTITY["battery_control"], "state": "on"},
+        {"entity_id": ENTITY["rollout_approved"], "state": "on"},
+        {"entity_id": ENTITY["manual_override"], "state": "off"},
+        {"entity_id": ENTITY["ev_trip"], "state": "No trip"},
+        {"entity_id": ENTITY["ev_soc"], "state": "40"},
+        {"entity_id": ENTITY["ev_limit"], "state": "80"},
+    ]
+
+    class RacingHA:
+        coordinator: Coordinator
+
+        async def states(self):
+            now = datetime.now(timezone.utc)
+            self.coordinator._cache_state(
+                ENTITY["battery_soc_heartbeat"],
+                {
+                    "entity_id": ENTITY["battery_soc_heartbeat"],
+                    "state": "unavailable",
+                    "last_reported": now.isoformat(),
+                },
+                received_at=now,
+                received_monotonic=asyncio.get_running_loop().time(),
+            )
+            return get_states
+
+        async def publish_state(self, *_args, **_kwargs) -> None:
+            return None
+
+        async def close(self) -> None:
+            return None
+
+    async def scenario() -> None:
+        ha = RacingHA()
+        coordinator = Coordinator(
+            Settings(data_dir=tmp_path, horizon_hours=4),
+            ha=ha,
+        )
+        ha.coordinator = coordinator
+
+        plan = await coordinator.run_once()
+
+        assert plan.actuation_allowed is False
+        assert any(
+            "soc-source heartbeat is unavailable" in warning.lower()
+            for warning in plan.warnings
+        )
 
     asyncio.run(scenario())
 

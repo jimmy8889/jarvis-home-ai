@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 
 from .config import ENTITY, Settings
 from .ha import HomeAssistantClient
-from .models import Plan
+from .models import Plan, TelemetryHealth
 from .optimizer import EnergyOptimizer
 from .state import LearningState
 
@@ -26,12 +26,13 @@ CONTROL_ENTITIES = {
 IMMEDIATE_REPLAN_ENTITIES = PRICE_ENTITIES | CONTROL_ENTITIES
 TELEMETRY_CACHE_ENTITIES = {
     ENTITY["battery_soc"],
+    ENTITY["battery_soc_heartbeat"],
     ENTITY["battery_usable"],
     ENTITY["pv_power"],
     ENTITY["home_load"],
 }
 FAST_FRESHNESS_ENTITIES = {
-    ENTITY["battery_soc"],
+    ENTITY["battery_soc_heartbeat"],
     ENTITY["pv_power"],
     ENTITY["home_load"],
 }
@@ -163,7 +164,17 @@ class Coordinator:
                     received_at=state_fetch_completed_at,
                     received_monotonic=state_fetch_completed,
                 )
-        plan = await asyncio.to_thread(self.optimizer.build_plan, states)
+        # Plan from the same merged cache used to derive freshness.  A
+        # WebSocket update can arrive while the bulk GET is in flight; passing
+        # the older HTTP snapshot with newer cache timestamps could otherwise
+        # authorize a value that has already become unavailable.
+        planning_states = list(self._cached_states.values())
+        telemetry_health = self._actuation_telemetry_health(loop.time())
+        plan = await asyncio.to_thread(
+            self.optimizer.build_plan,
+            planning_states,
+            telemetry_health=telemetry_health,
+        )
         decision_latency_ms = (
             (loop.time() - trigger_received_monotonic) * 1000
             if trigger_received_monotonic is not None
@@ -379,6 +390,17 @@ class Coordinator:
             return float("inf")
         return max(0.0, max(ages, default=0.0))
 
+    def _actuation_telemetry_health(self, now_monotonic: float) -> TelemetryHealth:
+        def age(entity_id: str) -> float | None:
+            updated = self._state_updated_monotonic.get(entity_id)
+            return None if updated is None else max(0.0, now_monotonic - updated)
+
+        return TelemetryHealth(
+            soc_source_heartbeat_age_seconds=age(ENTITY["battery_soc_heartbeat"]),
+            pv_age_seconds=age(ENTITY["pv_power"]),
+            load_age_seconds=age(ENTITY["home_load"]),
+        )
+
     async def _run_fast_dispatch(self) -> None:
         while not self._stop.is_set():
             revision, entity_id, received_at, received_monotonic = await self._fast_events.get()
@@ -389,14 +411,7 @@ class Coordinator:
                 plan = self.optimizer.build_fast_price_plan(
                     self.last_full_plan,
                     list(self._cached_states.values()),
-                    state_age_seconds=self._cached_state_age(
-                        FAST_FRESHNESS_ENTITIES,
-                        now_monotonic,
-                    ),
-                    soc_age_seconds=self._cached_state_age(
-                        {ENTITY["battery_soc"]},
-                        now_monotonic,
-                    ),
+                    telemetry_health=self._actuation_telemetry_health(now_monotonic),
                 )
                 decision_latency_ms = (
                     asyncio.get_running_loop().time() - received_monotonic

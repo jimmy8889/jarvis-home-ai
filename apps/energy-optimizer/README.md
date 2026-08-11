@@ -31,6 +31,10 @@ Local, production, forecast-aware dispatch planning for Amber prices, SAJ batter
 - Every accepted plan arms a replaceable one-shot at `valid_until`; it
   safe-stops exactly at expiry if the following Amber event is missed. The
   independent 60-second watchdog remains as a second layer.
+- Forced charge/discharge is checked 15 seconds after command issue against a
+  fresh, post-command `sensor.saj_battery_power` sample with the expected sign
+  and exclusive inverter mode. This is an observation window only; it does not
+  delay the command.
 
 ## Optimisation model
 
@@ -39,6 +43,11 @@ Local, production, forecast-aware dispatch planning for Amber prices, SAJ batter
 - 90% charge and discharge efficiencies, $0.08/kWh discharged wear cost and $0.02/kWh grid-arbitrage uncertainty margin.
 - Amber signed import/FIT prices, calibrated Solcast P10/P50/P90, weather, learned weekday/half-hour base load, 3.7 kW hot water and EV requirements share one plan.
 - The active Amber interval uses the exact live sensor state for the remaining settlement window. The next hour remains at five-minute resolution and the rest of the gap-free 36-hour horizon uses 30-minute slots, avoiding both price dilution and a costly all-day five-minute dynamic programme.
+- Battery export power is price-shaped across that horizon: weaker FIT intervals
+  are throttled so stored energy is retained for higher-value forecast windows,
+  while the best feasible intervals can use the full verified inverter output.
+  Node-RED applies each new target immediately; there is no smoothing ramp or
+  deliberate command delay.
 - A price event first publishes a short-lived current-interval dispatch from the last valid horizon, with no debounce, polling wait or command ramp. It requires explicit current Amber start/end metadata, fresh safety telemetry and all production gates; it preserves the cached morning reserve and any more valuable allocated future interval. Invalid, stale, low or negative pricing cannot inherit a forced export. The full 36-hour calculation then replaces it, normally about two seconds later on the measured development system.
 - Tesla charging is modelled as three phase at 6–16 A (about 4.45–11.86 kW at the observed phase voltage). Conservative direct-solar slots are exhausted before a clearly labelled departure-deadline fallback is considered.
 - A morning target is enforced only when pre-solar discharge has economic value and conservative solar can refill the battery, or the early price dominates later retained value. Poor-price days intentionally retain more SOC.
@@ -71,7 +80,7 @@ Safety and user helpers:
 - `input_datetime.energy_optimizer_shadow_started`
 - `input_text.energy_optimizer_actuator_status`
 
-The six `energy_optimizer_*` Home Assistant automations implement guarded hot-water control/fallback, the daily EV prompt and response, the advisory cheap-window alert, and disabled-by-helper local Tesla BLE auto-control.
+The `energy_optimizer_*` Home Assistant automations implement guarded hot-water control/fallback, the daily EV prompt and response, the advisory cheap-window alert, local Tesla BLE auto-control, and edge-triggered iPhone activity notifications. The versioned notification export is in `home-assistant/energy-optimizer-notifications.yaml`; battery and EV alerts wait for physical power confirmation before notifying.
 
 No Home Assistant webhook or unauthenticated optimiser endpoint is required. The service uses its existing secret-backed HA token to subscribe to `state_changed` over HA's local WebSocket API. Changes to either Amber price or the mode, rollout, battery-control and manual-override helpers wake the planner immediately. `/healthz` reports `state_stream_status`, the last trigger, and decision/cycle latency. The actuator should trigger from the completed `sensor.energy_optimizer_plan` update; that entity is published last as the plan commit marker, after the compact command sensors share the same plan ID. A revision check immediately before that marker prevents an overtaken calculation from actuating. Network and Home Assistant REST processing still impose unavoidable milliseconds of transport latency, but the optimiser adds no deliberate delay.
 

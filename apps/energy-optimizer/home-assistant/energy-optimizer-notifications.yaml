@@ -1,0 +1,138 @@
+# Version-controlled export of the live Home Assistant notification automations.
+# The live copies are stored in /config/automations.yaml and managed by Home Assistant.
+- id: energy_optimizer_phone_notifications
+  alias: Energy Optimizer - Battery Selling iPhone Notification
+  description: >-
+    Notify once per continuous battery-selling session after physical inverter
+    and grid-export confirmation; brief five-minute settlement-boundary stops
+    do not rearm it.
+  triggers:
+    - trigger: template
+      value_template: >-
+        {{
+          states('input_text.energy_optimizer_actuator_status').startswith('feedback_confirmed_discharge')
+          and is_state('input_boolean.battery_discharge', 'on')
+          and is_state('input_boolean.battery_charge', 'off')
+          and (states('sensor.saj_battery_power') | float(0)) > 1000
+          and (states('sensor.saj_ct_grid_power_total') | float(0)) < -1000
+        }}
+      for: "00:00:01"
+  conditions: []
+  actions:
+    - action: notify.mobile_app_iphone
+      data:
+        title: Battery selling
+        message: >-
+          Battery export has started at
+          {{ (states('sensor.saj_battery_power') | float(0) / 1000) | round(1) }} kW;
+          the site is exporting
+          {{ (states('sensor.saj_ct_grid_power_total') | float(0) / -1000) | round(1) }} kW.
+          Current FIT:
+          {{ (states('sensor.amber_express_trader_sheena_street_feed_in_price') | float(0) * 100) | round(1) }} c/kWh.
+        data:
+          tag: energy-optimizer-battery-selling
+    - wait_for_trigger:
+        - trigger: template
+          value_template: >-
+            {{
+              not (
+                is_state('input_boolean.battery_discharge', 'on')
+                and is_state('input_boolean.battery_charge', 'off')
+                and (states('sensor.saj_battery_power') | float(0)) > 1000
+                and (states('sensor.saj_ct_grid_power_total') | float(0)) < -1000
+              )
+            }}
+          for: "00:02:00"
+      timeout: "12:00:00"
+      continue_on_timeout: true
+  mode: single
+  max_exceeded: silent
+
+- id: energy_optimizer_ev_charging_notification
+  alias: Energy Optimizer - EV Charging iPhone Notification
+  description: >-
+    Notify once per physically measured Tesla charging session and rearm only
+    after charging has remained stopped for two minutes.
+  triggers:
+    - trigger: template
+      value_template: >-
+        {{
+          (states('sensor.tesla_ble_charge_power') | float(0)) > 1
+          or (states('sensor.tesla_charging_power') | float(0)) > 1
+        }}
+      for: "00:00:10"
+  conditions: []
+  actions:
+    - action: notify.mobile_app_iphone
+      data:
+        title: Car charging
+        message: >-
+          Tesla charging has started at
+          {{ states('number.tesla_ble_039d9c_charging_amps') | int(0) }} A three-phase
+          (about
+          {{ (states('number.tesla_ble_039d9c_charging_amps') | float(0) * 3 * 247 / 1000) | round(1) }} kW).
+        data:
+          tag: energy-optimizer-ev-start
+    - wait_for_trigger:
+        - trigger: template
+          value_template: >-
+            {{
+              (states('sensor.tesla_ble_charge_power') | float(0)) < 0.5
+              and (states('sensor.tesla_charging_power') | float(0)) < 0.5
+            }}
+          for: "00:02:00"
+      timeout: "16:00:00"
+      continue_on_timeout: true
+  mode: single
+  max_exceeded: silent
+
+- id: energy_optimizer_hot_water_start_notification
+  alias: Energy Optimizer - Hot Water Start iPhone Notification
+  description: >-
+    Notify when hot water is switched on; brief optimizer block gaps do not
+    rearm the alert.
+  triggers:
+    - trigger: state
+      entity_id: switch.hot_water
+      from: "off"
+      to: "on"
+  conditions: []
+  actions:
+    - action: notify.mobile_app_iphone
+      data:
+        title: Hot water heating
+        message: >-
+          Hot water has been turned on. Today's runtime is
+          {{ states('sensor.hot_water_runtime_today') | float(0) | round(2) }}
+          of 3 hours.
+        data:
+          tag: energy-optimizer-hot-water-start
+    - wait_for_trigger:
+        - trigger: state
+          entity_id: switch.hot_water
+          to: "off"
+          for: "00:30:00"
+      timeout: "08:00:00"
+      continue_on_timeout: true
+  mode: single
+  max_exceeded: silent
+
+- id: energy_optimizer_hot_water_complete_notification
+  alias: Energy Optimizer - Hot Water Complete iPhone Notification
+  description: >-
+    Notify once when the daily hot-water runtime reaches the three-hour service
+    target.
+  triggers:
+    - trigger: numeric_state
+      entity_id: sensor.hot_water_runtime_today
+      above: 2.99
+      for: "00:00:30"
+  conditions: []
+  actions:
+    - action: notify.mobile_app_iphone
+      data:
+        title: Hot water complete
+        message: Hot water has completed today's 3-hour heating allocation.
+        data:
+          tag: energy-optimizer-hot-water-complete
+  mode: single

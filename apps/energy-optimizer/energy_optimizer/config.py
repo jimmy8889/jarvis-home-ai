@@ -83,6 +83,11 @@ ENTITY = {
     "battery_soc": "sensor.saj_battery_1_soc",
     "battery_usable": "sensor.battery_usable_energy",
     "battery_power": "sensor.saj_battery_power_2",
+    # Unlike the MQTT battery-power entity above, this entity is supplied by
+    # the same polling SAJ Modbus integration as battery SOC.  Its fresh report
+    # is the source-health heartbeat when an unchanged SOC value itself has an
+    # old Home Assistant timestamp.
+    "battery_soc_heartbeat": "sensor.saj_battery_power",
     "pv_power": "sensor.pv_power_mqtt_abs",
     "pv_energy_today": "sensor.pv_energy_today_total",
     "home_load": "sensor.saj_home_load",

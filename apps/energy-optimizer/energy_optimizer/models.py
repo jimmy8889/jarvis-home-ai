@@ -5,6 +5,22 @@ from datetime import datetime
 from typing import Any
 
 
+@dataclass(frozen=True)
+class TelemetryHealth:
+    """Measurement ages required before either planner may actuate.
+
+    The SAJ SOC entity can legitimately retain an old Home Assistant timestamp
+    while its numeric value remains unchanged.  A separately polled power
+    entity from the same SAJ Modbus integration is therefore the explicit
+    source heartbeat for that value.  ``None`` means that freshness could not
+    be established and must never be treated as healthy.
+    """
+
+    soc_source_heartbeat_age_seconds: float | None
+    pv_age_seconds: float | None
+    load_age_seconds: float | None
+
+
 @dataclass
 class Slot:
     start: datetime

@@ -111,6 +111,10 @@ views:
           The active Amber interval is used at its exact five-minute price. A price-change
           event creates a new plan immediately; future intervals remain forecast-aware.
 
+          Battery export power is adaptive, not fixed: weaker FIT windows are throttled
+          to retain energy for better forecast prices, and each new target is applied
+          immediately without a software ramp.
+
           {% if p.warnings %}
           ### Current safeguards
           {% for warning in p.warnings %}- {{ warning }}
@@ -387,6 +391,14 @@ views:
           - automation.energy_optimizer_ev_trip_response
           - automation.energy_optimizer_ev_cheap_window
           - automation.energy_optimizer_ev_auto_actuator
+          - entity: automation.energy_optimizer_iphone_activity_notifications
+            name: Battery selling alerts
+          - entity: automation.energy_optimizer_ev_charging_iphone_notification
+            name: EV charging alerts
+          - entity: automation.energy_optimizer_hot_water_start_iphone_notification
+            name: Hot-water start alerts
+          - entity: automation.energy_optimizer_hot_water_complete_iphone_notification
+            name: Hot-water completion alerts
       - type: markdown
         entity_id:
           - sensor.energy_optimizer_status

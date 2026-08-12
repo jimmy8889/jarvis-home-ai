@@ -1,0 +1,19 @@
+- id: energy_optimizer_ev_requirement_date
+  alias: Energy Optimizer - EV Requirement Date
+  description: >-
+    Keeps the EV departure date aligned with the next 7am departure day
+    whenever the trip requirement changes.
+  triggers:
+    - trigger: state
+      entity_id: input_select.energy_optimizer_ev_trip
+    - trigger: state
+      entity_id: input_number.energy_optimizer_ev_custom_km
+  conditions: []
+  actions:
+    - action: input_datetime.set_datetime
+      target:
+        entity_id: input_datetime.energy_optimizer_ev_departure
+      data:
+        datetime: >-
+          {{ (now() + timedelta(days=1 if now().hour >= 7 else 0)).strftime('%Y-%m-%d') }} 07:00:00
+  mode: restart

@@ -269,12 +269,13 @@ views:
 
           ## 🚗 Car
           Recommendation: **{{ states('sensor.energy_optimizer_ev') | replace('_',' ') | title }}**  
-          Current SOC: **{{ states('sensor.tesla_battery_level') }}%** · charge limit: **{{ states('sensor.tesla_charge_limit_soc') }}%**  
+          Current SOC: **{{ states('sensor.tesla_battery_level') }}%** · configured charge limit: **{{ states('number.tesla_ble_039d9c_charging_limit') }}%**<br>
           Required energy: **{{ p.ev_required_kwh | float(0) | round(1) }} kWh** · target SOC: **{{ p.ev_target_soc_pct | float(0) | round(0) }}%**  
           Current plan: **{{ p.ev_charge_source | default('none') | replace('_',' ') | title }}** · **{{ p.ev_charge_amps_target | int(0) }} A three-phase / {{ p.ev_power_target_kw | float(0) | round(1) }} kW**
           Planned energy: **{{ p.ev_solar_energy_kwh | float(0) | round(1) }} kWh direct solar** · **{{ p.ev_fallback_energy_kwh | float(0) | round(1) }} kWh deadline fallback**
           Best window: **{{ as_timestamp(p.ev_charge_start, 0) | timestamp_custom('%a %-I:%M %p') }} – {{ as_timestamp(p.ev_charge_end, 0) | timestamp_custom('%a %-I:%M %p') }}**  
-          Estimated purchase/opportunity cost: **${{ p.ev_estimated_cost | float(0) | round(2) }}**
+          Estimated purchase/opportunity cost: **${{ p.ev_estimated_cost | float(0) | round(2) }}**<br>
+          Unanswered trip mode uses exceptionally low-FIT solar opportunistically up to the configured limit, but never diverts solar needed to refill the house battery.
       - type: entities
         title: Tomorrow’s EV requirement
         state_color: true
@@ -283,6 +284,8 @@ views:
             name: Trip distance
           - entity: input_number.energy_optimizer_ev_custom_km
             name: Custom distance
+          - entity: number.tesla_ble_039d9c_charging_limit
+            name: EV charge limit
           - entity: input_datetime.energy_optimizer_ev_departure
             name: Departure
           - entity: sensor.tesla_battery_level

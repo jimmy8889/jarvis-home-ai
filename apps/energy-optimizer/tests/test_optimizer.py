@@ -676,6 +676,54 @@ def test_ev_uses_negative_fit_direct_solar_without_battery_or_grid_support(tmp_p
     conservative_surplus = plan_slots[1].solar_low_kw - plan_slots[1].load_kw - plan_slots[1].hot_water_kw
     assert plan_slots[1].ev_power_target_kw <= conservative_surplus
     assert schedule.solar_energy_kwh == pytest.approx(schedule.required_kwh)
+
+
+def test_unanswered_ev_uses_low_fit_surplus_up_to_editable_charge_limit(tmp_path):
+    opt = optimizer(tmp_path)
+    now = datetime(2026, 8, 12, 8, 0, tzinfo=BRISBANE)
+    plan_slots = slots(now, fit=0.0, buy=0.20, solar=12.0, load=1.0, count=4)
+    plan_slots[0].export_price = 0.08
+    for item in plan_slots[1:]:
+        item.export_price = 0.0
+    states = ev_states(soc=80, departure=now + timedelta(hours=5), trip="Unanswered")
+    states[ENTITY["ev_charge_limit"]] = {"state": "90"}
+
+    schedule = opt._schedule_ev(
+        plan_slots,
+        states,
+        now,
+        battery_soc_pct=80,
+        battery_capacity_kwh=47,
+        evening=now + timedelta(hours=2),
+    )
+
+    assert schedule.target_soc_pct == 90
+    assert schedule.required_kwh > 0
+    assert schedule.solar_energy_kwh > 0
+    assert plan_slots[0].ev_charge_source == "none"
+    assert any(item.ev_charge_source == "direct_solar" for item in plan_slots[1:])
+
+
+def test_unanswered_ev_does_not_use_surplus_when_later_solar_cannot_refill_house_battery(tmp_path):
+    opt = optimizer(tmp_path)
+    now = datetime(2026, 8, 12, 8, 0, tzinfo=BRISBANE)
+    plan_slots = slots(now, fit=0.0, buy=0.20, solar=0.0, load=1.0, count=4)
+    plan_slots[0].solar_kw = plan_slots[0].solar_low_kw = 12.0
+    plan_slots[0].export_price = 0.0
+    states = ev_states(soc=10, departure=now + timedelta(hours=5), trip="Unanswered")
+    states[ENTITY["ev_charge_limit"]] = {"state": "90"}
+
+    schedule = opt._schedule_ev(
+        plan_slots,
+        states,
+        now,
+        battery_soc_pct=10,
+        battery_capacity_kwh=47,
+        evening=now + timedelta(hours=2),
+    )
+
+    assert schedule.solar_energy_kwh == 0
+    assert all(item.ev_charge_source == "none" for item in plan_slots)
     assert schedule.fallback_energy_kwh == 0.0
 
 

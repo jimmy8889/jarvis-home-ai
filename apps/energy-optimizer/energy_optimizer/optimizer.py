@@ -77,13 +77,12 @@ class EnergyOptimizer:
         )
 
         morning, evening = self._detect_crossovers(slots, now)
-        self._schedule_hot_water(slots, states, now, evening)
-        ev = self._schedule_ev(slots, states, now)
-
         raw_soc = numeric_state(states, ENTITY["battery_soc"], float("nan"))
         soc = raw_soc if math.isfinite(raw_soc) and 0.0 <= raw_soc <= 100.0 else 50.0
         capacity = numeric_state(states, ENTITY["battery_usable"], self.settings.battery_capacity_kwh)
         capacity = min(60.0, max(35.0, capacity))
+        self._schedule_hot_water(slots, states, now, evening)
+        ev = self._schedule_ev(slots, states, now, soc, capacity, evening)
         intervals = self._dispatch(slots, soc, capacity, evening, morning)
 
         first = intervals[0]
@@ -733,6 +732,9 @@ class EnergyOptimizer:
         slots: list[Slot],
         states: dict[str, dict[str, Any]],
         now: datetime,
+        battery_soc_pct: float = 50.0,
+        battery_capacity_kwh: float = 47.0,
+        evening: datetime | None = None,
     ) -> _EVSchedule:
         selection = str(states.get(ENTITY["ev_trip"], {}).get("state", "Unanswered")).lower()
         distances = {"no trip": 0.0, "local / 50 km": 50.0, "100 km": 100.0, "200 km": 200.0}
@@ -745,11 +747,22 @@ class EnergyOptimizer:
             or ("custom" in selection and distance > 0)
         )
         trip_energy = distance * self.settings.ev_kwh_per_km * self.settings.ev_trip_margin
+        configured_limit = numeric_state(
+            states,
+            ENTITY["ev_charge_limit"],
+            numeric_state(states, ENTITY["ev_limit"], 80.0),
+        )
+        configured_limit = min(100.0, max(40.0, configured_limit))
+        opportunistic_only = "unanswered" in selection
         target = max(
             self.settings.ev_minimum_departure_soc_pct,
             self.settings.ev_arrival_reserve_pct + 100 * trip_energy / self.settings.ev_usable_capacity_kwh,
         )
-        target = min(target, numeric_state(states, ENTITY["ev_limit"], 80.0))
+        target = min(target, configured_limit)
+        if opportunistic_only:
+            # There is no declared trip requirement, but the car may absorb
+            # otherwise-low-value solar all the way to its editable limit.
+            target = configured_limit
         current = numeric_state(states, ENTITY["ev_soc"], target)
         required = max(0.0, (target - current) / 100 * self.settings.ev_usable_capacity_kwh / 0.90)
         departure = self._departure(states, now)
@@ -773,8 +786,24 @@ class EnergyOptimizer:
         # shortfall.  Signed FIT is deliberately used for ordering: consuming
         # solar during the most-negative FIT periods is preferred first.
         solar_candidates: list[tuple[Slot, int]] = []
+        battery_energy = battery_capacity_kwh * battery_soc_pct / 100
+        full_energy = battery_capacity_kwh * self.settings.battery_evening_target_soc_pct / 100
         for slot in candidates:
             surplus_kw = max(0.0, slot.solar_low_kw - slot.load_kw - slot.hot_water_kw)
+            if opportunistic_only:
+                if slot.export_price > self.settings.ev_opportunistic_fit_max:
+                    continue
+                refill_deadline = evening or (slot.start + timedelta(hours=8))
+                future_surplus = sum(
+                    max(0.0, later.solar_low_kw - later.load_kw - later.hot_water_kw)
+                    * later.duration_h * self.settings.battery_charge_efficiency
+                    for later in slots
+                    if slot.start < later.start < refill_deadline
+                )
+                # Do not divert solar if the remaining conservative forecast
+                # cannot refill the house battery by evening.
+                if future_surplus + 1e-6 < max(0.0, full_energy - battery_energy):
+                    continue
             available_amps = self._ev_amps_for_power(surplus_kw, round_up=False)
             if available_amps >= self.settings.ev_min_charge_amps:
                 solar_candidates.append((slot, available_amps))

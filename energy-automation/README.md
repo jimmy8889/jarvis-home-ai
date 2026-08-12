@@ -161,6 +161,9 @@ Charging is three phase at approximately 247 V per phase, using 6–16 A, or rou
 Policy:
 
 - `Unanswered` and `No trip` are direct-solar-only modes.
+- `Unanswered` has no mandatory trip energy, but it may opportunistically use
+  exceptionally low-FIT solar up to `number.tesla_ble_039d9c_charging_limit`
+  when the conservative forecast still refills the house battery.
 - Direct-solar charging is capped to conservative surplus after household load and hot water.
 - `Local / 50 km`, `100 km`, `200 km`, or a positive custom distance creates an explicit departure requirement.
 - Deadline fallback is allowed only for an explicit trip when solar alone is insufficient.

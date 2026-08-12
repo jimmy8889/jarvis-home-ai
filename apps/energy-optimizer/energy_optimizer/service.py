@@ -23,7 +23,13 @@ CONTROL_ENTITIES = {
     ENTITY["battery_control"],
     ENTITY["rollout_approved"],
 }
-IMMEDIATE_REPLAN_ENTITIES = PRICE_ENTITIES | CONTROL_ENTITIES
+EV_REQUIREMENT_ENTITIES = {
+    ENTITY["ev_trip"],
+    ENTITY["ev_custom_km"],
+    ENTITY["ev_departure"],
+    ENTITY["ev_charge_limit"],
+}
+IMMEDIATE_REPLAN_ENTITIES = PRICE_ENTITIES | CONTROL_ENTITIES | EV_REQUIREMENT_ENTITIES
 TELEMETRY_CACHE_ENTITIES = {
     ENTITY["battery_soc"],
     ENTITY["battery_soc_heartbeat"],
@@ -361,9 +367,13 @@ class Coordinator:
                         self.last_price_event_at = received_at
                     else:
                         self.last_control_event_at = received_at
-                    self._fast_events.put_nowait(
-                        (revision, entity_id, received_at, received_monotonic)
-                    )
+                    # EV requirement changes need a fresh full schedule: a
+                    # retained-price fast plan would otherwise publish the
+                    # previous EV target until the next periodic cycle.
+                    if entity_id in PRICE_ENTITIES | CONTROL_ENTITIES:
+                        self._fast_events.put_nowait(
+                            (revision, entity_id, received_at, received_monotonic)
+                        )
                     self._queue_immediate_replan(entity_id, received_at)
                     reconnect_delay = 1.0
                 if not self._stop.is_set():

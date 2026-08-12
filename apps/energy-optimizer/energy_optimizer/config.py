@@ -61,6 +61,7 @@ class Settings:
     ev_max_charge_amps: int = 16
     ev_max_charge_kw: float = 11.86
     ev_default_departure_hour: int = 7
+    ev_opportunistic_fit_max: float = 0.01
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -115,6 +116,7 @@ ENTITY = {
     "ev_power": "sensor.tesla_charging_power",
     "ev_soc": "sensor.tesla_battery_level",
     "ev_limit": "sensor.tesla_charge_limit_soc",
+    "ev_charge_limit": "number.tesla_ble_039d9c_charging_limit",
     "ev_plugged": "binary_sensor.tesla_plugged_in",
     "ev_home": "device_tracker.tesla_location_2",
     "mode": "input_select.energy_optimizer_mode",

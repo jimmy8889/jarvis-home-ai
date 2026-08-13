@@ -1,0 +1,26 @@
+diff --git a/custom_components/saj_h2_modbus/charge_control.py b/custom_components/saj_h2_modbus/charge_control.py
+--- a/custom_components/saj_h2_modbus/charge_control.py
++++ b/custom_components/saj_h2_modbus/charge_control.py
+@@
++        ("anti_reflux_mode", "anti_reflux_mode"),
+         ("export_limit", "export_limit"),
+@@
++        "anti_reflux_mode": {"address": 0x365C, "label": "anti-reflux mode"},
+         "export_limit": {"address": 0x365A, "label": "export limit"},
+diff --git a/custom_components/saj_h2_modbus/number.py b/custom_components/saj_h2_modbus/number.py
+--- a/custom_components/saj_h2_modbus/number.py
++++ b/custom_components/saj_h2_modbus/number.py
+@@
++    {
++        "key": "anti_reflux_mode",
++        "name": "Anti-Reflux Mode",
++        "min": 0,
++        "max": 3,
++        "step": 1,
++        "default": 0,
++        "unit": None,
++        "setter": "set_anti_reflux_mode",
++        "allowed_values": [0, 1, 3],
++    },
+     {
+         "key": "export_limit",

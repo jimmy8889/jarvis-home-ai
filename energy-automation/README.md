@@ -176,27 +176,26 @@ Policy:
 
 ## Negative-FIT curtailment
 
-The generic SAJ `Export Limit (Input)` value is retained as an advisory
-integration control, but it is not trusted as evidence of physical
-curtailment. On this inverter, the verified control is
-`number.saj_grid_max_discharge_power_input`, whose scale is 0–1100 (1000 is
-100% of the verified 28 kW inverter output).
+The SAJ integration's `Export Limit (Input)` is the correct zero-export
+control, but its value only takes effect when anti-reflux mode is enabled.
+The installed integration was extended with
+`number.saj_anti_reflux_mode_input`, which writes register `0x365C`.
 
 When the optimiser publishes `sensor.energy_optimizer_pv_export = curtail`,
-the **Energy Optimizer - SAJ Negative-FIT Curtailment** automation sets that
-output ceiling every 15 seconds and on relevant load/plan changes. It reserves
-the larger of the measured house demand or the physically measured wall-
-connector demand, plus active hot water and a 0.5 kW margin. If a valid
-direct-solar EV request is waiting to start, it reserves the Tesla's minimum
-useful three-phase rate (about 4.5 kW), not the unproven full request.
+the **Energy Optimizer - SAJ Negative-FIT Zero Export** automation writes:
 
-The live grid meter then adjusts the SAJ ceiling by one 10%-of-inverter step
-at a time: sustained export lowers the ceiling; material import raises it.
-The cap never falls below the EV-start reserve while direct-solar EV charging
-is requested. When export is allowed again, it immediately restores 1100.
-This is deliberately a bounded feedback loop, rather than trusting an
-optimistic number entity or assuming a car has started simply because it was
-commanded.
+| SAJ setting | Value | Meaning |
+|---|---:|---|
+| Anti-reflux mode | 1 | total-power anti-reflux |
+| Export limit | 0 | no site export |
+| Grid maximum discharge | 1100 | does not constrain normal solar self-consumption |
+
+The inverter itself then follows the instantaneous load. This keeps the house,
+Tesla and hot water supplied from solar where available and imports only the
+small remainder, while holding export at zero during a negative FIT. It is
+more precise and less wasteful than artificially limiting all inverter output.
+When export is allowed again, anti-reflux is disabled and both limits are
+restored to 1100.
 
 ## Hot water
 
@@ -293,8 +292,7 @@ Before deployment:
 - Fixed the EV actuator's plan-field mapping and three-phase solar-current
   calculation; verified the wall connector charging from the current
   direct-solar plan.
-- Replaced blind negative-FIT export curtailment with the SAJ grid-output cap,
-  validated against live inverter power and the grid meter.
-- Made curtailment track physical wall-connector demand and apply bounded
-  grid-meter feedback, so a waiting Tesla no longer reserves a full 16 A worth
-  of solar while it is drawing nothing.
+- Replaced blind negative-FIT curtailment with a verified SAJ anti-reflux
+  control: mode 1 plus a 0 W export limit. Live validation showed inverter
+  output at 1.194 kW against a 1.247 kW house load, i.e. it followed demand
+  and avoided export rather than throttling the whole inverter.

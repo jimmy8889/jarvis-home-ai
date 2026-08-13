@@ -184,14 +184,19 @@ curtailment. On this inverter, the verified control is
 
 When the optimiser publishes `sensor.energy_optimizer_pv_export = curtail`,
 the **Energy Optimizer - SAJ Negative-FIT Curtailment** automation sets that
-output ceiling every 15 seconds and on relevant load/plan changes. It uses the
-greater of measured whole-house load and planned direct-solar EV plus
-hot-water demand, then uses the next 10%-of-inverter step plus a 0.5 kW
-margin. When export is allowed again, it immediately restores 1100.
+output ceiling every 15 seconds and on relevant load/plan changes. It reserves
+the larger of the measured house demand or the physically measured wall-
+connector demand, plus active hot water and a 0.5 kW margin. If a valid
+direct-solar EV request is waiting to start, it reserves the Tesla's minimum
+useful three-phase rate (about 4.5 kW), not the unproven full request.
 
-This avoids a curtailment deadlock: the planned EV power remains in the cap
-even while PV output is being reduced, so curtailment cannot starve the car
-and then infer that the car no longer needs solar.
+The live grid meter then adjusts the SAJ ceiling by one 10%-of-inverter step
+at a time: sustained export lowers the ceiling; material import raises it.
+The cap never falls below the EV-start reserve while direct-solar EV charging
+is requested. When export is allowed again, it immediately restores 1100.
+This is deliberately a bounded feedback loop, rather than trusting an
+optimistic number entity or assuming a car has started simply because it was
+commanded.
 
 ## Hot water
 
@@ -290,3 +295,6 @@ Before deployment:
   direct-solar plan.
 - Replaced blind negative-FIT export curtailment with the SAJ grid-output cap,
   validated against live inverter power and the grid meter.
+- Made curtailment track physical wall-connector demand and apply bounded
+  grid-meter feedback, so a waiting Tesla no longer reserves a full 16 A worth
+  of solar while it is drawing nothing.

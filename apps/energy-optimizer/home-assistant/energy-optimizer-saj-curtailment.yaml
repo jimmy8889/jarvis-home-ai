@@ -2,9 +2,10 @@
   alias: Energy Optimizer - SAJ Negative-FIT Curtailment
   description: >-
     Uses the verified SAJ grid-output limit during a negative-FIT curtail plan.
-    It preserves the house, planned direct-solar EV load and active hot-water
-    element, then restores the inverter's normal 110% limit immediately when
-    export is allowed again.
+    It starts a waiting EV at its minimum useful power, then follows its actual
+    wall-connector draw and trims one SAJ step from the live grid meter.  This
+    avoids exporting solar simply because a requested EV session has not yet
+    begun drawing power.
   triggers:
     - trigger: state
       entity_id: sensor.energy_optimizer_pv_export
@@ -14,6 +15,8 @@
         - sensor.energy_optimizer_hot_water
         - switch.hot_water
         - sensor.saj_home_load
+        - sensor.tesla_charging_power
+        - sensor.saj_ct_grid_power_total
     - trigger: time_pattern
       seconds: /15
     - trigger: homeassistant
@@ -28,26 +31,47 @@
         curtail_required: >-
           {{ is_state('sensor.energy_optimizer_pv_export', 'curtail') }}
         house_kw: "{{ states('sensor.saj_home_load') | float(0) / 1000 }}"
-        # The SAJ load meter excludes the wall connector, so include the
-        # optimiser's planned direct-solar EV load.  This also prevents a
-        # deadlock where curtailment starves the car, the car stops, and the
-        # lower inferred load then keeps PV unnecessarily curtailed.
-        ev_kw: >-
+        ev_requested: >-
           {% if states('sensor.energy_optimizer_ev') == 'charge' and
                 state_attr('sensor.energy_optimizer_ev', 'charge_source') == 'direct_solar' %}
-            {{ state_attr('sensor.energy_optimizer_ev', 'power_target_kw') | float(0) }}
+            true
+          {% else %}
+            false
+          {% endif %}
+        # The wall connector is the physical source of truth.  While a valid
+        # direct-solar request is waiting to start, reserve enough PV for the
+        # Tesla's minimum 6 A three-phase charge (~4.5 kW), but never assume
+        # the full requested 16 A is already being consumed.
+        ev_actual_kw: "{{ states('sensor.tesla_charging_power') | float(0) }}"
+        ev_required_kw: >-
+          {% if ev_actual_kw | float(0) >= 1 %}
+            {{ ev_actual_kw | float(0) }}
+          {% elif ev_requested | bool %}
+            4.5
           {% else %}
             0
           {% endif %}
         hot_water_kw: "{{ 3.7 if is_state('switch.hot_water', 'on') else 0 }}"
-        # Once the car starts, the SAJ house meter includes it.  Use the
-        # larger of measured whole-house demand and the pre-start flexible-load
-        # commitment so neither case is double-counted.
-        required_output_kw: >-
-          {{ [house_kw | float(0), ev_kw | float(0) + hot_water_kw | float(0)] | max + 0.5 }}
-        curtail_limit_pct: >-
+        required_output_kw: "{{ [house_kw | float(0), ev_required_kw | float(0) + hot_water_kw | float(0)] | max + 0.5 }}"
+        base_limit_pct: >-
           {% set raw = ((required_output_kw | float(0) / 28) * 10) | round(0, 'ceil') | int * 100 %}
-          {{ [[raw, 100] | max, 1000] | min }}
+          {{ [[raw, 300] | max, 1000] | min }}
+        current_limit_pct: "{{ states('number.saj_grid_max_discharge_power_input') | int(1100) }}"
+        grid_kw: "{{ states('sensor.saj_ct_grid_power_total') | float(0) / 1000 }}"
+        # CT export is negative. Correct only one 2.8 kW SAJ step at a time,
+        # never below the EV-start reserve, so telemetry noise cannot swing
+        # the site from export to import.
+        curtail_limit_pct: >-
+          {% set base = base_limit_pct | int(300) %}
+          {% set current = current_limit_pct | int(1100) %}
+          {% set grid = grid_kw | float(0) %}
+          {% if grid < -1.5 %}
+            {{ [[current - 100, base] | max, 300] | max }}
+          {% elif grid > 1.5 %}
+            {{ [[current + 100, base] | max, 1000] | min }}
+          {% else %}
+            {{ base }}
+          {% endif %}
     - choose:
         - conditions:
             - condition: template

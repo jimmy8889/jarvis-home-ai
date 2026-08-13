@@ -169,6 +169,29 @@ Policy:
 - Deadline fallback is allowed only for an explicit trip when solar alone is insufficient.
 - A fallback/mixed EV slot cannot discharge the stationary battery. Solar or grid must supply the shortfall.
 - The Home Assistant actuator independently rejects fallback unless a trip is explicit and `input_boolean.battery_discharge` is off.
+- The actuator reads the EV action from the optimiser sensor state and the
+  source from `charge_source`; it derives the available three-phase current as
+  `solar kW × 1000 / (3 × 247 V)`. This avoids treating a live solar plan as
+  idle or underestimating the available current.
+
+## Negative-FIT curtailment
+
+The generic SAJ `Export Limit (Input)` value is retained as an advisory
+integration control, but it is not trusted as evidence of physical
+curtailment. On this inverter, the verified control is
+`number.saj_grid_max_discharge_power_input`, whose scale is 0–1100 (1000 is
+100% of the verified 28 kW inverter output).
+
+When the optimiser publishes `sensor.energy_optimizer_pv_export = curtail`,
+the **Energy Optimizer - SAJ Negative-FIT Curtailment** automation sets that
+output ceiling every 15 seconds and on relevant load/plan changes. It uses the
+greater of measured whole-house load and planned direct-solar EV plus
+hot-water demand, then uses the next 10%-of-inverter step plus a 0.5 kW
+margin. When export is allowed again, it immediately restores 1100.
+
+This avoids a curtailment deadlock: the planned EV power remains in the cap
+even while PV output is being reduced, so curtailment cannot starve the car
+and then infer that the car no longer needs solar.
 
 ## Hot water
 
@@ -259,3 +282,11 @@ Before deployment:
   conservatively feasible.
 - Added the expected hot-water operating window and scheduled hours to the
   Flexible Loads dashboard.
+
+### 2026-08-13
+
+- Fixed the EV actuator's plan-field mapping and three-phase solar-current
+  calculation; verified the wall connector charging from the current
+  direct-solar plan.
+- Replaced blind negative-FIT export curtailment with the SAJ grid-output cap,
+  validated against live inverter power and the grid meter.

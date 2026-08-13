@@ -1,0 +1,68 @@
+- id: energy_optimizer_saj_curtailment_governor
+  alias: Energy Optimizer - SAJ Negative-FIT Curtailment
+  description: >-
+    Uses the verified SAJ grid-output limit during a negative-FIT curtail plan.
+    It preserves the house, planned direct-solar EV load and active hot-water
+    element, then restores the inverter's normal 110% limit immediately when
+    export is allowed again.
+  triggers:
+    - trigger: state
+      entity_id: sensor.energy_optimizer_pv_export
+    - trigger: state
+      entity_id:
+        - sensor.energy_optimizer_ev
+        - sensor.energy_optimizer_hot_water
+        - switch.hot_water
+        - sensor.saj_home_load
+    - trigger: time_pattern
+      seconds: /15
+    - trigger: homeassistant
+      event: start
+  conditions: []
+  actions:
+    - variables:
+        gates_ok: >-
+          {{ is_state('input_select.energy_optimizer_mode', 'Active') and
+             is_state('input_boolean.energy_optimizer_rollout_approved', 'on') and
+             is_state('input_boolean.energy_optimizer_manual_override', 'off') }}
+        curtail_required: >-
+          {{ is_state('sensor.energy_optimizer_pv_export', 'curtail') }}
+        house_kw: "{{ states('sensor.saj_home_load') | float(0) / 1000 }}"
+        # The SAJ load meter excludes the wall connector, so include the
+        # optimiser's planned direct-solar EV load.  This also prevents a
+        # deadlock where curtailment starves the car, the car stops, and the
+        # lower inferred load then keeps PV unnecessarily curtailed.
+        ev_kw: >-
+          {% if states('sensor.energy_optimizer_ev') == 'charge' and
+                state_attr('sensor.energy_optimizer_ev', 'charge_source') == 'direct_solar' %}
+            {{ state_attr('sensor.energy_optimizer_ev', 'power_target_kw') | float(0) }}
+          {% else %}
+            0
+          {% endif %}
+        hot_water_kw: "{{ 3.7 if is_state('switch.hot_water', 'on') else 0 }}"
+        # Once the car starts, the SAJ house meter includes it.  Use the
+        # larger of measured whole-house demand and the pre-start flexible-load
+        # commitment so neither case is double-counted.
+        required_output_kw: >-
+          {{ [house_kw | float(0), ev_kw | float(0) + hot_water_kw | float(0)] | max + 0.5 }}
+        curtail_limit_pct: >-
+          {% set raw = ((required_output_kw | float(0) / 28) * 10) | round(0, 'ceil') | int * 100 %}
+          {{ [[raw, 100] | max, 1000] | min }}
+    - choose:
+        - conditions:
+            - condition: template
+              value_template: "{{ gates_ok | bool and curtail_required | bool }}"
+          sequence:
+            - action: number.set_value
+              target:
+                entity_id: number.saj_grid_max_discharge_power_input
+              data:
+                value: "{{ curtail_limit_pct | int }}"
+      default:
+        - action: number.set_value
+          target:
+            entity_id: number.saj_grid_max_discharge_power_input
+          data:
+            value: 1100
+  mode: restart
+  max_exceeded: silent

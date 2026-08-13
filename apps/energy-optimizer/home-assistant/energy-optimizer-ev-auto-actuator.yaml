@@ -37,8 +37,11 @@
         car_ready: >-
           {{ is_state('binary_sensor.tesla_plugged_in', 'on') and
              is_state('device_tracker.tesla_location_2', 'home') }}
-        plan_action: "{{ state_attr('sensor.energy_optimizer_ev', 'action') | default('idle', true) }}"
-        plan_source: "{{ state_attr('sensor.energy_optimizer_ev', 'source') | default('none', true) }}"
+        # The optimiser publishes its action as the sensor state and the
+        # energy source as `charge_source`; using nonexistent attributes made
+        # every live plan look idle and repeatedly stopped the car.
+        plan_action: "{{ states('sensor.energy_optimizer_ev') | default('idle', true) }}"
+        plan_source: "{{ state_attr('sensor.energy_optimizer_ev', 'charge_source') | default('none', true) }}"
         planned_amps: "{{ state_attr('sensor.energy_optimizer_ev', 'charge_amps_target') | int(0) }}"
         trip_selection: "{{ states('input_select.energy_optimizer_ev_trip') | lower }}"
         explicit_trip_required: >-
@@ -51,10 +54,12 @@
              is_state('input_boolean.battery_discharge', 'off') }}
         source_allowed: >-
           {{ (plan_source == 'direct_solar') or (fallback_allowed | bool) }}
-        pv_kw: "{{ states('sensor.saj_total_load_power') | float(0) / 1000 }}"
-        load_kw: "{{ states('sensor.saj_total_load_power_2') | float(0) / 1000 }}"
+        # Use the actual PV and household-load meters, both in watts.
+        pv_kw: "{{ states('sensor.pv_power_mqtt_abs') | float(0) / 1000 }}"
+        load_kw: "{{ states('sensor.saj_home_load') | float(0) / 1000 }}"
         direct_solar_kw: "{{ [0, pv_kw - load_kw] | max }}"
-        direct_solar_amps: "{{ (direct_solar_kw * 1000 / (1.732 * 247)) | int(0) }}"
+        # The Tesla control is three phase: kW = 3 × 247 V × A / 1000.
+        direct_solar_amps: "{{ (direct_solar_kw * 1000 / (3 * 247)) | int(0) }}"
         target_amps: >-
           {% if plan_source == 'direct_solar' %}
             {{ [16, planned_amps, direct_solar_amps] | min }}

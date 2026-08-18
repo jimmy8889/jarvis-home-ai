@@ -201,6 +201,9 @@ restored to 1100.
 
 - The element is modelled as a 3.7 kW binary load.
 - It receives three hours in minimum 15-minute dwell blocks.
+- A valid new optimiser start is applied immediately. The dwell applies only
+  to stopping an already-active element, so a recent off command can never
+  hold up the next scheduled heating block.
 - Blocks are selected by lowest opportunity cost, including negative FIT periods and otherwise-curtailed solar.
 - The Flexible Loads dashboard shows the expected optimiser start, finish, and
   scheduled hours for the current hot-water plan.
@@ -296,3 +299,6 @@ Before deployment:
   control: mode 1 plus a 0 W export limit. Live validation showed inverter
   output at 1.194 kW against a 1.247 kW house load, i.e. it followed demand
   and avoided export rather than throttling the whole inverter.
+- Re-enabled the Hot Water Control production gate and corrected the actuator
+  dwell condition. Live verification: planned state on, switch on, 3.914 kW
+  measured element power, and physical heating confirmation on.

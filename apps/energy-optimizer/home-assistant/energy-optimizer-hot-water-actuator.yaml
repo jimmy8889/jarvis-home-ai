@@ -1,0 +1,68 @@
+- id: energy_optimizer_hot_water_actuator
+  alias: Energy Optimizer - Hot Water Plan Actuator
+  description: >-
+    Production actuator for fresh optimiser hot-water commands. It immediately
+    starts a valid new heating block, while retaining a 15-minute minimum
+    on-dwell before a planned stop can interrupt it. Disarming stays immediate.
+  triggers:
+    - trigger: state
+      entity_id: sensor.energy_optimizer_hot_water
+      id: plan
+    - trigger: time_pattern
+      minutes: /5
+      id: watchdog
+    - trigger: state
+      entity_id:
+        - input_select.energy_optimizer_mode
+        - input_boolean.energy_optimizer_hot_water_control
+        - input_boolean.energy_optimizer_rollout_approved
+        - input_boolean.energy_optimizer_manual_override
+      id: gate_changed
+  conditions: []
+  actions:
+    - variables:
+        gates_enabled: >-
+          {{ is_state('input_select.energy_optimizer_mode', 'Active') and
+             is_state('input_boolean.energy_optimizer_hot_water_control', 'on') and
+             is_state('input_boolean.energy_optimizer_rollout_approved', 'on') and
+             is_state('input_boolean.energy_optimizer_manual_override', 'off') }}
+        plan_fresh: >-
+          {{ as_timestamp(state_attr('sensor.energy_optimizer_hot_water',
+             'valid_until'), 0) > as_timestamp(now()) }}
+        # A dwell protects an active heating block from being interrupted; it
+        # must never delay a valid new start simply because the switch was off
+        # recently.
+        on_dwell_ok: >-
+          {{ not is_state('switch.hot_water', 'on') or
+             as_timestamp(now()) - as_timestamp(states.switch.hot_water.last_changed) >= 900 }}
+        off_dwell_ok: >-
+          {{ not is_state('switch.hot_water', 'on') or
+             as_timestamp(now()) - as_timestamp(states.switch.hot_water.last_changed) >= 900 }}
+        runtime: "{{ states('sensor.hot_water_runtime_today') | float(0) }}"
+    - choose:
+        - conditions:
+            - condition: template
+              value_template: "{{ trigger.id == 'gate_changed' and not gates_enabled | bool }}"
+          sequence:
+            - action: switch.turn_off
+              target:
+                entity_id: switch.hot_water
+        - conditions:
+            - condition: template
+              value_template: >-
+                {{ gates_enabled | bool and plan_fresh | bool and on_dwell_ok | bool and
+                   runtime | float(0) < 3 and is_state('sensor.energy_optimizer_hot_water', 'on') }}
+          sequence:
+            - action: switch.turn_on
+              target:
+                entity_id: switch.hot_water
+        - conditions:
+            - condition: template
+              value_template: >-
+                {{ gates_enabled | bool and plan_fresh | bool and off_dwell_ok | bool and
+                   is_state('sensor.energy_optimizer_hot_water', 'off') }}
+          sequence:
+            - action: switch.turn_off
+              target:
+                entity_id: switch.hot_water
+  mode: restart

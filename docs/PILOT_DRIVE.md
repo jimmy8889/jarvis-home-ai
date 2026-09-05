@@ -47,7 +47,7 @@ ingress must publish only the device API paths needed by paired clients.
 ```mermaid
 flowchart LR
     App["Pilot Drive\nKeychain device credential"] -->|"HTTPS, device capabilities"| Core["Pilot Core VehicleService"]
-    Core -->|"curated state and allowlisted services"| HA["Home Assistant\nTesla Custom v3.27.0"]
+    Core -->|"curated state and allowlisted services"| HA["Home Assistant\nNative Tesla Fleet + Pilot Vehicle"]
     Core -->|"bearer token, bounded reads"| Adapter["pilot-teslamate-adapter 0.1.0\n10.0.1.192:8781"]
     Adapter -->|"SELECT-only role"| DB["TeslaMate 4.0.1 PostgreSQL"]
     Core --> Local["Pilot storage\ndestinations, care, receipts, actions, audit"]
@@ -65,16 +65,19 @@ bounded fallback state reads when required.
 
 ## Tesla provider decision
 
-Keep Tesla Custom/HACS `v3.27.0` active for v1 controls and TeslaMate MQTT
-synchronisation. Keep the disabled native Home Assistant Tesla Fleet
-integration disabled to prevent duplicate polling. Do not configure a second
-direct Tesla client in Pilot Core.
+Native Home Assistant Tesla Fleet is the sole current-state/control provider.
+The `pilot_vehicle.send_navigation` custom service is the only route bridge; it
+accepts a native HA device target and bounded coordinates, then calls the
+signed Fleet `navigation_gps_request` command. Pilot Core never receives Tesla
+credentials, VINs, or provider identifiers. TeslaMate remains the historical
+source and its MQTT synchronisation is unchanged.
 
-Home Assistant's native Tesla Fleet integration remains the preferred future
-provider, but migration is deferred until the required route command and the
-full accepted control workflow are available. Migration also requires Tesla
-developer credentials, public-key hosting, command signing, and an explicit
-usage-billing decision.
+Fleet setup requires a Tesla Developer application with Vehicle Information,
+Vehicle Location, and Vehicle Commands scopes, the public key at
+`https://ip.jameshomeautomation.work/.well-known/appspecific/com.tesla.3p.public-key.pem`,
+and virtual-key enrollment for Jarvis. Keep Tesla Custom available during the
+rollout and disable it only after native controls and one physically confirmed
+route pass; see `docs/HOME_ASSISTANT_TESLA_FLEET_MIGRATION.md`.
 
 ## TeslaMate adapter deployment
 
@@ -147,12 +150,22 @@ Saved destinations include a name, address, coordinates, icon, climate flag,
 optional temperature override, and optional front-right seat climate mode.
 The destination editor can search MapKit for an address or place, populate the
 required address and coordinates, and still supports moving the pin manually.
+Use **Send to Jarvis** to run the destination workflow immediately without
+saving the place; **Save** keeps it as a reusable Quick Destination.
 The supported seat modes are off; heat low, medium, and high; and cool low,
 medium, and high. A one-tap request is idempotent on the server and reports
 wake, climate, temperature, front-right seat, and route independently. A
 climate or seat failure does not block the route and Pilot Core never issues an
 automatic compensating command. The result sheet offers explicit retry and
 Stop Climate actions.
+
+When Tesla Fleet has a route loaded, the Car surface also shows the active
+Tesla navigation destination, remaining distance, arrival estimate, and
+estimated state of charge at arrival. These are separate from Pilot Drive's
+saved quick destinations. Enable the native Fleet entities **Destination**
+and **State of charge at arrival** in Home Assistant if they are disabled by
+default; the configured entity IDs are `sensor.jarvis_destination` and
+`sensor.jarvis_state_of_charge_at_arrival`.
 
 Controls are rendered only when configured in Pilot Core. Unlock, remote
 start, HomeLink, valet changes, closure/window movement, and software install

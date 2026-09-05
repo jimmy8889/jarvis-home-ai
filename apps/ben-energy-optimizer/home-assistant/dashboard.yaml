@@ -1,0 +1,86 @@
+title: Ben Energy Optimizer
+views:
+  - title: Energy
+    path: energy
+    icon: mdi:battery-sync
+    cards:
+      - type: markdown
+        visibility:
+          - condition: state
+            entity: input_select.ben_manual_mode
+            state_not: Stopped
+        content: >-
+          # ⚠ Manual {{ states('input_select.ben_manual_mode') }} active
+
+          Requested: **{{ states('input_number.ben_manual_grid_rate') }} kW** · Achieved grid: **{{ states('sensor.site_grid_power_nr_4') }} kW**
+
+          Started: {{ states('input_text.ben_manual_session_started') }}. Automatic Amber planning is overridden until Stop.
+      - type: button
+        name: STOP MANUAL MODE
+        icon: mdi:stop-circle
+        show_state: false
+        tap_action:
+          action: perform-action
+          perform_action: input_button.press
+          target: {entity_id: input_button.ben_manual_stop}
+        visibility:
+          - condition: state
+            entity: input_select.ben_manual_mode
+            state_not: Stopped
+      - type: glance
+        title: Live site
+        columns: 5
+        entities:
+          - entity: sensor.site_pv_power_nr_4
+            name: Solar
+          - entity: sensor.site_load_power_nr_4
+            name: Load
+          - entity: sensor.site_battery_power_nr_4
+            name: Battery
+          - entity: sensor.site_battery_soc_nr_4
+            name: SOC
+          - entity: sensor.site_grid_power_nr_4
+            name: Grid
+      - type: entities
+        title: Amber and current plan
+        entities:
+          - sensor.amber_express_trader_container_general_price
+          - sensor.amber_express_trader_container_feed_in_price
+          - sensor.ben_optimizer_action
+          - sensor.ben_optimizer_dynamic_reserve
+          - sensor.ben_optimizer_net_benefit
+          - input_text.ben_optimizer_actuator_status
+          - input_boolean.ben_optimizer_enabled
+      - type: entities
+        title: Why and what is next
+        entities:
+          - sensor.ben_optimizer_reason
+          - sensor.ben_optimizer_battery_target
+          - sensor.ben_optimizer_site_grid_target
+          - sensor.ben_optimizer_next_buy
+          - sensor.ben_optimizer_next_sell
+          - sensor.ben_optimizer_forecast_horizon
+          - sensor.ben_optimizer_confidence
+      - type: entities
+        title: Economic controls
+        entities:
+          - input_number.ben_optimizer_buy_price
+          - input_number.ben_optimizer_sell_price
+      - type: entities
+        title: Manual site test
+        entities:
+          - input_number.ben_manual_grid_rate
+          - input_button.ben_manual_start_import
+          - input_button.ben_manual_start_export
+          - input_button.ben_manual_stop
+          - input_select.ben_manual_mode
+          - input_boolean.ben_manual_fault
+      - type: history-graph
+        title: Power and SOC
+        hours_to_show: 24
+        entities:
+          - sensor.site_pv_power_nr_4
+          - sensor.site_load_power_nr_4
+          - sensor.site_battery_power_nr_4
+          - sensor.site_grid_power_nr_4
+          - sensor.site_battery_soc_nr_4

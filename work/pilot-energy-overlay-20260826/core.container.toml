@@ -1,0 +1,501 @@
+[server]
+listen_host = "0.0.0.0"
+listen_port = 8770
+database_path = "/data/pilot.db"
+audio_asset_path = "/data/audio"
+audio_asset_max_bytes = 20000000
+audio_asset_retention_seconds = 3600
+meeting_asset_path = "/data/meetings"
+meeting_asset_max_bytes = 2000000000
+public_upload_base_url = ""
+public_client_base_url = "https://pilot.jameshomeautomation.work"
+firmware_asset_path = "/data/firmware"
+firmware_asset_max_bytes = 8000000
+vehicle_asset_path = "/data/vehicle-assets"
+vehicle_asset_max_bytes = 10000000
+voice_audio_max_bytes = 1600000
+conversation_session_ttl_seconds = 900
+conversation_max_turns = 20
+admin_token_env = "PILOT_CORE_ADMIN_TOKEN"
+bootstrap_token_env = "PILOT_CORE_BOOTSTRAP_TOKEN"
+legacy_bootstrap_enabled = false
+
+[integrations]
+music_assistant_url = "http://10.0.2.72:8095"
+music_assistant_token_env = "MUSIC_ASSISTANT_TOKEN"
+home_assistant_url = "http://10.0.2.72:8123"
+home_assistant_token_env = "HOME_ASSISTANT_TOKEN"
+home_assistant_assist_pipeline_id = "01kxkqhhw28z558e2b99nwzk0z"
+home_assistant_assist_language = "en"
+home_assistant_assist_timeout_seconds = 60
+energy_manager_url = "http://10.0.1.205:8787"
+energy_manager_timeout_seconds = 2
+energy_manager_snapshot_interval_seconds = 2
+energy_manager_plan_interval_seconds = 20
+energy_manager_stale_after_seconds = 10
+weather_entity_id = "weather.geebung"
+sun_entity_id = "sun.sun"
+outdoor_temperature_entity_id = "sensor.gw1100c_outdoor_temperature"
+indoor_temperature_entity_id = "sensor.temp3_temperature"
+temperature_history_hours = 24
+home_timezone = "Australia/Brisbane"
+vehicle_home_geofence_entity_id = "sensor.tesla_geofence"
+energy_solar_power_entity_id = "sensor.pv_power_mqtt_abs"
+energy_grid_power_entity_id = "sensor.saj_ct_grid_power_total"
+energy_battery_power_entity_id = "sensor.saj_battery_power_2"
+energy_battery_soc_entity_id = "sensor.saj_battery_1_soc"
+energy_home_load_entity_id = "sensor.saj_home_load"
+energy_server_power_entity_id = "sensor.server_desk_power"
+energy_vehicle_connected_entity_id = "binary_sensor.tesla_wall_connector_vehicle_connected"
+energy_vehicle_power_entity_id = "sensor.tesla_charging_power"
+energy_vehicle_soc_entity_id = "sensor.jarvis_battery"
+energy_solar_today_entity_ids = ["sensor.saj_power_current_day", "sensor.saj_today_pv_energy_2", "sensor.saj_today_pv_energy_3"]
+energy_home_today_entity_id = "sensor.saj_total_today_load"
+energy_grid_export_today_entity_id = "sensor.saj_sum_all_phases_sell_today"
+energy_history_hours = 24
+amber_import_price_entity_id = "sensor.amber_01k9pncwz9prbf508wt588p9mn_amber_price_now"
+amber_feed_in_price_entity_id = "sensor.amber_01k9pncwz9prbf508wt588p9mn_amber_fit_now"
+amber_feed_in_forecast_entity_id = "sensor.amber_express_trader_sheena_street_feed_in_price"
+tesla_charging_mode_entity_id = "input_select.tesla_charging_mode"
+office_sim_rig_switch_entity_id = "switch.james_office_sim_rig_master"
+codex_usage_used_entity_id = "sensor.codex_5_hour_used"
+codex_usage_remaining_entity_id = "sensor.codex_5_hour_remaining"
+codex_usage_reset_entity_id = "sensor.codex_5_hour_reset"
+teslamate_adapter_url = "http://10.0.1.192:8781"
+teslamate_adapter_token_env = "PILOT_TESLAMATE_ADAPTER_TOKEN"
+media_room_mode_on_script_id = "script.movie_mode_on"
+media_room_mode_off_script_id = "script.movie_mode_off"
+temperature_office_entity_id = "sensor.office_broadlink_temperature"
+temperature_tv_room_entity_id = "sensor.gw1100c_indoor_temperature"
+temperature_bedroom_entity_id = "sensor.temp3_temperature"
+temperature_media_room_entity_id = "sensor.media_room_broadlink_temperature"
+proxmox_url = "https://10.0.1.120:8006"
+proxmox_token_id = "pilot-monitor@pve!pilot-core"
+proxmox_token_secret_env = "PROXMOX_TOKEN_SECRET"
+proxmox_migration_token_id = "pilot-migrate@pve!pilot-core"
+proxmox_migration_token_secret_env = "PROXMOX_MIGRATION_TOKEN_SECRET"
+proxmox_verify_tls = false
+truenas_url = "https://10.0.1.102"
+truenas_token_env = "TRUENAS_API_KEY"
+# TrueNAS currently presents its factory self-signed localhost certificate.
+# Transport remains encrypted, but hostname/CA verification must stay disabled
+# until a LAN-valid certificate is installed on the appliance.
+truenas_verify_tls = false
+homelab_cache_seconds = 5
+tts_provider = "openai"
+tts_url = "http://10.0.1.43:8030/v1/audio/speech"
+tts_token_env = "PILOT_TTS_TOKEN"
+# Optional Kokoro-82M sidecar on the RTX 3080. Kokoro voice IDs (bm_*/bf_*)
+# are routed here while Qwen remains the default engine for its own voices.
+tts_kokoro_url = "http://10.0.1.43:8032/v1/audio/speech"
+tts_kokoro_token_env = "PILOT_KOKORO_TOKEN"
+tts_engine_id = ""
+tts_model = "tts"
+tts_voice = "serena"
+tts_format = "wav"
+tts_language = "en_US"
+tts_sample_rate = 16000
+tts_sample_channels = 1
+tts_sample_bytes = 2
+tts_timeout_seconds = 30
+voice_stt_url = "http://10.0.1.43:8031/v1"
+voice_stt_token_env = "PILOT_VOICE_STT_TOKEN"
+voice_stt_model = "small.en"
+voice_stt_timeout_seconds = 20
+llm_provider = "vllm"
+llm_url = "http://10.0.1.219:8000/v1"
+llm_token_env = "PILOT_LLM_TOKEN"
+llm_model = "auto"
+llm_reasoning_effort = ""
+llm_timeout_seconds = 60
+llm_max_output_tokens = 1024
+llm_max_tool_rounds = 4
+llm_context_turns = 12
+llm_fast_context_tokens = 8192
+llm_standard_context_tokens = 16384
+llm_deep_context_tokens = 65536
+llm_hermes_context_tokens = 65536
+llm_experimental_context_tokens = 131072
+llm_fast_output_tokens = 512
+llm_standard_output_tokens = 1024
+llm_deep_output_tokens = 2048
+llm_hermes_output_tokens = 4096
+meeting_stt_url = ""
+meeting_stt_token_env = "PILOT_MEETING_STT_TOKEN"
+meeting_stt_model = "whisper-1"
+meeting_stt_timeout_seconds = 600
+meeting_analysis_model = "auto"
+meeting_transcript_max_characters = 500000
+
+[[integrations.llm_backends]]
+id = "omarchy-rtx3080-primary"
+url = "http://10.0.1.219:8000/v1"
+token_env = "PILOT_LLM_3080_TOKEN"
+model = "primary"
+roles = ["assistant", "reasoning", "meeting"]
+priority = 10
+max_output_tokens = 1536
+timeout_seconds = 90
+
+# The RTX 3080 exposes one GPU mode at a time. When verifier mode is active it
+# is a bounded assistant fallback; in speech mode this route is simply offline.
+[[integrations.llm_backends]]
+id = "omarchy-rtx3080-verifier"
+url = "http://10.0.1.219:8000/v1"
+token_env = "PILOT_LLM_3080_TOKEN"
+model = "verifier"
+roles = ["assistant", "verification"]
+priority = 100
+max_output_tokens = 1024
+timeout_seconds = 60
+
+[[integrations.llm_backends]]
+id = "omarchy-rtx3080-vision"
+url = "http://10.0.1.219:8000/v1"
+token_env = "PILOT_LLM_3080_TOKEN"
+model = "vision"
+roles = ["vision"]
+priority = 10
+max_output_tokens = 1024
+timeout_seconds = 60
+
+[[vehicles]]
+id = "jarvis"
+name = "Jarvis"
+teslamate_car_id = 1
+default_climate_target_c = 22.0
+manual_battery_baseline_kwh = 75.0
+
+[vehicles.telemetry]
+state = "binary_sensor.jarvis_status"
+online = "binary_sensor.jarvis_status"
+battery_percent = "sensor.jarvis_battery_level"
+rated_range_km = "sensor.jarvis_battery_range"
+odometer_km = "sensor.jarvis_odometer_2"
+latitude = "device_tracker.jarvis_location"
+longitude = "device_tracker.jarvis_location"
+location_name = "device_tracker.jarvis_location"
+inside_temperature_c = "sensor.jarvis_inside_temperature"
+outside_temperature_c = "sensor.jarvis_outside_temperature"
+locked = "lock.jarvis_lock"
+frunk = "cover.jarvis_frunk_2"
+trunk = "cover.jarvis_trunk_2"
+charging_state = "sensor.jarvis_charging"
+charge_port = "cover.jarvis_charge_port_door"
+charge_limit_percent = "number.jarvis_charge_limit_2"
+charge_rate_kw = "sensor.jarvis_charger_power_2"
+time_to_full_hours = "sensor.jarvis_time_to_full_charge"
+energy_added_kwh = "sensor.jarvis_charge_energy_added"
+navigation_destination = "sensor.jarvis_destination"
+distance_to_destination_km = "sensor.jarvis_distance_to_arrival_2"
+time_to_destination_hours = "sensor.jarvis_time_to_arrival"
+state_of_charge_at_arrival_percent = "sensor.jarvis_state_of_charge_at_arrival"
+tyre_front_left_bar = "sensor.jarvis_tire_pressure_front_left"
+tyre_front_right_bar = "sensor.jarvis_tire_pressure_front_right"
+tyre_rear_left_bar = "sensor.jarvis_tire_pressure_rear_left"
+tyre_rear_right_bar = "sensor.jarvis_tire_pressure_rear_right"
+
+[vehicles.controls.wake]
+domain = "button"
+service = "press"
+entity_id = "button.jarvis_wake"
+
+[vehicles.controls.wake.home]
+domain = "button"
+service = "press"
+entity_id = "button.tesla_ble_039d9c_wake_up"
+
+[vehicles.controls.lock]
+domain = "lock"
+service = "lock"
+entity_id = "lock.jarvis_lock"
+observable_entity_id = "lock.jarvis_lock"
+
+[vehicles.controls.lock.home]
+domain = "lock"
+service = "lock"
+entity_id = "lock.tesla_ble_lock_car"
+
+[vehicles.controls.unlock]
+domain = "lock"
+service = "unlock"
+entity_id = "lock.jarvis_lock"
+observable_entity_id = "lock.jarvis_lock"
+
+[vehicles.controls.unlock.home]
+domain = "lock"
+service = "unlock"
+entity_id = "lock.tesla_ble_lock_car"
+
+[vehicles.controls.open_frunk]
+domain = "cover"
+service = "open_cover"
+entity_id = "cover.jarvis_frunk_2"
+observable_entity_id = "cover.jarvis_frunk_2"
+
+[vehicles.controls.open_frunk.home]
+domain = "cover"
+service = "open_cover"
+entity_id = "cover.tesla_ble_frunk"
+
+[vehicles.controls.open_trunk]
+domain = "cover"
+service = "open_cover"
+entity_id = "cover.jarvis_trunk_2"
+observable_entity_id = "cover.jarvis_trunk_2"
+
+[vehicles.controls.open_trunk.home]
+domain = "cover"
+service = "open_cover"
+entity_id = "cover.tesla_ble_boot"
+
+[vehicles.controls.close_trunk]
+domain = "cover"
+service = "close_cover"
+entity_id = "cover.jarvis_trunk_2"
+observable_entity_id = "cover.jarvis_trunk_2"
+
+[vehicles.controls.close_trunk.home]
+domain = "cover"
+service = "close_cover"
+entity_id = "cover.tesla_ble_boot"
+
+[vehicles.controls.vent_windows]
+domain = "cover"
+service = "open_cover"
+entity_id = "cover.jarvis_windows_2"
+observable_entity_id = "cover.jarvis_windows_2"
+
+[vehicles.controls.vent_windows.home]
+domain = "cover"
+service = "open_cover"
+entity_id = "cover.tesla_ble_vent"
+
+[vehicles.controls.close_windows]
+domain = "cover"
+service = "close_cover"
+entity_id = "cover.jarvis_windows_2"
+observable_entity_id = "cover.jarvis_windows_2"
+
+[vehicles.controls.close_windows.home]
+domain = "cover"
+service = "close_cover"
+entity_id = "cover.tesla_ble_vent"
+
+[vehicles.controls.climate_on]
+domain = "climate"
+service = "set_hvac_mode"
+entity_id = "climate.jarvis_climate"
+observable_entity_id = "climate.jarvis_climate"
+
+[vehicles.controls.climate_on.home]
+domain = "switch"
+service = "turn_on"
+entity_id = "switch.tesla_ble_climate"
+
+[vehicles.controls.climate_off]
+domain = "climate"
+service = "set_hvac_mode"
+entity_id = "climate.jarvis_climate"
+observable_entity_id = "climate.jarvis_climate"
+
+[vehicles.controls.climate_off.home]
+domain = "switch"
+service = "turn_off"
+entity_id = "switch.tesla_ble_climate"
+
+[vehicles.controls.set_temperature]
+domain = "climate"
+service = "set_temperature"
+entity_id = "climate.jarvis_climate"
+
+[vehicles.controls.set_seat_climate_front_right]
+domain = "select"
+service = "select_option"
+entity_id = "select.jarvis_seat_heater_front_right"
+observable_entity_id = "select.jarvis_seat_heater_front_right"
+
+[vehicles.controls.set_steering_heat]
+domain = "select"
+service = "select_option"
+entity_id = "select.jarvis_steering_wheel_heater"
+observable_entity_id = "select.jarvis_steering_wheel_heater"
+
+[vehicles.controls.start_charging]
+domain = "switch"
+service = "turn_on"
+entity_id = "switch.jarvis_charge"
+observable_entity_id = "switch.jarvis_charge"
+
+[vehicles.controls.start_charging.home]
+domain = "switch"
+service = "turn_on"
+entity_id = "switch.tesla_ble_charger"
+
+[vehicles.controls.stop_charging]
+domain = "switch"
+service = "turn_off"
+entity_id = "switch.jarvis_charge"
+observable_entity_id = "switch.jarvis_charge"
+
+[vehicles.controls.stop_charging.home]
+domain = "switch"
+service = "turn_off"
+entity_id = "switch.tesla_ble_charger"
+
+[vehicles.controls.set_charge_limit]
+domain = "number"
+service = "set_value"
+entity_id = "number.jarvis_charge_limit_2"
+observable_entity_id = "number.jarvis_charge_limit_2"
+
+[vehicles.controls.set_charge_limit.home]
+domain = "number"
+service = "set_value"
+entity_id = "number.tesla_ble_charging_limit"
+
+[vehicles.controls.sentry_on]
+domain = "switch"
+service = "turn_on"
+entity_id = "switch.jarvis_sentry_mode_2"
+observable_entity_id = "switch.jarvis_sentry_mode_2"
+
+[vehicles.controls.sentry_on.home]
+domain = "switch"
+service = "turn_on"
+entity_id = "switch.tesla_ble_sentry_mode"
+
+[vehicles.controls.sentry_off]
+domain = "switch"
+service = "turn_off"
+entity_id = "switch.jarvis_sentry_mode_2"
+observable_entity_id = "switch.jarvis_sentry_mode_2"
+
+[vehicles.controls.sentry_off.home]
+domain = "switch"
+service = "turn_off"
+entity_id = "switch.tesla_ble_sentry_mode"
+
+[vehicles.controls.flash_lights]
+domain = "button"
+service = "press"
+entity_id = "button.jarvis_flash_lights_2"
+
+[vehicles.controls.flash_lights.home]
+domain = "button"
+service = "press"
+entity_id = "button.tesla_ble_flash_light"
+
+[vehicles.controls.honk_horn]
+domain = "button"
+service = "press"
+entity_id = "button.jarvis_honk_horn"
+
+[vehicles.controls.honk_horn.home]
+domain = "button"
+service = "press"
+entity_id = "button.tesla_ble_039d9c_sound_horn"
+
+[vehicles.controls.remote_start]
+domain = "button"
+service = "press"
+entity_id = "button.jarvis_keyless_driving"
+
+[vehicles.controls.send_route]
+domain = "pilot_vehicle"
+service = "send_navigation"
+device_id = "bb68e0870d7405246b9d8e66eaaa017b"
+
+[[rooms]]
+id = "bedroom"
+name = "Bedroom"
+music_enabled = false
+home_area_ids = ["bedroom"]
+response_player_id = "bedroom-display-speaker"
+default_music_player_id = ""
+default_device_id = "pilot-bedroom-display"
+agent_url = ""
+
+[[players]]
+id = "bedroom-display-speaker"
+room_id = "bedroom"
+name = "Bedroom Display Speaker"
+protocol = "pilot-device"
+kind = "response"
+endpoint = "pilot-bedroom-display"
+control_enabled = false
+
+[[rooms]]
+id = "office"
+name = "Office"
+home_area_ids = ["office", "james_office"]
+response_player_id = "office-assistant"
+default_music_player_id = "office-music"
+default_device_id = "pilot-office"
+agent_url = ""
+assist_satellite_entity_id = "assist_satellite.pilot_office_assist_satellite_2"
+
+[[players]]
+id = "office-assistant"
+room_id = "office"
+name = "Office Assistant"
+protocol = "pipewire"
+kind = "response"
+endpoint = "homeai"
+
+[[players]]
+id = "office-music"
+room_id = "office"
+name = "Pilot Office Music"
+protocol = "sendspin"
+kind = "music"
+endpoint = "ws://10.0.2.72:8927/sendspin"
+external_id = "uppilotoffice"
+
+[[players]]
+id = "office-airplay"
+room_id = "office"
+name = "Pilot Office"
+protocol = "airplay"
+kind = "music-input"
+endpoint = "homeai.local:5000"
+
+[[rooms]]
+id = "media-room"
+name = "Media Room"
+home_area_ids = ["media_room"]
+response_player_id = "media-room-assistant"
+default_music_player_id = "media-room-heos"
+default_device_id = ""
+agent_url = ""
+
+[[players]]
+id = "media-room-assistant"
+room_id = "media-room"
+name = "Media Room Assistant"
+protocol = "heos"
+kind = "response"
+endpoint = "media_player.media_room"
+external_id = "1174905188"
+control_enabled = false
+
+[[players]]
+id = "media-room-heos"
+room_id = "media-room"
+name = "Media Room"
+protocol = "heos"
+kind = "music"
+endpoint = "media_player.media_room"
+control_endpoint = "media_player.media_room_3"
+external_id = "1174905188"
+control_enabled = true
+
+[[players]]
+id = "media-room-shield"
+room_id = "media-room"
+name = "SHIELD"
+protocol = "universal_player"
+kind = "video"
+endpoint = ""
+external_id = "upb0713734fca0742d2bf2125b59cbf3b1"
+control_enabled = false

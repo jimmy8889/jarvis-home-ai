@@ -268,8 +268,11 @@ final class PilotTests: XCTestCase {
 
     func testEnergySceneUsesAuthoritativeSunAndTeslaDeadband() {
         XCTAssertFalse(EnergyScenePolicy.vehicleIsDrawingPower(1.6))
-        XCTAssertFalse(EnergyScenePolicy.vehicleIsDrawingPower(99.9))
-        XCTAssertTrue(EnergyScenePolicy.vehicleIsDrawingPower(100))
+        XCTAssertFalse(EnergyScenePolicy.vehicleIsDrawingPower(29.9))
+        XCTAssertTrue(EnergyScenePolicy.vehicleIsDrawingPower(30))
+        XCTAssertEqual(EnergyScenePolicy.gridStatus(watts: -49.9, direction: "exporting"), "Idle")
+        XCTAssertEqual(EnergyScenePolicy.gridStatus(watts: -50, direction: "exporting"), "Export")
+        XCTAssertEqual(EnergyScenePolicy.gridStatus(watts: 50, direction: "importing"), "Import")
         XCTAssertEqual(
             EnergyScenePolicy.houseAsset(
                 isDay: true,
@@ -446,6 +449,46 @@ final class PilotTests: XCTestCase {
         XCTAssertTrue(value.controls.mediaRoomMode.available)
     }
 
+    func testDashboardContractAllowsUnavailableChargingControl() throws {
+        var object = try XCTUnwrap(
+            JSONSerialization.jsonObject(
+                with: JSONEncoder().encode(DashboardSnapshot.unavailable)
+            ) as? [String: Any]
+        )
+        var controls = try XCTUnwrap(object["controls"] as? [String: Any])
+        controls.removeValue(forKey: "tesla_charging_mode")
+        object["controls"] = controls
+
+        let value = try JSONDecoder().decode(
+            DashboardSnapshot.self,
+            from: JSONSerialization.data(withJSONObject: object)
+        )
+
+        XCTAssertNil(value.controls.chargingMode.value)
+        XCTAssertTrue(value.controls.chargingMode.options.isEmpty)
+        XCTAssertFalse(value.controls.chargingMode.available)
+        XCTAssertFalse(value.controls.mediaRoomMode.available)
+    }
+
+    @MainActor
+    func testLiveMonitoringRefreshesWithoutAnEnergyEvent() async {
+        var sleeps = 0
+        var refreshes = 0
+
+        await PilotModel.runPeriodicLiveMonitoring(
+            interval: .seconds(5),
+            shouldContinue: { refreshes < 2 },
+            refresh: { refreshes += 1 },
+            sleep: { interval in
+                XCTAssertEqual(interval, .seconds(5))
+                sleeps += 1
+            }
+        )
+
+        XCTAssertEqual(sleeps, 2)
+        XCTAssertEqual(refreshes, 2)
+    }
+
     @MainActor
     func testPairingCodeParsesJSONAndBareGrant() throws {
         let json = """
@@ -609,6 +652,174 @@ final class PilotTests: XCTestCase {
         XCTAssertEqual(roundTrip.recordingPath, pending.recordingPath)
     }
 
+    @MainActor
+    func testPendingMeetingRetryAlreadyProcessingFinalizesWithoutSecondPass() async throws {
+        let service = PendingMeetingTestService(meetingStatuses: ["processing"])
+        let fixture = try PendingMeetingModelFixture(service: service)
+        defer { fixture.cleanUp() }
+
+        await fixture.model.retryPendingMeeting(fixture.meetingID)
+
+        XCTAssertEqual(service.meetingCallCount, 1)
+        XCTAssertEqual(service.processCallCount, 0)
+        XCTAssertEqual(service.uploadCallCount, 0)
+        XCTAssertTrue(fixture.model.pendingMeetingRecordings.isEmpty)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: fixture.recordingURL.path))
+    }
+
+    @MainActor
+    func testLostProcessResponseUsesDurableProcessingStatus() async throws {
+        let service = PendingMeetingTestService(
+            meetingStatuses: ["recorded", "processing"],
+            processError: PendingMeetingTestError.lostResponse
+        )
+        let fixture = try PendingMeetingModelFixture(service: service)
+        defer { fixture.cleanUp() }
+
+        await fixture.model.retryPendingMeeting(fixture.meetingID)
+
+        XCTAssertEqual(service.meetingCallCount, 2)
+        XCTAssertEqual(service.processCallCount, 1)
+        XCTAssertTrue(fixture.model.pendingMeetingRecordings.isEmpty)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: fixture.recordingURL.path))
+    }
+
+    @MainActor
+    func testLostProcessResponseStillRecordedRetainsPendingSource() async throws {
+        let service = PendingMeetingTestService(
+            meetingStatuses: ["recorded", "recorded"],
+            processError: PendingMeetingTestError.lostResponse
+        )
+        let fixture = try PendingMeetingModelFixture(service: service)
+        defer { fixture.cleanUp() }
+
+        await fixture.model.retryPendingMeeting(fixture.meetingID)
+
+        XCTAssertEqual(service.meetingCallCount, 2)
+        XCTAssertEqual(service.processCallCount, 1)
+        XCTAssertEqual(fixture.model.pendingMeetingRecordings.count, 1)
+        XCTAssertEqual(fixture.model.pendingMeetingRecordings.first?.state, .failed)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: fixture.recordingURL.path))
+    }
+
+    @MainActor
+    func testUnacceptedProcessResponseRetainsPendingSource() async throws {
+        let service = PendingMeetingTestService(
+            meetingStatuses: ["created", "created"],
+            processStatus: "created"
+        )
+        let fixture = try PendingMeetingModelFixture(service: service)
+        defer { fixture.cleanUp() }
+
+        await fixture.model.retryPendingMeeting(fixture.meetingID)
+
+        XCTAssertEqual(service.meetingCallCount, 2)
+        XCTAssertEqual(service.processCallCount, 1)
+        XCTAssertEqual(fixture.model.pendingMeetingRecordings.count, 1)
+        XCTAssertEqual(fixture.model.pendingMeetingRecordings.first?.state, .failed)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: fixture.recordingURL.path))
+    }
+
+    @MainActor
+    func testConcurrentPendingMeetingRetriesRunOneProcessingPass() async throws {
+        let service = PendingMeetingTestService(
+            meetingStatuses: ["recorded"],
+            blockProcessing: true
+        )
+        let fixture = try PendingMeetingModelFixture(service: service)
+        defer { fixture.cleanUp() }
+
+        let firstRetry = Task { @MainActor in
+            await fixture.model.retryPendingMeeting(fixture.meetingID)
+        }
+        let clock = ContinuousClock()
+        let deadline = clock.now.advanced(by: .seconds(2))
+        while !service.processStarted {
+            guard clock.now < deadline else {
+                XCTFail("Timed out waiting for the first processing pass")
+                break
+            }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+
+        await fixture.model.retryPendingMeeting(fixture.meetingID)
+        XCTAssertEqual(service.processCallCount, 1)
+        service.releaseProcessing()
+        await firstRetry.value
+
+        XCTAssertEqual(service.meetingCallCount, 1)
+        XCTAssertEqual(service.processCallCount, 1)
+        XCTAssertTrue(fixture.model.pendingMeetingRecordings.isEmpty)
+    }
+
+    @MainActor
+    func testAcceptedMeetingDeletionFailureRemainsDurableAndRelaunchRetriesCleanup() async throws {
+        let service = PendingMeetingTestService(
+            meetingStatuses: ["processing", "processing"]
+        )
+        let remover = PendingMeetingFileRemovalProbe(failuresRemaining: 1)
+        let fixture = try PendingMeetingModelFixture(
+            service: service,
+            meetingRecordingFileRemover: remover.remove
+        )
+        defer { fixture.cleanUp() }
+
+        await fixture.model.retryPendingMeeting(fixture.meetingID)
+
+        let retained = try XCTUnwrap(
+            fixture.model.pendingMeetingRecordings.first
+        )
+        XCTAssertTrue(retained.uploadComplete)
+        XCTAssertEqual(retained.state, .failed)
+        XCTAssertTrue(
+            retained.failureMessage?.contains("could not be removed") == true
+        )
+        XCTAssertTrue(FileManager.default.fileExists(atPath: fixture.recordingURL.path))
+        XCTAssertEqual(remover.attemptCount, 1)
+        let persisted = try XCTUnwrap(
+            UserDefaults.standard.data(forKey: "pilot.pendingMeetings.v1")
+        )
+        XCTAssertEqual(
+            try JSONDecoder().decode(
+                [PendingMeetingRecording].self,
+                from: persisted
+            ).first?.meetingID,
+            fixture.meetingID
+        )
+
+        let relaunched = PilotModel(
+            loadStoredSettings: false,
+            meetingSubmissionServiceProvider: { service },
+            meetingRecordingFileRemover: remover.remove
+        )
+        await relaunched.resumePendingMeetingSubmissions()
+
+        XCTAssertTrue(relaunched.pendingMeetingRecordings.isEmpty)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: fixture.recordingURL.path))
+        XCTAssertEqual(remover.attemptCount, 2)
+        XCTAssertEqual(service.meetingCallCount, 2)
+        XCTAssertEqual(service.processCallCount, 0)
+        XCTAssertEqual(service.uploadCallCount, 0)
+    }
+
+    @MainActor
+    func testRelaunchRetriesRetainedRecordingWhoseUploadFailed() async throws {
+        let service = PendingMeetingTestService(meetingStatuses: ["recorded"])
+        let fixture = try PendingMeetingModelFixture(
+            service: service,
+            uploadComplete: false
+        )
+        defer { fixture.cleanUp() }
+
+        await fixture.model.resumePendingMeetingSubmissions()
+
+        XCTAssertEqual(service.uploadCallCount, 1)
+        XCTAssertEqual(service.meetingCallCount, 0)
+        XCTAssertEqual(service.processCallCount, 1)
+        XCTAssertTrue(fixture.model.pendingMeetingRecordings.isEmpty)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: fixture.recordingURL.path))
+    }
+
     func testMeetingListDecodesProcessingAndEvidenceCounts() throws {
         let data = Data(
             """
@@ -689,5 +900,163 @@ final class PilotTests: XCTestCase {
         XCTAssertEqual(model.activePlayer?.effective.media?.title, "Teardrop")
         XCTAssertTrue(model.energy.isPopulated)
         XCTAssertFalse(model.messages.isEmpty)
+    }
+}
+
+private enum PendingMeetingTestError: LocalizedError {
+    case lostResponse
+
+    var errorDescription: String? {
+        "The processing response was lost."
+    }
+}
+
+@MainActor
+private final class PendingMeetingModelFixture {
+    let meetingID = "meeting-\(UUID().uuidString.lowercased())"
+    let recordingURL: URL
+    let model: PilotModel
+
+    init(
+        service: PendingMeetingTestService,
+        uploadComplete: Bool = true,
+        meetingRecordingFileRemover: @escaping (URL) throws -> Void = {
+            try FileManager.default.removeItem(at: $0)
+        }
+    ) throws {
+        UserDefaults.standard.removeObject(forKey: "pilot.pendingMeetings.v1")
+        recordingURL = FileManager.default.temporaryDirectory.appending(
+            path: "\(meetingID).m4a"
+        )
+        try Data("pending meeting recording".utf8).write(
+            to: recordingURL,
+            options: .atomic
+        )
+        model = PilotModel(
+            loadStoredSettings: false,
+            meetingSubmissionServiceProvider: { service },
+            meetingRecordingFileRemover: meetingRecordingFileRemover
+        )
+        model.pendingMeetingRecordings = [
+            PendingMeetingRecording(
+                id: meetingID,
+                meetingID: meetingID,
+                title: "Planning",
+                recordingPath: recordingURL.path,
+                state: .failed,
+                uploadComplete: uploadComplete,
+                failureMessage: "Previous processing response was lost.",
+                updatedAt: .now
+            ),
+        ]
+    }
+
+    func cleanUp() {
+        try? FileManager.default.removeItem(at: recordingURL)
+        UserDefaults.standard.removeObject(forKey: "pilot.pendingMeetings.v1")
+    }
+}
+
+@MainActor
+private final class PendingMeetingFileRemovalProbe {
+    private var failuresRemaining: Int
+    private(set) var attemptCount = 0
+
+    init(failuresRemaining: Int) {
+        self.failuresRemaining = failuresRemaining
+    }
+
+    func remove(_ url: URL) throws {
+        attemptCount += 1
+        if failuresRemaining > 0 {
+            failuresRemaining -= 1
+            throw CocoaError(.fileWriteNoPermission)
+        }
+        try FileManager.default.removeItem(at: url)
+    }
+}
+
+@MainActor
+private final class PendingMeetingTestService: PendingMeetingCoreServing {
+    private var meetingStatuses: [String]
+    private let processError: Error?
+    private let processStatus: String
+    private var blockProcessing: Bool
+    private var processContinuation: CheckedContinuation<Void, Never>?
+    private(set) var uploadCallCount = 0
+    private(set) var meetingCallCount = 0
+    private(set) var processCallCount = 0
+    private(set) var processStarted = false
+
+    init(
+        meetingStatuses: [String],
+        processError: Error? = nil,
+        processStatus: String = "processing",
+        blockProcessing: Bool = false
+    ) {
+        self.meetingStatuses = meetingStatuses
+        self.processError = processError
+        self.processStatus = processStatus
+        self.blockProcessing = blockProcessing
+    }
+
+    func uploadMeetingRecording(
+        meetingID: String,
+        recordingURL: URL,
+        uploadEndpoint: String?
+    ) async throws {
+        uploadCallCount += 1
+    }
+
+    func meeting(_ meetingID: String) async throws -> PilotMeetingDetail {
+        meetingCallCount += 1
+        let status = meetingStatuses.isEmpty ? "recorded" : meetingStatuses.removeFirst()
+        return PilotMeetingDetail(
+            id: meetingID,
+            title: "Planning",
+            language: "en-AU",
+            sourceDeviceID: "pilot-ios-test",
+            sourceCaptureID: nil,
+            startedAt: "2026-08-11T05:00:00Z",
+            endedAt: nil,
+            status: status,
+            summary: nil,
+            recording: nil,
+            participants: [],
+            transcript: [],
+            decisions: [],
+            actionItems: []
+        )
+    }
+
+    func processMeeting(_ meetingID: String) async throws -> PilotMeeting {
+        processCallCount += 1
+        processStarted = true
+        if blockProcessing {
+            await withCheckedContinuation { continuation in
+                processContinuation = continuation
+            }
+        }
+        if let processError { throw processError }
+        return PilotMeeting(
+            id: meetingID,
+            title: "Planning",
+            language: "en-AU",
+            sourceDeviceID: "pilot-ios-test",
+            sourceCaptureID: nil,
+            startedAt: "2026-08-11T05:00:00Z",
+            endedAt: nil,
+            status: processStatus,
+            summary: nil,
+            hasRecording: true,
+            transcriptSegmentCount: nil,
+            actionItemCount: nil
+        )
+    }
+
+    func releaseProcessing() {
+        blockProcessing = false
+        processContinuation?.resume()
+        processContinuation = nil
     }
 }

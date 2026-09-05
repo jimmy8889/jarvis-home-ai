@@ -56,11 +56,19 @@ enum PilotTheme {
 }
 
 enum EnergyScenePolicy {
-    static let batteryFlowDeadbandWatts = 100.0
-    static let vehicleFlowDeadbandWatts = 100.0
+    static let pathDeadbandWatts = 20.0
+    static let directionDeadbandWatts = 50.0
+    static let batteryFlowDeadbandWatts = directionDeadbandWatts
+    static let vehicleFlowDeadbandWatts = 30.0
 
     static func vehicleIsDrawingPower(_ watts: Double?) -> Bool {
         abs(watts ?? 0) >= vehicleFlowDeadbandWatts
+    }
+
+    static func gridStatus(watts: Double?, direction: String?) -> String {
+        guard abs(watts ?? 0) >= directionDeadbandWatts else { return "Idle" }
+        if direction == "exporting" || (watts ?? 0) < 0 { return "Export" }
+        return "Import"
     }
 
     static func houseAsset(
@@ -603,10 +611,6 @@ private struct EnergyFlowPage: View {
         EnergyScenePolicy.vehicleIsDrawingPower(vehiclePower)
     }
 
-    private var gridExporting: Bool {
-        snapshot.power.directions["grid"] == "exporting" || (snapshot.power.gridWatts ?? 0) < -100
-    }
-
     private var batteryStatus: String {
         guard abs(snapshot.power.batteryWatts ?? 0) >= EnergyScenePolicy.batteryFlowDeadbandWatts else {
             return "Idle"
@@ -662,7 +666,10 @@ private struct EnergyFlowPage: View {
                     EnergySceneMetric(
                         title: "GRID",
                         value: Self.power(snapshot.power.gridWatts.map(abs)),
-                        detail: gridExporting ? "Export" : "Import",
+                        detail: EnergyScenePolicy.gridStatus(
+                            watts: snapshot.power.gridWatts,
+                            direction: snapshot.power.directions["grid"]
+                        ),
                         color: PilotTheme.cyan,
                         symbol: "transmission"
                     )
@@ -766,8 +773,12 @@ private struct EnergyFlowLines: View {
             points: route([(0.48, 0.14), (0.50, 0.14), hub], size: size),
             color: PilotTheme.amber,
             watts: power.solarWatts,
-            threshold: 25,
-            active: flowIsActive("solar", watts: power.solarWatts, threshold: 25),
+            threshold: EnergyScenePolicy.pathDeadbandWatts,
+            active: flowIsActive(
+                "solar",
+                watts: power.solarWatts,
+                threshold: EnergyScenePolicy.pathDeadbandWatts
+            ),
             forward: true,
             date: date
         )
@@ -776,8 +787,12 @@ private struct EnergyFlowLines: View {
             points: route([hub, (0.86, 0.63), (0.86, 0.29)], size: size),
             color: PilotTheme.cyan,
             watts: power.gridWatts,
-            threshold: 100,
-            active: flowIsActive("grid", watts: power.gridWatts, threshold: 100),
+            threshold: EnergyScenePolicy.pathDeadbandWatts,
+            active: flowIsActive(
+                "grid",
+                watts: power.gridWatts,
+                threshold: EnergyScenePolicy.pathDeadbandWatts
+            ),
             forward: power.directions["grid"] == "exporting" || (power.gridWatts ?? 0) < -100,
             date: date
         )
@@ -786,8 +801,12 @@ private struct EnergyFlowLines: View {
             points: route([hub, (0.50, 0.82)], size: size),
             color: PilotTheme.mint,
             watts: power.homeLoadWatts,
-            threshold: 25,
-            active: flowIsActive("home", watts: power.homeLoadWatts, threshold: 25),
+            threshold: EnergyScenePolicy.pathDeadbandWatts,
+            active: flowIsActive(
+                "home",
+                watts: power.homeLoadWatts,
+                threshold: EnergyScenePolicy.pathDeadbandWatts
+            ),
             forward: true,
             date: date
         )
@@ -796,11 +815,11 @@ private struct EnergyFlowLines: View {
             points: route([hub, (0.72, 0.63), (0.72, 0.70)], size: size),
             color: PilotTheme.mint,
             watts: power.batteryWatts,
-            threshold: EnergyScenePolicy.batteryFlowDeadbandWatts,
+            threshold: EnergyScenePolicy.pathDeadbandWatts,
             active: flowIsActive(
                 "battery",
                 watts: power.batteryWatts,
-                threshold: EnergyScenePolicy.batteryFlowDeadbandWatts
+                threshold: EnergyScenePolicy.pathDeadbandWatts
             ),
             forward: power.directions["battery"] == "charging"
                 || (power.batteryWatts ?? 0) <= -EnergyScenePolicy.batteryFlowDeadbandWatts,
@@ -812,11 +831,11 @@ private struct EnergyFlowLines: View {
             points: route([hub, (0.17, 0.63), (0.17, 0.72)], size: size),
             color: .red,
             watts: vehiclePower,
-            threshold: EnergyScenePolicy.vehicleFlowDeadbandWatts,
+            threshold: EnergyScenePolicy.pathDeadbandWatts,
             active: flowIsActive(
                 "vehicle",
                 watts: vehiclePower,
-                threshold: EnergyScenePolicy.vehicleFlowDeadbandWatts
+                threshold: EnergyScenePolicy.pathDeadbandWatts
             ),
             forward: true,
             date: date,
@@ -827,8 +846,12 @@ private struct EnergyFlowLines: View {
             points: route([hub, (0.84, 0.63), (0.84, 0.72)], size: size),
             color: PilotTheme.violet,
             watts: power.serverRackWatts,
-            threshold: 25,
-            active: flowIsActive("server_rack", watts: power.serverRackWatts, threshold: 25),
+            threshold: EnergyScenePolicy.pathDeadbandWatts,
+            active: flowIsActive(
+                "server_rack",
+                watts: power.serverRackWatts,
+                threshold: EnergyScenePolicy.pathDeadbandWatts
+            ),
             forward: true,
             date: date
         )

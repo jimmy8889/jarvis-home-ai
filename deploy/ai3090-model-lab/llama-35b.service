@@ -1,0 +1,26 @@
+[Unit]
+Description=Qwen3.6 35B-A3B IQ4_NL MTP OpenAI-compatible API
+Wants=network-online.target
+After=network-online.target nvidia-persistenced.service
+Conflicts=vllm.service
+
+[Service]
+Type=simple
+User=jameshazell
+Group=jameshazell
+SupplementaryGroups=video render
+Environment=HOME=/home/jameshazell
+EnvironmentFile=/etc/vllm/api.env
+ExecStartPre=/usr/bin/test -x /opt/llama-35b/bin/llama-server
+ExecStartPre=/usr/bin/test -f /srv/models/llama-35b/Qwen3.6-35B-A3B-UD-IQ4_NL.gguf
+ExecStart=/opt/llama-35b/bin/llama-server --model /srv/models/llama-35b/Qwen3.6-35B-A3B-UD-IQ4_NL.gguf --alias primary --host 0.0.0.0 --port 8000 --api-key ${VLLM_API_KEY} --ctx-size 8192 --gpu-layers 99 --flash-attn on --parallel 1 --spec-type draft-mtp --spec-draft-n-max 2
+Restart=on-failure
+RestartSec=15s
+TimeoutStopSec=30s
+KillSignal=SIGTERM
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+
+[Install]
+WantedBy=multi-user.target

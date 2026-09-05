@@ -8,6 +8,7 @@ struct DestinationEditor: View {
     @State private var draft: DestinationDraft
     @State private var useTemperatureOverride: Bool
     @State private var isSaving = false
+    @State private var isSending = false
     @State private var searchQuery = ""
     @State private var isSearching = false
     @State private var searchMessage: String?
@@ -108,6 +109,15 @@ struct DestinationEditor: View {
                     Text("Sending this destination may wake the car, waits up to 60 seconds, starts climate, applies the optional front right seat setting, and sends coordinates to the touchscreen. Each step is reported independently.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
+                    Button {
+                        Task { await sendToCar() }
+                    } label: {
+                        Label(isSending ? "Sending…" : "Send to Jarvis", systemImage: "location.fill")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(DriveTheme.accent)
+                    .disabled(draft.address.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isSaving || isSending)
                 }
             }
             .navigationTitle(destination == nil ? "New destination" : "Edit destination")
@@ -172,5 +182,15 @@ struct DestinationEditor: View {
         } catch {
             searchMessage = "Place search is unavailable. Enter the address and tap the map instead."
         }
+    }
+
+    @MainActor
+    private func sendToCar() async {
+        isSending = true
+        if !useTemperatureOverride { draft.temperatureC = nil }
+        if !draft.climateEnabled { draft.seatClimateMode = nil }
+        await model.send(draft)
+        isSending = false
+        dismiss()
     }
 }

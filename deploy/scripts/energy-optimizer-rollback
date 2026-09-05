@@ -1,0 +1,85 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+target_host="root@10.0.1.204"
+target_root="/opt/jarvis-home-ai"
+release_id=""
+apply=false
+
+while (($#)); do
+  case "$1" in
+    --host) target_host="$2"; shift 2 ;;
+    --path) target_root="$2"; shift 2 ;;
+    --release) release_id="$2"; shift 2 ;;
+    --apply) apply=true; shift ;;
+    *) echo "Unknown argument: $1" >&2; exit 2 ;;
+  esac
+done
+
+if [[ -z "$release_id" ]]; then
+  release_id="$(ssh -o BatchMode=yes "$target_host" \
+    "python3 - <<'PY'
+import json
+from pathlib import Path
+
+current = Path('/opt/jarvis-home-ai/current-energy-optimizer')
+if not current.is_symlink():
+    raise SystemExit('No active energy-optimizer release symlink')
+active_id = current.resolve().name
+manifest = Path('/opt/energy-optimizer/releases') / f'{active_id}.json'
+data = json.loads(manifest.read_text())
+previous = data.get('previous_release')
+if not previous:
+    raise SystemExit('Active release does not record a previous release')
+print(Path(previous).name)
+PY")"
+fi
+
+release_root="$target_root/releases/energy-optimizer/$release_id"
+echo "Rollback target: $release_id"
+ssh -o BatchMode=yes "$target_host" "
+  set -eu
+  test -f '$release_root/infra/energy-optimizer/docker-compose.yml'
+  test -f '/opt/energy-optimizer/releases/$release_id.json'
+"
+
+if [[ "$apply" != true ]]; then
+  echo "Dry run only. Re-run with --apply to disarm, restore safe SAJ defaults, and activate this release."
+  exit 0
+fi
+
+ssh -o BatchMode=yes "$target_host" "
+  set -eu
+  task_token=\$(cat /opt/energy-optimizer/secrets/home_assistant_token)
+  ha_call() {
+    domain=\$1
+    service=\$2
+    payload=\$3
+    curl -fsS -X POST \
+      -H \"Authorization: Bearer \$task_token\" \
+      -H 'Content-Type: application/json' \
+      -d \"\$payload\" \
+      \"http://10.0.2.72:8123/api/services/\$domain/\$service\" >/dev/null
+  }
+  ha_call input_boolean turn_on '{\"entity_id\":\"input_boolean.energy_optimizer_manual_override\"}'
+  ha_call input_boolean turn_off '{\"entity_id\":\"input_boolean.battery_charge\"}'
+  ha_call input_boolean turn_off '{\"entity_id\":\"input_boolean.battery_discharge\"}'
+  ha_call switch turn_off '{\"entity_id\":\"switch.hot_water\"}'
+  ha_call switch turn_off '{\"entity_id\":\"switch.tesla_ble_039d9c_charger\"}'
+  ha_call number set_value '{\"entity_id\":\"number.saj_anti_reflux_mode_input\",\"value\":0}'
+  ha_call number set_value '{\"entity_id\":\"number.saj_export_limit_input\",\"value\":1100}'
+  ha_call number set_value '{\"entity_id\":\"number.saj_grid_max_discharge_power_input\",\"value\":1100}'
+  cd '$release_root'
+  ENERGY_OPTIMIZER_IMAGE_TAG='$release_id' docker compose -p energy-optimizer \
+    -f infra/energy-optimizer/docker-compose.yml up -d --build
+  for attempt in \$(seq 1 30); do
+    if curl -fsS http://127.0.0.1:8785/readyz >/dev/null; then
+      ln -sfn '$release_root' '$target_root/current-energy-optimizer'
+      echo 'Rollback service is ready. Manual override remains on for deliberate validation/re-arm.'
+      exit 0
+    fi
+    sleep 2
+  done
+  docker logs --tail 200 energy-optimizer >&2 || true
+  exit 1
+"

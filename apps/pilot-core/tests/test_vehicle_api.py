@@ -122,7 +122,6 @@ class FakeTeslaMate:
 class VehicleApiTests(unittest.TestCase):
     def setUp(self) -> None:
         os.environ["PILOT_TESLAMATE_ADAPTER_TOKEN"] = "t" * 32
-        os.environ["PILOT_TESLA_VEHICLE_ID"] = "provider-vehicle-test"
         self.root = tempfile.TemporaryDirectory()
         root = Path(self.root.name)
         self.settings = Settings(
@@ -180,9 +179,9 @@ class VehicleApiTests(unittest.TestCase):
                         ),
                         VehicleControl(
                             "send_route",
-                            "tesla_custom",
-                            "api",
-                            provider_vehicle_id_env="PILOT_TESLA_VEHICLE_ID",
+                            "pilot_vehicle",
+                            "send_navigation",
+                            device_id="native-tesla-device-id",
                         ),
                     ),
                 ),
@@ -214,7 +213,6 @@ class VehicleApiTests(unittest.TestCase):
         self.store.close()
         self.root.cleanup()
         os.environ.pop("PILOT_TESLAMATE_ADAPTER_TOKEN", None)
-        os.environ.pop("PILOT_TESLA_VEHICLE_ID", None)
 
     def headers(self, device_id: str = "pilot-drive", token: str | None = None) -> dict[str, str]:
         return {
@@ -391,9 +389,44 @@ class VehicleApiTests(unittest.TestCase):
         self.assertEqual(completed["status"], "unverified")
         self.assertTrue(
             any(
-                domain == "tesla_custom"
-                and data.get("command") == "SEND_GPS_TO_VEHICLE"
-                for domain, _service, data in self.integrations.calls
+                domain == "pilot_vehicle"
+                and service == "send_navigation"
+                and data == {
+                    "latitude": -27.4,
+                    "longitude": 153.0,
+                    "order": 0,
+                }
+                for domain, service, data in self.integrations.calls
+            )
+        )
+
+    def test_destination_workflow_accepts_unsaved_coordinates(self) -> None:
+        response = self.client.post(
+            "/v1/devices/pilot-drive/vehicles/jarvis/actions",
+            headers=self.headers(),
+            json={
+                "action": "destination_workflow",
+                "parameters": {
+                    "latitude": -27.45,
+                    "longitude": 153.02,
+                    "climate_enabled": False,
+                },
+                "idempotency_key": "route-direct-001",
+            },
+        )
+        self.assertEqual(response.status_code, 202)
+        completed = self.wait_action(response.json()["id"])
+        steps = {item["step"]: item["status"] for item in completed["steps"]}
+        self.assertEqual(steps["climate"], "disabled")
+        self.assertEqual(steps["route"], "accepted")
+        self.assertEqual(completed["status"], "unverified")
+        self.assertTrue(
+            any(
+                domain == "pilot_vehicle"
+                and service == "send_navigation"
+                and data["latitude"] == -27.45
+                and data["longitude"] == 153.02
+                for domain, service, data in self.integrations.calls
             )
         )
 

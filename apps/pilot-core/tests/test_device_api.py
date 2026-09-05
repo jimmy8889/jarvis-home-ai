@@ -51,6 +51,7 @@ class DisplayNodeApiTests(unittest.TestCase):
                 energy_battery_soc_entity_id="sensor.battery_soc",
                 energy_home_load_entity_id="sensor.home_load",
                 tesla_charging_mode_entity_id="input_select.car_mode",
+                office_sim_rig_switch_entity_id="switch.james_office_sim_rig_master",
                 media_room_mode_on_script_id="script.movie_on",
                 media_room_mode_off_script_id="script.movie_off",
                 tts_provider="home_assistant",
@@ -110,6 +111,16 @@ class DisplayNodeApiTests(unittest.TestCase):
         self.headers = {
             "Authorization": f"Bearer {self.token}",
             "X-Pilot-Device-ID": "pilot-bedroom-display",
+        }
+        self.office_token = self.store.register_device(
+            "pilot-office-display",
+            "office",
+            "Office Display",
+            ["display", "media-control", "sim-rig-control"],
+        )
+        self.office_headers = {
+            "Authorization": f"Bearer {self.office_token}",
+            "X-Pilot-Device-ID": "pilot-office-display",
         }
 
     def tearDown(self) -> None:
@@ -620,7 +631,7 @@ class DisplayNodeApiTests(unittest.TestCase):
             "home_assistant_typed_action",
             new=typed_action,
         ):
-            selected = self.client.post(
+            obsolete = self.client.post(
                 "/v1/devices/pilot-bedroom-display/dashboard/actions",
                 headers=self.headers,
                 json={"action": "set_tesla_charging_mode", "value": "Solar"},
@@ -630,18 +641,18 @@ class DisplayNodeApiTests(unittest.TestCase):
                 headers=self.headers,
                 json={"action": "set_media_room_mode", "value": "on"},
             )
-            rejected = self.client.post(
-                "/v1/devices/pilot-bedroom-display/dashboard/actions",
-                headers=self.headers,
-                json={"action": "set_tesla_charging_mode", "value": "Solar + Grid"},
+            sim_rig = self.client.post(
+                "/v1/devices/pilot-office-display/dashboard/actions",
+                headers=self.office_headers,
+                json={"action": "set_sim_rig_power", "value": "on"},
             )
-        self.assertEqual(selected.status_code, 200, selected.text)
+        self.assertEqual(obsolete.status_code, 422, obsolete.text)
         self.assertEqual(movie.status_code, 200, movie.text)
-        self.assertEqual(rejected.status_code, 422, rejected.text)
-        typed_action.assert_any_await(
-            "input_select", "select_option", "input_select.car_mode", {"option": "Solar"}
-        )
+        self.assertEqual(sim_rig.status_code, 200, sim_rig.text)
         typed_action.assert_any_await("script", "turn_on", "script.movie_on", {})
+        typed_action.assert_any_await(
+            "switch", "turn_on", "switch.james_office_sim_rig_master", {}
+        )
 
     def test_voice_stream_returns_private_tts_asset(self) -> None:
         synthesized = SynthesizedAudio(

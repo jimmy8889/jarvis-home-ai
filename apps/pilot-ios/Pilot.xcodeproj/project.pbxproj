@@ -7,18 +7,36 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		03FF02E2BD28B4A671F5E02A /* WatchMeetingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8D14D57342D43D9F1407928 /* WatchMeetingView.swift */; };
+		0422A420C7213800F69F2341 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = D7F4B2A7A9DDC86BC4B34A26 /* Assets.xcassets */; };
 		0766FAAC59F3AF4F6BB1A4C0 /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AEDFE53775C96B8F08B3A077 /* RootView.swift */; };
+		0AE318850C235603BF2B6697 /* PilotWatchApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3CB0866EE2D31C5FE72D7E3B /* PilotWatchApp.swift */; };
+		0D63A16E8518D6EE43C50161 /* WatchMeetingOutbox.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9EA9BD9E5512B18AEB47097C /* WatchMeetingOutbox.swift */; };
+		135B625D0A15FF5B3E777404 /* WatchMeetingTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A6217653B3EA9CE2706B3B7 /* WatchMeetingTransport.swift */; };
+		1E4B2B8070AEF16564EDA50D /* WatchMeetingModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3DF255BC98808FFBCFCCABFC /* WatchMeetingModels.swift */; };
 		260C6B29B047979CE7181505 /* PilotAPI.swift in Sources */ = {isa = PBXBuildFile; fileRef = F5C5898A0D20AD0532CB74F5 /* PilotAPI.swift */; };
 		261B33A90351935B3E847324 /* SendspinKit in Frameworks */ = {isa = PBXBuildFile; productRef = 1415F6AAF3FCC263AA335360 /* SendspinKit */; };
+		2A59BD45C324364126AEFB11 /* WatchMeetingDeliveryPipelineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2B6F85BB4C8FB47AB44E9BE /* WatchMeetingDeliveryPipelineTests.swift */; };
+		3C4EC11211D4FB73158D41E2 /* MeetingBackgroundUploadCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = EFD33802D915CA8188FED5A3 /* MeetingBackgroundUploadCoordinator.swift */; };
+		65505E28D67E842F515B3A9A /* MeetingBackgroundUploadCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 53C674B14C98BD7CDB09D91C /* MeetingBackgroundUploadCoordinatorTests.swift */; };
+		6D3B182C0AC9AD3D0A7071F7 /* PilotWatchLifecycle.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE1A873D39E2F3261560DD2E /* PilotWatchLifecycle.swift */; };
 		73C38B51C88460671408B296 /* VoiceAudioController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 66F7D952FA44369FC4B0D574 /* VoiceAudioController.swift */; };
+		768929989203358A4FFB5CFA /* WatchMeetingInboxTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EBF0D75C47353E5E4DF442D6 /* WatchMeetingInboxTests.swift */; };
 		79F03F8FEF4C54983AB1698B /* HomeLabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F32B41CB078609AA107FD80 /* HomeLabView.swift */; };
+		813D6D5AD7C892E83223548C /* PilotWatch.app in Embed Watch Content */ = {isa = PBXBuildFile; fileRef = 630560F1682DCC8AB7211136 /* PilotWatch.app */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		93570751D7B731E10026294F /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0403CF9AD9A373A5C4ECA2C /* Models.swift */; };
 		9778D75A4D000C2405F0F53E /* PilotTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5169EE5BCE182D7B1AFBC22B /* PilotTests.swift */; };
 		A2F6BD8D8D4A937B4D8CD6E3 /* PhonePlaybackController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B45F19FEC453C7C45B90BB83 /* PhonePlaybackController.swift */; };
+		A9A56F104ECA47E6E3D01502 /* WatchMeetingModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B47A0C573133DF801DE33FD8 /* WatchMeetingModel.swift */; };
+		AA69C516414C83754E59DF3D /* PilotApplicationDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A40F02DEE5A35CE7225DC6E /* PilotApplicationDelegate.swift */; };
 		AD1B14677B9B6BD4063C4B8B /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 83A4E73A78886F255F2ED460 /* Assets.xcassets */; };
+		B87EB5382C7BA1916F32F8C7 /* PilotApplicationDelegateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA8A2E861B9243D7750927ED /* PilotApplicationDelegateTests.swift */; };
 		BB2E1AB014C6C81377A42F25 /* PilotClientKit in Frameworks */ = {isa = PBXBuildFile; productRef = 4251A525458A5949FCC12F9C /* PilotClientKit */; };
+		D81489F2411FD4FB36B795F8 /* WatchMeetingDeliveryPipeline.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E61123A8DF188C829AD5505 /* WatchMeetingDeliveryPipeline.swift */; };
 		DF4427ABDB61AE355381264B /* PilotModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A3D7B9A9354E56EC99B7E08 /* PilotModel.swift */; };
+		E16DC0BABED277E97405FAFB /* WatchMeetingInbox.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49471ACFC44EFA02105A8B2C /* WatchMeetingInbox.swift */; };
 		F1D9C21F86E27295DA5AA39F /* PilotApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 88E48CEE1B3F4DF8D6EDB216 /* PilotApp.swift */; };
+		FCA60EAB9CD36E55B08A4C63 /* WatchMeetingPersistenceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8902C26F78E454CA1881FB58 /* WatchMeetingPersistenceTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -29,23 +47,71 @@
 			remoteGlobalIDString = FE8ED209D7643DC0791F345F;
 			remoteInfo = Pilot;
 		};
+		2DE6AFCC27D399A96A0AB91D /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = A7605EA25E9B512DD73FBB4B /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 195C0E0F7E490A12EFE8E429;
+			remoteInfo = PilotWatch;
+		};
+		B4C23756CEA707D34C8AB521 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = A7605EA25E9B512DD73FBB4B /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 195C0E0F7E490A12EFE8E429;
+			remoteInfo = PilotWatch;
+		};
 /* End PBXContainerItemProxy section */
 
+/* Begin PBXCopyFilesBuildPhase section */
+		6D4AB0ABEA2CC1C5D0E4E3B3 /* Embed Watch Content */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "$(CONTENTS_FOLDER_PATH)/Watch";
+			dstSubfolderSpec = 16;
+			files = (
+				813D6D5AD7C892E83223548C /* PilotWatch.app in Embed Watch Content */,
+			);
+			name = "Embed Watch Content";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
 /* Begin PBXFileReference section */
+		01C5BE077797DD020EA80DEC /* PilotWatchTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = PilotWatchTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		033B7B0DFB321D06AF6959AE /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		2F32B41CB078609AA107FD80 /* HomeLabView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeLabView.swift; sourceTree = "<group>"; };
+		3CB0866EE2D31C5FE72D7E3B /* PilotWatchApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PilotWatchApp.swift; sourceTree = "<group>"; };
+		3DF255BC98808FFBCFCCABFC /* WatchMeetingModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchMeetingModels.swift; sourceTree = "<group>"; };
+		49471ACFC44EFA02105A8B2C /* WatchMeetingInbox.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchMeetingInbox.swift; sourceTree = "<group>"; };
+		4A40F02DEE5A35CE7225DC6E /* PilotApplicationDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PilotApplicationDelegate.swift; sourceTree = "<group>"; };
 		5169EE5BCE182D7B1AFBC22B /* PilotTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PilotTests.swift; sourceTree = "<group>"; };
 		51E6679F15E94024CDFE97BC /* PilotClientKit */ = {isa = PBXFileReference; lastKnownFileType = folder; name = PilotClientKit; path = ../../packages/PilotClientKit; sourceTree = SOURCE_ROOT; };
+		53C674B14C98BD7CDB09D91C /* MeetingBackgroundUploadCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetingBackgroundUploadCoordinatorTests.swift; sourceTree = "<group>"; };
+		5E61123A8DF188C829AD5505 /* WatchMeetingDeliveryPipeline.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchMeetingDeliveryPipeline.swift; sourceTree = "<group>"; };
+		630560F1682DCC8AB7211136 /* PilotWatch.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = PilotWatch.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		66F7D952FA44369FC4B0D574 /* VoiceAudioController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceAudioController.swift; sourceTree = "<group>"; };
 		6A3D7B9A9354E56EC99B7E08 /* PilotModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PilotModel.swift; sourceTree = "<group>"; };
 		83A4E73A78886F255F2ED460 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		88E48CEE1B3F4DF8D6EDB216 /* PilotApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PilotApp.swift; sourceTree = "<group>"; };
+		8902C26F78E454CA1881FB58 /* WatchMeetingPersistenceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchMeetingPersistenceTests.swift; sourceTree = "<group>"; };
+		9A6217653B3EA9CE2706B3B7 /* WatchMeetingTransport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchMeetingTransport.swift; sourceTree = "<group>"; };
+		9EA9BD9E5512B18AEB47097C /* WatchMeetingOutbox.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchMeetingOutbox.swift; sourceTree = "<group>"; };
 		A69638DA27EA76C10C483DDC /* PilotTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = PilotTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		AB85CEC11BD665F9FF73BE7E /* Pilot.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = Pilot.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		AE1A873D39E2F3261560DD2E /* PilotWatchLifecycle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PilotWatchLifecycle.swift; sourceTree = "<group>"; };
 		AEDFE53775C96B8F08B3A077 /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
 		B0403CF9AD9A373A5C4ECA2C /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
+		B2B6F85BB4C8FB47AB44E9BE /* WatchMeetingDeliveryPipelineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchMeetingDeliveryPipelineTests.swift; sourceTree = "<group>"; };
 		B45F19FEC453C7C45B90BB83 /* PhonePlaybackController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhonePlaybackController.swift; sourceTree = "<group>"; };
+		B47A0C573133DF801DE33FD8 /* WatchMeetingModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchMeetingModel.swift; sourceTree = "<group>"; };
+		D7F4B2A7A9DDC86BC4B34A26 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		EB26B3FCFA77D9290AF28829 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		EBF0D75C47353E5E4DF442D6 /* WatchMeetingInboxTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchMeetingInboxTests.swift; sourceTree = "<group>"; };
+		EFD33802D915CA8188FED5A3 /* MeetingBackgroundUploadCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetingBackgroundUploadCoordinator.swift; sourceTree = "<group>"; };
 		F5C5898A0D20AD0532CB74F5 /* PilotAPI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PilotAPI.swift; sourceTree = "<group>"; };
+		F8D14D57342D43D9F1407928 /* WatchMeetingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchMeetingView.swift; sourceTree = "<group>"; };
+		FA8A2E861B9243D7750927ED /* PilotApplicationDelegateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PilotApplicationDelegateTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -64,7 +130,11 @@
 		2DB63B66A426AB40F3323889 /* PilotTests */ = {
 			isa = PBXGroup;
 			children = (
+				53C674B14C98BD7CDB09D91C /* MeetingBackgroundUploadCoordinatorTests.swift */,
+				FA8A2E861B9243D7750927ED /* PilotApplicationDelegateTests.swift */,
 				5169EE5BCE182D7B1AFBC22B /* PilotTests.swift */,
+				B2B6F85BB4C8FB47AB44E9BE /* WatchMeetingDeliveryPipelineTests.swift */,
+				EBF0D75C47353E5E4DF442D6 /* WatchMeetingInboxTests.swift */,
 			);
 			path = PilotTests;
 			sourceTree = "<group>";
@@ -75,6 +145,8 @@
 				8B571694C3218DABEF4077E0 /* Packages */,
 				F1EA1129CE9D13BD867B1F21 /* Pilot */,
 				2DB63B66A426AB40F3323889 /* PilotTests */,
+				F81CE15C959AB0E102F0C9F7 /* PilotWatch */,
+				A3F1A30D376573BF71EA0490 /* PilotWatchTests */,
 				DC7D82CC69762577B57556DA /* Products */,
 			);
 			sourceTree = "<group>";
@@ -87,11 +159,21 @@
 			name = Packages;
 			sourceTree = "<group>";
 		};
+		A3F1A30D376573BF71EA0490 /* PilotWatchTests */ = {
+			isa = PBXGroup;
+			children = (
+				8902C26F78E454CA1881FB58 /* WatchMeetingPersistenceTests.swift */,
+			);
+			path = PilotWatchTests;
+			sourceTree = "<group>";
+		};
 		DC7D82CC69762577B57556DA /* Products */ = {
 			isa = PBXGroup;
 			children = (
 				AB85CEC11BD665F9FF73BE7E /* Pilot.app */,
 				A69638DA27EA76C10C483DDC /* PilotTests.xctest */,
+				630560F1682DCC8AB7211136 /* PilotWatch.app */,
+				01C5BE077797DD020EA80DEC /* PilotWatchTests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -102,20 +184,58 @@
 				83A4E73A78886F255F2ED460 /* Assets.xcassets */,
 				2F32B41CB078609AA107FD80 /* HomeLabView.swift */,
 				033B7B0DFB321D06AF6959AE /* Info.plist */,
+				EFD33802D915CA8188FED5A3 /* MeetingBackgroundUploadCoordinator.swift */,
 				B0403CF9AD9A373A5C4ECA2C /* Models.swift */,
 				B45F19FEC453C7C45B90BB83 /* PhonePlaybackController.swift */,
 				F5C5898A0D20AD0532CB74F5 /* PilotAPI.swift */,
 				88E48CEE1B3F4DF8D6EDB216 /* PilotApp.swift */,
+				4A40F02DEE5A35CE7225DC6E /* PilotApplicationDelegate.swift */,
 				6A3D7B9A9354E56EC99B7E08 /* PilotModel.swift */,
 				AEDFE53775C96B8F08B3A077 /* RootView.swift */,
 				66F7D952FA44369FC4B0D574 /* VoiceAudioController.swift */,
+				5E61123A8DF188C829AD5505 /* WatchMeetingDeliveryPipeline.swift */,
+				49471ACFC44EFA02105A8B2C /* WatchMeetingInbox.swift */,
 			);
 			path = Pilot;
+			sourceTree = "<group>";
+		};
+		F81CE15C959AB0E102F0C9F7 /* PilotWatch */ = {
+			isa = PBXGroup;
+			children = (
+				D7F4B2A7A9DDC86BC4B34A26 /* Assets.xcassets */,
+				EB26B3FCFA77D9290AF28829 /* Info.plist */,
+				3CB0866EE2D31C5FE72D7E3B /* PilotWatchApp.swift */,
+				AE1A873D39E2F3261560DD2E /* PilotWatchLifecycle.swift */,
+				B47A0C573133DF801DE33FD8 /* WatchMeetingModel.swift */,
+				3DF255BC98808FFBCFCCABFC /* WatchMeetingModels.swift */,
+				9EA9BD9E5512B18AEB47097C /* WatchMeetingOutbox.swift */,
+				9A6217653B3EA9CE2706B3B7 /* WatchMeetingTransport.swift */,
+				F8D14D57342D43D9F1407928 /* WatchMeetingView.swift */,
+			);
+			path = PilotWatch;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		0AF436AD64A4C2D4BBCF3883 /* PilotWatchTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A264380B235423C7F46A4647 /* Build configuration list for PBXNativeTarget "PilotWatchTests" */;
+			buildPhases = (
+				97215D56663BBB2FAE70CD18 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				26C5B14041822041CA36D086 /* PBXTargetDependency */,
+			);
+			name = PilotWatchTests;
+			packageProductDependencies = (
+			);
+			productName = PilotWatchTests;
+			productReference = 01C5BE077797DD020EA80DEC /* PilotWatchTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 		11F542B11D39DB43DD511507 /* PilotTests */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = 7D0A758B4DB46E8AB822D2AB /* Build configuration list for PBXNativeTarget "PilotTests" */;
@@ -134,6 +254,24 @@
 			productReference = A69638DA27EA76C10C483DDC /* PilotTests.xctest */;
 			productType = "com.apple.product-type.bundle.unit-test";
 		};
+		195C0E0F7E490A12EFE8E429 /* PilotWatch */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = E8013A353906A4AD22184279 /* Build configuration list for PBXNativeTarget "PilotWatch" */;
+			buildPhases = (
+				BEBBBA7023BDB0C64802F244 /* Sources */,
+				C1796F88B35D51CF3E1D9FEC /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = PilotWatch;
+			packageProductDependencies = (
+			);
+			productName = PilotWatch;
+			productReference = 630560F1682DCC8AB7211136 /* PilotWatch.app */;
+			productType = "com.apple.product-type.application";
+		};
 		FE8ED209D7643DC0791F345F /* Pilot */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = C88E1BB78C3D84A1284783C0 /* Build configuration list for PBXNativeTarget "Pilot" */;
@@ -141,10 +279,12 @@
 				103AA9C78E34D6CDE3EA0B73 /* Sources */,
 				7EFE0C03BFA31B79D408917E /* Resources */,
 				04CCF6C4AF3422963904D8CB /* Frameworks */,
+				6D4AB0ABEA2CC1C5D0E4E3B3 /* Embed Watch Content */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				37D10967D034A0BCC16D754A /* PBXTargetDependency */,
 			);
 			name = Pilot;
 			packageProductDependencies = (
@@ -164,6 +304,12 @@
 				BuildIndependentTargetsInParallel = YES;
 				LastUpgradeCheck = 1430;
 				TargetAttributes = {
+					0AF436AD64A4C2D4BBCF3883 = {
+						DevelopmentTeam = 362V48U65C;
+					};
+					195C0E0F7E490A12EFE8E429 = {
+						DevelopmentTeam = 362V48U65C;
+					};
 					FE8ED209D7643DC0791F345F = {
 						DevelopmentTeam = 362V48U65C;
 					};
@@ -189,6 +335,8 @@
 			targets = (
 				FE8ED209D7643DC0791F345F /* Pilot */,
 				11F542B11D39DB43DD511507 /* PilotTests */,
+				195C0E0F7E490A12EFE8E429 /* PilotWatch */,
+				0AF436AD64A4C2D4BBCF3883 /* PilotWatchTests */,
 			);
 		};
 /* End PBXProject section */
@@ -202,6 +350,14 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		C1796F88B35D51CF3E1D9FEC /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				0422A420C7213800F69F2341 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
@@ -210,13 +366,25 @@
 			buildActionMask = 2147483647;
 			files = (
 				79F03F8FEF4C54983AB1698B /* HomeLabView.swift in Sources */,
+				3C4EC11211D4FB73158D41E2 /* MeetingBackgroundUploadCoordinator.swift in Sources */,
 				93570751D7B731E10026294F /* Models.swift in Sources */,
 				A2F6BD8D8D4A937B4D8CD6E3 /* PhonePlaybackController.swift in Sources */,
 				260C6B29B047979CE7181505 /* PilotAPI.swift in Sources */,
 				F1D9C21F86E27295DA5AA39F /* PilotApp.swift in Sources */,
+				AA69C516414C83754E59DF3D /* PilotApplicationDelegate.swift in Sources */,
 				DF4427ABDB61AE355381264B /* PilotModel.swift in Sources */,
 				0766FAAC59F3AF4F6BB1A4C0 /* RootView.swift in Sources */,
 				73C38B51C88460671408B296 /* VoiceAudioController.swift in Sources */,
+				D81489F2411FD4FB36B795F8 /* WatchMeetingDeliveryPipeline.swift in Sources */,
+				E16DC0BABED277E97405FAFB /* WatchMeetingInbox.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		97215D56663BBB2FAE70CD18 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				FCA60EAB9CD36E55B08A4C63 /* WatchMeetingPersistenceTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -224,13 +392,41 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				65505E28D67E842F515B3A9A /* MeetingBackgroundUploadCoordinatorTests.swift in Sources */,
+				B87EB5382C7BA1916F32F8C7 /* PilotApplicationDelegateTests.swift in Sources */,
 				9778D75A4D000C2405F0F53E /* PilotTests.swift in Sources */,
+				2A59BD45C324364126AEFB11 /* WatchMeetingDeliveryPipelineTests.swift in Sources */,
+				768929989203358A4FFB5CFA /* WatchMeetingInboxTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		BEBBBA7023BDB0C64802F244 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				0AE318850C235603BF2B6697 /* PilotWatchApp.swift in Sources */,
+				6D3B182C0AC9AD3D0A7071F7 /* PilotWatchLifecycle.swift in Sources */,
+				A9A56F104ECA47E6E3D01502 /* WatchMeetingModel.swift in Sources */,
+				1E4B2B8070AEF16564EDA50D /* WatchMeetingModels.swift in Sources */,
+				0D63A16E8518D6EE43C50161 /* WatchMeetingOutbox.swift in Sources */,
+				135B625D0A15FF5B3E777404 /* WatchMeetingTransport.swift in Sources */,
+				03FF02E2BD28B4A671F5E02A /* WatchMeetingView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
+		26C5B14041822041CA36D086 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 195C0E0F7E490A12EFE8E429 /* PilotWatch */;
+			targetProxy = B4C23756CEA707D34C8AB521 /* PBXContainerItemProxy */;
+		};
+		37D10967D034A0BCC16D754A /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 195C0E0F7E490A12EFE8E429 /* PilotWatch */;
+			targetProxy = 2DE6AFCC27D399A96A0AB91D /* PBXContainerItemProxy */;
+		};
 		BD5105DA696A981748AB089D /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			target = FE8ED209D7643DC0791F345F /* Pilot */;
@@ -270,6 +466,25 @@
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Pilot.app/Pilot";
+			};
+			name = Release;
+		};
+		5652E107D85C5525BC1D37CE /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				DEVELOPMENT_TEAM = 362V48U65C;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.jameshazell.PilotWatchTests;
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				TARGETED_DEVICE_FAMILY = 4;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/PilotWatch.app/PilotWatch";
 			};
 			name = Release;
 		};
@@ -329,12 +544,44 @@
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
-				SDKROOT = iphoneos;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 				SWIFT_VERSION = 6.0;
+				WATCHOS_DEPLOYMENT_TARGET = 10.0;
 			};
 			name = Debug;
+		};
+		A2859DF53AC479C160D884CE /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				"ARCHS[sdk=watchos*]" = "arm64_32 arm64";
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				DEVELOPMENT_TEAM = 362V48U65C;
+				INFOPLIST_FILE = PilotWatch/Info.plist;
+				ONLY_ACTIVE_ARCH = NO;
+				PRODUCT_BUNDLE_IDENTIFIER = com.jameshazell.pilot.watchkitapp;
+				PRODUCT_NAME = PilotWatch;
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				TARGETED_DEVICE_FAMILY = 4;
+			};
+			name = Debug;
+		};
+		A4EACF4802A88FD7B1B8249B /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				"ARCHS[sdk=watchos*]" = "arm64_32 arm64";
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				DEVELOPMENT_TEAM = 362V48U65C;
+				INFOPLIST_FILE = PilotWatch/Info.plist;
+				ONLY_ACTIVE_ARCH = NO;
+				PRODUCT_BUNDLE_IDENTIFIER = com.jameshazell.pilot.watchkitapp;
+				PRODUCT_NAME = PilotWatch;
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				TARGETED_DEVICE_FAMILY = 4;
+			};
+			name = Release;
 		};
 		B9526E7DB7A128CDB144622B /* Debug */ = {
 			isa = XCBuildConfiguration;
@@ -404,12 +651,31 @@
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
-				SDKROOT = iphoneos;
 				SWIFT_COMPILATION_MODE = wholemodule;
 				SWIFT_OPTIMIZATION_LEVEL = "-O";
 				SWIFT_VERSION = 6.0;
+				WATCHOS_DEPLOYMENT_TARGET = 10.0;
 			};
 			name = Release;
+		};
+		C8F1C0895958E84FF1CA6241 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				DEVELOPMENT_TEAM = 362V48U65C;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.jameshazell.PilotWatchTests;
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				TARGETED_DEVICE_FAMILY = 4;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/PilotWatch.app/PilotWatch";
+			};
+			name = Debug;
 		};
 		C9D2BBAB7A4E7EA3FEA815B4 /* Release */ = {
 			isa = XCBuildConfiguration;
@@ -451,11 +717,29 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Debug;
 		};
+		A264380B235423C7F46A4647 /* Build configuration list for PBXNativeTarget "PilotWatchTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				C8F1C0895958E84FF1CA6241 /* Debug */,
+				5652E107D85C5525BC1D37CE /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
 		C88E1BB78C3D84A1284783C0 /* Build configuration list for PBXNativeTarget "Pilot" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				B9526E7DB7A128CDB144622B /* Debug */,
 				C9D2BBAB7A4E7EA3FEA815B4 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		E8013A353906A4AD22184279 /* Build configuration list for PBXNativeTarget "PilotWatch" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A2859DF53AC479C160D884CE /* Debug */,
+				A4EACF4802A88FD7B1B8249B /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Debug;

@@ -1,0 +1,29 @@
+# Retained IDs for superseded EV automations. Their pre-remediation definitions
+# are preserved in the dated Home Assistant rollback checkpoint. Keeping inert
+# records here prevents an old export from silently restoring a second policy.
+- id: energy_optimizer_ev_daily_prompt
+  alias: Energy Optimizer - RETIRED EV Daily Trip Prompt
+  description: Replaced by the unified No trip requirement and editable dashboard controls.
+  initial_state: false
+  triggers: []
+  conditions: []
+  actions: []
+  mode: single
+
+- id: energy_optimizer_ev_trip_response
+  alias: Energy Optimizer - RETIRED EV Trip Response
+  description: Replaced by the unified requirement-date automation and immediate optimiser replanning.
+  initial_state: false
+  triggers: []
+  conditions: []
+  actions: []
+  mode: single
+
+- id: energy_optimizer_ev_cheap_window
+  alias: Energy Optimizer - RETIRED EV Cheap Window
+  description: Replaced by the forecast plan, live EV actuator and physical charging notifications.
+  initial_state: false
+  triggers: []
+  conditions: []
+  actions: []
+  mode: single

@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+# Must be run as root during the already-approved model maintenance window.
+set -euo pipefail
+
+LAB_HOME=/home/jameshazell/pilot-model-lab
+MODEL="$LAB_HOME/models/qwen36-35b/Qwen3.6-35B-A3B-UD-IQ4_NL.gguf"
+PRODUCTION_MODEL=/srv/models/llama-35b/Qwen3.6-35B-A3B-UD-IQ4_NL.gguf
+EXPECTED_BYTES=18536192288
+
+[[ $(stat --format=%s "$MODEL") -eq $EXPECTED_BYTES ]] || {
+  echo "35B IQ4_NL model is incomplete or has an unexpected size." >&2
+  exit 1
+}
+
+# SELinux does not permit a system service to execute or read this workload
+# from the login user's private home. Stage an immutable production copy while
+# the existing vLLM endpoint remains available.
+systemctl stop llama-35b || true
+systemctl start vllm || true
+install -d -m 0755 /opt/llama-35b /srv/models/llama-35b
+rm -rf /opt/llama-35b/bin
+cp -a "$LAB_HOME/bin" /opt/llama-35b/bin
+cp --reflink=auto --preserve=mode,timestamps "$MODEL" "$PRODUCTION_MODEL"
+chown -R root:root /opt/llama-35b /srv/models/llama-35b
+chmod 0755 /opt/llama-35b /opt/llama-35b/bin /srv/models/llama-35b
+chmod 0644 "$PRODUCTION_MODEL"
+restorecon -RF /opt/llama-35b /srv/models/llama-35b
+[[ $(stat --format=%s "$PRODUCTION_MODEL") -eq $EXPECTED_BYTES ]] || exit 1
+
+install -m 0644 "$LAB_HOME/scripts/llama-35b.service" /etc/systemd/system/llama-35b.service
+systemctl daemon-reload
+systemctl stop vllm
+systemctl start llama-35b
+systemctl is-active --quiet llama-35b
+
+rollback() {
+  systemctl stop llama-35b || true
+  systemctl start vllm || true
+}
+
+for _ in $(seq 1 90); do
+  if curl --fail --silent http://127.0.0.1:8000/health >/dev/null; then
+    systemctl enable llama-35b
+    echo "35B llama.cpp production service is healthy. Rollback: systemctl stop llama-35b && systemctl start vllm"
+    exit 0
+  fi
+  sleep 1
+done
+
+echo "llama-35b did not become healthy; restoring vLLM." >&2
+rollback
+exit 1

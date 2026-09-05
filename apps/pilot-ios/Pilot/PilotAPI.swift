@@ -2,9 +2,36 @@ import Foundation
 import PilotClientKit
 
 struct PilotAPI: Sendable {
+    typealias MeetingTicketIssuer = @Sendable (
+        _ meetingID: String,
+        _ sha256: String,
+        _ sizeBytes: Int64,
+        _ filename: String
+    ) async throws -> MeetingRecordingUploadTicket
+    typealias MeetingUploadPerformer = @Sendable (
+        _ request: URLRequest,
+        _ recordingURL: URL
+    ) async throws -> (Data, URLResponse)
+
     let coreURL: URL
     let deviceID: String
     let token: String
+    private let meetingTicketIssuer: MeetingTicketIssuer?
+    private let meetingUploadPerformer: MeetingUploadPerformer?
+
+    init(
+        coreURL: URL,
+        deviceID: String,
+        token: String,
+        meetingTicketIssuer: MeetingTicketIssuer? = nil,
+        meetingUploadPerformer: MeetingUploadPerformer? = nil
+    ) {
+        self.coreURL = coreURL
+        self.deviceID = deviceID
+        self.token = token
+        self.meetingTicketIssuer = meetingTicketIssuer
+        self.meetingUploadPerformer = meetingUploadPerformer
+    }
 
     private func request(
         path: String,
@@ -459,11 +486,22 @@ struct PilotAPI: Sendable {
         return try JSONDecoder().decode(PilotMeetingDetail.self, from: data)
     }
 
-    func createMeeting(title: String) async throws -> PilotMeeting {
-        let body = try JSONSerialization.data(withJSONObject: [
+    func createMeeting(
+        title: String,
+        startedAt: Date? = nil,
+        sourceCaptureID: String? = nil
+    ) async throws -> PilotMeeting {
+        var payload: [String: Any] = [
             "title": title,
             "language": "en-AU",
-        ])
+        ]
+        if let startedAt {
+            payload["started_at"] = ISO8601DateFormatter().string(from: startedAt)
+        }
+        if let sourceCaptureID, !sourceCaptureID.isEmpty {
+            payload["source_capture_id"] = sourceCaptureID
+        }
+        let body = try JSONSerialization.data(withJSONObject: payload)
         let data = try await request(
             path: "v1/devices/\(deviceID)/meetings",
             method: "POST",
@@ -477,39 +515,107 @@ struct PilotAPI: Sendable {
         recordingURL: URL,
         uploadEndpoint: String? = nil
     ) async throws {
-        let url: URL
-        if let uploadEndpoint, !uploadEndpoint.isEmpty {
-            let resolved = uploadEndpoint.replacingOccurrences(
-                of: "{meeting_id}",
-                with: meetingID
+        let attributes = try FileManager.default.attributesOfItem(
+            atPath: recordingURL.path
+        )
+        guard let sizeNumber = attributes[.size] as? NSNumber else {
+            throw PilotAPIError.invalidResponse
+        }
+        var effectiveEndpoint = uploadEndpoint
+        var uploadTicket: MeetingRecordingUploadTicket?
+        do {
+            uploadTicket = try await meetingRecordingUploadTicket(
+                meetingID: meetingID,
+                sha256: try WatchMeetingFileIntegrity.sha256Hex(at: recordingURL),
+                sizeBytes: sizeNumber.int64Value,
+                filename: recordingURL.lastPathComponent
             )
-            guard let advertisedURL = URL(string: resolved) else {
-                throw PilotAPIError.invalidResponse
+        } catch {
+            // Older/unavailable ticket issuance safely falls back to a legacy
+            // same-origin Core upload route. The permanent token never goes to
+            // an advertised external host.
+            if MeetingBackgroundUploadCoordinator.advertisedEndpointIsOffOrigin(
+                uploadEndpoint,
+                coreURL: coreURL
+            ) {
+                effectiveEndpoint = nil
             }
-            if advertisedURL.scheme != nil && advertisedURL.scheme != "https" {
-                throw PilotAPIError.invalidResponse
-            }
-            url = advertisedURL.scheme == nil
-                ? coreURL.appending(path: resolved)
-                : advertisedURL
-        } else {
-            url = coreURL.appending(
-                path: "v1/devices/\(deviceID)/meetings/\(meetingID)/recording"
+            uploadTicket = nil
+        }
+
+        let request: URLRequest
+        do {
+            request = try MeetingBackgroundUploadCoordinator.uploadRequest(
+                coreURL: coreURL,
+                deviceID: deviceID,
+                token: token,
+                meetingID: meetingID,
+                recordingURL: recordingURL,
+                advertisedUploadEndpoint: effectiveEndpoint,
+                uploadTicket: uploadTicket
+            )
+        } catch MeetingBackgroundUploadError.invalidUploadTicket
+            where uploadTicket != nil
+        {
+            request = try MeetingBackgroundUploadCoordinator.uploadRequest(
+                coreURL: coreURL,
+                deviceID: deviceID,
+                token: token,
+                meetingID: meetingID,
+                recordingURL: recordingURL,
+                advertisedUploadEndpoint: nil,
+                uploadTicket: nil
             )
         }
-        var request = URLRequest(url: url)
-        request.httpMethod = "PUT"
-        request.timeoutInterval = 600
-        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        request.setValue(deviceID, forHTTPHeaderField: "X-Pilot-Device-ID")
-        request.setValue(recordingURL.lastPathComponent, forHTTPHeaderField: "X-Pilot-Filename")
-        request.setValue("audio/m4a", forHTTPHeaderField: "Content-Type")
-        request.setValue("application/json", forHTTPHeaderField: "Accept")
-        let (data, response) = try await URLSession.shared.upload(
-            for: request,
-            fromFile: recordingURL
-        )
+        let (data, response): (Data, URLResponse)
+        if let meetingUploadPerformer {
+            (data, response) = try await meetingUploadPerformer(request, recordingURL)
+        } else {
+            (data, response) = try await URLSession.shared.upload(
+                for: request,
+                fromFile: recordingURL
+            )
+        }
         try Self.validate(response, data: data)
+    }
+
+    func meetingRecordingUploadTicket(
+        meetingID: String,
+        sha256: String,
+        sizeBytes: Int64,
+        filename: String
+    ) async throws -> MeetingRecordingUploadTicket {
+        let ticket: MeetingRecordingUploadTicket
+        if let meetingTicketIssuer {
+            ticket = try await meetingTicketIssuer(
+                meetingID,
+                sha256,
+                sizeBytes,
+                filename
+            )
+        } else {
+            let body = try JSONSerialization.data(withJSONObject: [
+                "sha256": sha256,
+                "size_bytes": sizeBytes,
+                "filename": filename,
+                "content_type": "audio/m4a",
+            ])
+            let data = try await request(
+                path: "v1/devices/\(deviceID)/meetings/\(meetingID)/recording-upload-ticket",
+                method: "POST",
+                body: body
+            )
+            ticket = try JSONDecoder().decode(MeetingRecordingUploadTicket.self, from: data)
+        }
+        guard ticket.isBound(
+            toMeetingID: meetingID,
+            filename: filename,
+            sha256: sha256,
+            sizeBytes: sizeBytes
+        ) else {
+            throw PilotAPIError.invalidResponse
+        }
+        return ticket
     }
 
     func processMeeting(_ meetingID: String) async throws -> PilotMeeting {

@@ -1,0 +1,138 @@
+input_boolean:
+  ben_optimizer_enabled:
+    name: Ben Optimizer Enabled
+    icon: mdi:robot
+  ben_manual_fault:
+    name: Ben Manual Test Fault
+    icon: mdi:alert-circle
+
+input_number:
+  ben_optimizer_buy_price:
+    name: Buy at or below
+    min: -1
+    max: 2
+    step: 0.001
+    mode: box
+    unit_of_measurement: $/kWh
+  ben_optimizer_sell_price:
+    name: Sell at or above
+    min: -1
+    max: 2
+    step: 0.001
+    mode: box
+    unit_of_measurement: $/kWh
+  ben_manual_grid_rate:
+    name: Manual grid rate
+    min: 0.1
+    max: 25
+    step: 0.1
+    mode: box
+    unit_of_measurement: kW
+
+input_select:
+  ben_manual_mode:
+    name: Ben Manual Mode
+    options: [Stopped, Import, Export]
+    icon: mdi:hand-back-right
+
+input_button:
+  ben_manual_start_import:
+    name: Start Import
+    icon: mdi:transmission-tower-export
+  ben_manual_start_export:
+    name: Start Export
+    icon: mdi:transmission-tower-import
+  ben_manual_stop:
+    name: Stop
+    icon: mdi:stop-circle
+
+input_text:
+  ben_optimizer_actuator_status:
+    name: Ben Optimizer Actuator Status
+    max: 255
+  ben_manual_session_started:
+    name: Ben Manual Session Started
+    max: 64
+
+template:
+  - sensor:
+      - name: Ben Optimizer Action
+        state: "{{ state_attr('sensor.ben_optimizer_plan', 'action') | default('unavailable', true) }}"
+        attributes:
+          reason: "{{ state_attr('sensor.ben_optimizer_plan', 'reason') }}"
+      - name: Ben Optimizer Dynamic Reserve
+        unit_of_measurement: "%"
+        state: "{{ state_attr('sensor.ben_optimizer_plan', 'dynamic_reserve_pct') | float(0) }}"
+      - name: Ben Optimizer Net Benefit
+        unit_of_measurement: "$"
+        state: "{{ state_attr('sensor.ben_optimizer_plan', 'expected_net_benefit') | float(0) }}"
+        attributes:
+          charging_cost: "{{ state_attr('sensor.ben_optimizer_plan', 'expected_charging_cost') }}"
+          export_revenue: "{{ state_attr('sensor.ben_optimizer_plan', 'expected_export_revenue') }}"
+          wear: "{{ state_attr('sensor.ben_optimizer_plan', 'expected_wear_cost') }}"
+      - name: Ben Optimizer Reason
+        state: "{{ state_attr('sensor.ben_optimizer_plan', 'reason') | default('Waiting for a valid plan.', true) }}"
+      - name: Ben Optimizer Battery Target
+        unit_of_measurement: kW
+        state: "{{ state_attr('sensor.ben_optimizer_plan', 'battery_power_target_kw') | float(0) }}"
+      - name: Ben Optimizer Site Grid Target
+        unit_of_measurement: kW
+        state: "{{ state_attr('sensor.ben_optimizer_plan', 'site_grid_target_kw') | float(0) }}"
+      - name: Ben Optimizer Confidence
+        unit_of_measurement: "%"
+        state: "{{ ((state_attr('sensor.ben_optimizer_plan', 'confidence') | float(0)) * 100) | round(0) }}"
+      - name: Ben Optimizer Next Buy
+        state: >-
+          {% set x = state_attr('sensor.ben_optimizer_plan', 'next_buy_window') %}
+          {{ (x['start'] ~ ' @ $' ~ x['import_price'] ~ '/kWh') if x else 'None in available forecast' }}
+      - name: Ben Optimizer Next Sell
+        state: >-
+          {% set x = state_attr('sensor.ben_optimizer_plan', 'next_sell_window') %}
+          {{ (x['start'] ~ ' @ $' ~ x['fit'] ~ '/kWh') if x else 'None in available forecast' }}
+      - name: Ben Optimizer Forecast Horizon
+        state: "{{ state_attr('sensor.ben_optimizer_plan', 'forecast_horizon_end') | default('Unavailable', true) }}"
+
+automation:
+  - id: ben_manual_start_import
+    alias: Ben Manual Start Import
+    mode: single
+    triggers:
+      - trigger: state
+        entity_id: input_button.ben_manual_start_import
+    actions:
+      - action: input_boolean.turn_off
+        target: {entity_id: input_boolean.ben_manual_fault}
+      - action: input_text.set_value
+        target: {entity_id: input_text.ben_manual_session_started}
+        data: {value: "{{ now().isoformat() }}"}
+      - action: input_select.select_option
+        target: {entity_id: input_select.ben_manual_mode}
+        data: {option: Import}
+  - id: ben_manual_start_export
+    alias: Ben Manual Start Export
+    mode: single
+    triggers:
+      - trigger: state
+        entity_id: input_button.ben_manual_start_export
+    actions:
+      - action: input_boolean.turn_off
+        target: {entity_id: input_boolean.ben_manual_fault}
+      - action: input_text.set_value
+        target: {entity_id: input_text.ben_manual_session_started}
+        data: {value: "{{ now().isoformat() }}"}
+      - action: input_select.select_option
+        target: {entity_id: input_select.ben_manual_mode}
+        data: {option: Export}
+  - id: ben_manual_stop
+    alias: Ben Manual Stop
+    mode: restart
+    triggers:
+      - trigger: state
+        entity_id: input_button.ben_manual_stop
+    actions:
+      - action: input_select.select_option
+        target: {entity_id: input_select.ben_manual_mode}
+        data: {option: Stopped}
+      - action: input_text.set_value
+        target: {entity_id: input_text.ben_manual_session_started}
+        data: {value: ""}

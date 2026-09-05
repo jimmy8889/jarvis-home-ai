@@ -1,0 +1,20 @@
+[Unit]
+Description=Energy Manager recovery companion
+After=network-online.target nut-server.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=energy-recovery
+Group=energy-recovery
+ExecStart=/usr/local/lib/energy-recovery/energy_recovery_companion.py
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/energy-recovery
+
+[Install]
+WantedBy=multi-user.target

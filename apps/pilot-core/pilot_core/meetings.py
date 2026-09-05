@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
+import fcntl
 from hashlib import sha256
 import ipaddress
 import json
@@ -9,6 +10,7 @@ import math
 import os
 from pathlib import Path
 import secrets
+import stat
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -38,15 +40,28 @@ class MeetingRecordingError(ValueError):
     pass
 
 
+class MeetingRecordingConflict(MeetingRecordingError):
+    pass
+
+
 class MeetingProcessingError(RuntimeError):
     pass
 
 
 class MeetingRecordings:
+    stale_upload_age_seconds = 6 * 60 * 60
+    stale_upload_cleanup_max_entries = 512
+
     def __init__(self, store: Store, path: str, max_bytes: int) -> None:
         self.store = store
         self.root = Path(path)
         self.max_bytes = max_bytes
+        try:
+            self.cleanup_stale_uploads()
+        except OSError:
+            # Cleanup is recovery hygiene and must not make Core unavailable
+            # when the asset root is temporarily unreadable at startup.
+            pass
 
     async def save(
         self,
@@ -54,16 +69,16 @@ class MeetingRecordings:
         filename: str,
         content_type: str,
         chunks: AsyncIterator[bytes],
+        *,
+        expected_sha256: str | None = None,
+        expected_size_bytes: int | None = None,
+        replace_existing: bool = True,
     ) -> dict[str, Any]:
         if self.store.get_meeting(meeting_id) is None:
             raise KeyError(meeting_id)
-        normalized_type = content_type.partition(";")[0].strip().lower()
-        extension = ALLOWED_RECORDING_TYPES.get(normalized_type)
-        if extension is None:
-            raise MeetingRecordingError("unsupported meeting recording type")
-        safe_name = Path(filename).name.strip() or f"recording{extension}"
-        if not safe_name.lower().endswith(extension):
-            safe_name += extension
+        safe_name, normalized_type, extension = self.normalized_metadata(
+            filename, content_type
+        )
 
         meeting_directory = self.root / meeting_id
         meeting_directory.mkdir(parents=True, exist_ok=True)
@@ -71,12 +86,24 @@ class MeetingRecordings:
         temporary = meeting_directory / f".upload-{secrets.token_hex(8)}"
         digest = sha256()
         size = 0
+        upload_lock_descriptor: int | None = None
         try:
             with temporary.open("xb") as handle:
+                # A concurrent/startup scavenger must never remove an active
+                # upload, even if its timestamp is unexpectedly old.
+                fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+                upload_lock_descriptor = os.dup(handle.fileno())
                 async for chunk in chunks:
                     if not chunk:
                         continue
                     size += len(chunk)
+                    if (
+                        expected_size_bytes is not None
+                        and size > expected_size_bytes
+                    ):
+                        raise MeetingRecordingError(
+                            "meeting recording size does not match upload ticket"
+                        )
                     if size > self.max_bytes:
                         raise MeetingRecordingError(
                             "meeting recording exceeds configured size limit"
@@ -87,19 +114,172 @@ class MeetingRecordings:
                 os.fsync(handle.fileno())
             if size == 0:
                 raise MeetingRecordingError("meeting recording is empty")
-            os.chmod(temporary, 0o600)
-            os.replace(temporary, destination)
+            actual_sha256 = digest.hexdigest()
+            if expected_size_bytes is not None and size != expected_size_bytes:
+                raise MeetingRecordingError(
+                    "meeting recording size does not match upload ticket"
+                )
+            if (
+                expected_sha256 is not None
+                and not secrets.compare_digest(
+                    actual_sha256, expected_sha256.strip().lower()
+                )
+            ):
+                raise MeetingRecordingError(
+                    "meeting recording SHA-256 does not match upload ticket"
+                )
+
+            lock_path = meeting_directory / ".recording.lock"
+            with lock_path.open("a+b") as lock_handle:
+                os.chmod(lock_path, 0o600)
+                fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX)
+                if (
+                    not replace_existing
+                    and self.store.get_meeting_recording(meeting_id)
+                ):
+                    raise MeetingRecordingConflict(
+                        "meeting recording already exists"
+                    )
+                os.chmod(temporary, 0o600)
+                os.replace(temporary, destination)
+                self._fsync_file_and_directory(destination)
+                try:
+                    recording = self.store.set_meeting_recording(
+                        meeting_id,
+                        safe_name,
+                        normalized_type,
+                        actual_sha256,
+                        size,
+                        str(destination),
+                        replace_existing=replace_existing,
+                    )
+                except FileExistsError:
+                    raise MeetingRecordingConflict(
+                        "meeting recording already exists"
+                    ) from None
         finally:
+            if upload_lock_descriptor is not None:
+                os.close(upload_lock_descriptor)
             temporary.unlink(missing_ok=True)
 
-        return self.store.set_meeting_recording(
-            meeting_id,
-            safe_name,
-            normalized_type,
-            digest.hexdigest(),
-            size,
-            str(destination),
+        return recording
+
+    def cleanup_stale_uploads(
+        self,
+        *,
+        now: datetime | None = None,
+        stale_after_seconds: int | None = None,
+        max_entries: int | None = None,
+    ) -> int:
+        """Remove a bounded number of old, unlocked crash leftovers."""
+        if not self.root.is_dir():
+            return 0
+        age = (
+            self.stale_upload_age_seconds
+            if stale_after_seconds is None
+            else max(0, stale_after_seconds)
         )
+        budget = (
+            self.stale_upload_cleanup_max_entries
+            if max_entries is None
+            else max(0, max_entries)
+        )
+        if budget == 0:
+            return 0
+        reference = now or datetime.now(UTC)
+        cutoff = reference.timestamp() - age
+        scanned = 0
+        removed = 0
+        changed_directories: set[Path] = set()
+
+        with os.scandir(self.root) as root_entries:
+            for meeting_entry in root_entries:
+                if scanned >= budget:
+                    break
+                scanned += 1
+                if not meeting_entry.is_dir(follow_symlinks=False):
+                    continue
+                with os.scandir(meeting_entry.path) as upload_entries:
+                    for upload_entry in upload_entries:
+                        if scanned >= budget:
+                            break
+                        scanned += 1
+                        if not upload_entry.name.startswith(".upload-"):
+                            continue
+                        if not upload_entry.is_file(follow_symlinks=False):
+                            continue
+                        try:
+                            descriptor = os.open(
+                                upload_entry.path,
+                                os.O_RDWR
+                                | getattr(os, "O_NOFOLLOW", 0),
+                            )
+                        except FileNotFoundError:
+                            continue
+                        try:
+                            try:
+                                fcntl.flock(
+                                    descriptor,
+                                    fcntl.LOCK_EX | fcntl.LOCK_NB,
+                                )
+                            except BlockingIOError:
+                                continue
+                            descriptor_stat = os.fstat(descriptor)
+                            if descriptor_stat.st_mtime > cutoff:
+                                continue
+                            path_stat = os.stat(
+                                upload_entry.path, follow_symlinks=False
+                            )
+                            if (
+                                not stat.S_ISREG(path_stat.st_mode)
+                                or path_stat.st_ino != descriptor_stat.st_ino
+                                or path_stat.st_dev != descriptor_stat.st_dev
+                            ):
+                                continue
+                            os.unlink(upload_entry.path)
+                            removed += 1
+                            changed_directories.add(Path(meeting_entry.path))
+                        except FileNotFoundError:
+                            continue
+                        finally:
+                            os.close(descriptor)
+
+        for directory in changed_directories:
+            self._fsync_directory(directory)
+        return removed
+
+    @classmethod
+    def _fsync_file_and_directory(cls, path: Path) -> None:
+        descriptor = os.open(path, os.O_RDONLY)
+        try:
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+        cls._fsync_directory(path.parent)
+
+    @staticmethod
+    def _fsync_directory(directory: Path) -> None:
+        descriptor = os.open(
+            directory,
+            os.O_RDONLY | getattr(os, "O_DIRECTORY", 0),
+        )
+        try:
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+
+    @staticmethod
+    def normalized_metadata(
+        filename: str, content_type: str
+    ) -> tuple[str, str, str]:
+        normalized_type = content_type.partition(";")[0].strip().lower()
+        extension = ALLOWED_RECORDING_TYPES.get(normalized_type)
+        if extension is None:
+            raise MeetingRecordingError("unsupported meeting recording type")
+        safe_name = Path(filename).name.strip() or f"recording{extension}"
+        if not safe_name.lower().endswith(extension):
+            safe_name += extension
+        return safe_name, normalized_type, extension
 
 
 class MeetingProcessor:

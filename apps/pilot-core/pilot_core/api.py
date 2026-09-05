@@ -40,6 +40,7 @@ from .conversation import (
     OpenAICompatibleLLM,
 )
 from .dashboard import DashboardService
+from .energy_manager import EnergyManagerClient
 from .firmware import FirmwareReleaseError, FirmwareReleases, is_newer_version
 from .home_actions import (
     HomeActionConflict,
@@ -54,6 +55,7 @@ from .media_state import MediaStateReader
 from .meetings import (
     MeetingProcessingError,
     MeetingProcessor,
+    MeetingRecordingConflict,
     MeetingRecordingError,
     MeetingRecordings,
 )
@@ -206,6 +208,13 @@ class AssistantRequest(BaseModel):
     device_id: str | None = None
     expires_in_seconds: int = Field(default=30, ge=1, le=300)
     retention_seconds: int | None = Field(default=None, ge=60, le=86_400)
+    mode: Literal[
+        "fast",
+        "standard",
+        "deep",
+        "hermes",
+        "experimental-128k",
+    ] = "standard"
 
 
 class DeviceAssistantRequest(BaseModel):
@@ -213,6 +222,13 @@ class DeviceAssistantRequest(BaseModel):
     language: str = Field(default="en", min_length=2, max_length=35)
     conversation_id: str | None = None
     room_id: str | None = Field(default=None, min_length=1, max_length=128)
+    mode: Literal[
+        "fast",
+        "standard",
+        "deep",
+        "hermes",
+        "experimental-128k",
+    ] = "fast"
 
 
 class DeviceTTSPreviewRequest(BaseModel):
@@ -266,7 +282,10 @@ class DeviceHomeActionRequest(BaseModel):
 
 
 class DeviceDashboardActionRequest(BaseModel):
-    action: Literal["set_tesla_charging_mode", "set_media_room_mode"]
+    action: Literal[
+        "set_media_room_mode",
+        "set_sim_rig_power",
+    ]
     value: str = Field(min_length=1, max_length=32)
 
 
@@ -319,7 +338,7 @@ class VehicleActionInput(BaseModel):
 
     @model_validator(mode="after")
     def bound_vehicle_parameters(self) -> "VehicleActionInput":
-        if len(self.parameters) > 4 or any(
+        if len(self.parameters) > 6 or any(
             not isinstance(key, str)
             or len(key) > 64
             or isinstance(value, (dict, list))
@@ -512,6 +531,18 @@ class MeetingCreate(BaseModel):
     language: str = Field(default="en", min_length=2, max_length=35)
     started_at: datetime | None = None
     source_device_id: str | None = Field(default=None, max_length=128)
+    source_capture_id: str | None = Field(default=None, min_length=1, max_length=128)
+
+
+class MeetingRecordingUploadTicketRequest(BaseModel):
+    filename: str = Field(min_length=1, max_length=255)
+    content_type: str = Field(min_length=1, max_length=100)
+    sha256: str = Field(
+        min_length=64,
+        max_length=64,
+        pattern=r"^[0-9a-fA-F]{64}$",
+    )
+    size_bytes: int = Field(ge=1)
 
 
 class TranscriptSegmentInput(BaseModel):
@@ -649,6 +680,7 @@ def create_app(
     store: Store | None = None,
     *,
     integrations_override: Integrations | None = None,
+    energy_manager_override: EnergyManagerClient | None = None,
     teslamate_override: TeslaMateClient | None = None,
     homelab_override: HomeLabService | None = None,
 ) -> FastAPI:
@@ -659,12 +691,16 @@ def create_app(
     database = store or Store(settings.server.database_path, settings)
     orchestrator = RoomOrchestrator(registry, database)
     integrations = integrations_override or Integrations(settings.integrations)
+    energy_manager = energy_manager_override or EnergyManagerClient(
+        settings.integrations
+    )
     media_states = MediaStateReader(registry, integrations)
     home_intelligence = HomeIntelligence(
         database,
         integrations,
         settings.integrations,
         settings.rooms,
+        energy_manager,
     )
     home_actions = HomeActions(
         database,
@@ -672,7 +708,11 @@ def create_app(
         integrations,
         settings.rooms,
     )
-    home_dashboard = DashboardService(settings.integrations, integrations)
+    home_dashboard = DashboardService(
+        settings.integrations,
+        integrations,
+        energy_manager,
+    )
     audio_assets = AudioAssets(
         database,
         settings.server.audio_asset_path,
@@ -757,6 +797,11 @@ def create_app(
             )
             else None
         )
+        energy_manager_task = (
+            asyncio.create_task(energy_manager.run(), name="energy-manager-cache")
+            if energy_manager.configured
+            else None
+        )
         vehicle_state_task = (
             asyncio.create_task(
                 vehicle_service.run_state_updates(), name="vehicle-state-updates"
@@ -776,6 +821,13 @@ def create_app(
             if vehicle_action_tasks:
                 await asyncio.gather(*vehicle_action_tasks, return_exceptions=True)
             await home_intelligence.stop()
+            await energy_manager.stop()
+            if energy_manager_task:
+                try:
+                    await asyncio.wait_for(energy_manager_task, timeout=6)
+                except TimeoutError:
+                    energy_manager_task.cancel()
+                    await asyncio.gather(energy_manager_task, return_exceptions=True)
             if home_sync_task:
                 try:
                     await asyncio.wait_for(home_sync_task, timeout=6)
@@ -795,6 +847,7 @@ def create_app(
                 database.close()
 
     app = FastAPI(title="Pilot Core", version=__version__, lifespan=lifespan)
+    app.state.energy_manager = energy_manager
 
     def dashboard_file(name: str, media_type: str) -> FileResponse:
         path = dashboard_directory / name
@@ -920,11 +973,13 @@ def create_app(
                 "assistant": f"{base}/assistant",
                 "meetings": f"{base}/meetings",
                 "homelab": f"{base}/homelab",
+                # Permanent device credentials are valid only at the configured
+                # Core origin. Legacy clients therefore remain same-origin.
                 "meeting_recording_upload": (
-                    f"{settings.server.public_upload_base_url}{base}"
-                    "/meetings/{meeting_id}/recording"
-                    if settings.server.public_upload_base_url
-                    else f"{base}/meetings/{{meeting_id}}/recording"
+                    f"{base}/meetings/{{meeting_id}}/recording"
+                ),
+                "meeting_recording_upload_ticket": (
+                    f"{base}/meetings/{{meeting_id}}/recording-upload-ticket"
                 ),
                 "rotate_credentials": f"{base}/credentials/rotate-self",
             },
@@ -1613,6 +1668,7 @@ def create_app(
             "house-night.png": "image/png",
             "house-night-tesla.png": "image/png",
             "server-rack.png": "image/png",
+            "hot-water.png": "image/png",
         }
         media_type = allowed.get(asset_name)
         if media_type is None:
@@ -1650,6 +1706,7 @@ def create_app(
             request.language,
             started_at.astimezone(UTC).isoformat(),
             request.source_device_id,
+            request.source_capture_id,
         )
 
     @app.get("/v1/meetings", dependencies=[Depends(require_admin)])
@@ -2087,6 +2144,7 @@ def create_app(
             integrations.diagnostics(),
             media_states.snapshot(),
         )
+        diagnostics["energy_manager"] = energy_manager.health()
         tts_status = local_tts.status()
         # Configuration is the local TTS health check: synthesis itself is never
         # triggered by this silent operations snapshot.
@@ -3480,9 +3538,136 @@ def create_app(
             request.language,
             started_at.astimezone(UTC).isoformat(),
             device_id,
+            request.source_capture_id,
         )
         event = record_meeting_client_event(meeting)
         return {**meeting, "event": event}
+
+    @app.post(
+        "/v1/devices/{device_id}/meetings/{meeting_id}/recording-upload-ticket",
+        status_code=201,
+    )
+    async def issue_device_meeting_recording_upload_ticket(
+        device_id: str,
+        meeting_id: str,
+        request: MeetingRecordingUploadTicketRequest,
+        response: Response,
+        x_pilot_device_id: str = Header(),
+        authorization: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        device = authenticated_device(device_id, x_pilot_device_id, authorization)
+        require_meetings(device)
+        device_meeting(device, meeting_id)
+        if request.size_bytes > settings.server.meeting_asset_max_bytes:
+            raise HTTPException(
+                status_code=413,
+                detail="meeting recording exceeds configured size limit",
+            )
+        try:
+            filename, content_type, _ = meeting_recordings.normalized_metadata(
+                request.filename, request.content_type
+            )
+            ticket = database.create_meeting_recording_upload_ticket(
+                meeting_id,
+                device_id,
+                filename,
+                content_type,
+                request.sha256.lower(),
+                request.size_bytes,
+                ttl_seconds=86_400,
+            )
+        except MeetingRecordingError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from None
+        except FileExistsError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from None
+        except KeyError:
+            raise HTTPException(status_code=404, detail="meeting not found") from None
+        except PermissionError:
+            raise HTTPException(status_code=403, detail="meeting upload not permitted") from None
+
+        upload_path = f"/v1/meeting-recording-uploads/{ticket['id']}"
+        upload_url = (
+            f"{settings.server.public_upload_base_url}{upload_path}"
+            if settings.server.public_upload_base_url
+            else upload_path
+        )
+        response.headers["Cache-Control"] = "no-store"
+        return {
+            "schema_version": "pilot.meeting-recording-upload-ticket.v1",
+            "ticket_id": ticket["id"],
+            "meeting_id": meeting_id,
+            "upload_url": upload_url,
+            "upload_token": ticket["upload_token"],
+            "expires_at": ticket["expires_at"],
+            "recording": {
+                "filename": ticket["filename"],
+                "content_type": ticket["content_type"],
+                "sha256": ticket["sha256"],
+                "size_bytes": ticket["size_bytes"],
+            },
+        }
+
+    @app.put(
+        "/v1/meeting-recording-uploads/{ticket_id}",
+        status_code=201,
+    )
+    async def upload_ticketed_meeting_recording(
+        ticket_id: str,
+        request: Request,
+        response: Response,
+        authorization: str | None = Header(default=None),
+        x_pilot_filename: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        try:
+            ticket = database.claim_meeting_recording_upload_ticket(
+                ticket_id, _bearer(authorization)
+            )
+        except PermissionError:
+            raise HTTPException(
+                status_code=401,
+                detail="invalid or expired meeting upload ticket",
+            ) from None
+
+        try:
+            filename, content_type, _ = meeting_recordings.normalized_metadata(
+                ticket["filename"], request.headers.get("content-type", "")
+            )
+            if content_type != ticket["content_type"]:
+                raise MeetingRecordingError(
+                    "meeting recording content type does not match upload ticket"
+                )
+            if x_pilot_filename is not None:
+                supplied_filename, _, _ = meeting_recordings.normalized_metadata(
+                    x_pilot_filename, content_type
+                )
+                if supplied_filename != filename:
+                    raise MeetingRecordingError(
+                        "meeting recording filename does not match upload ticket"
+                    )
+            recording = await meeting_recordings.save(
+                ticket["meeting_id"],
+                filename,
+                content_type,
+                request.stream(),
+                expected_sha256=ticket["sha256"],
+                expected_size_bytes=ticket["size_bytes"],
+                replace_existing=False,
+            )
+        except MeetingRecordingConflict as error:
+            raise HTTPException(status_code=409, detail=str(error)) from None
+        except MeetingRecordingError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from None
+
+        database.complete_meeting_recording_upload_ticket(ticket_id)
+        meeting = database.get_meeting(ticket["meeting_id"])
+        assert meeting is not None
+        response.headers["Cache-Control"] = "no-store"
+        return {
+            **{key: value for key, value in recording.items() if key != "path"},
+            "ticket_id": ticket_id,
+            "meeting_id": ticket["meeting_id"],
+            "event": record_meeting_client_event(meeting),
+        }
 
     @app.get("/v1/devices/{device_id}/meetings")
     async def list_device_meetings(
@@ -3642,18 +3827,22 @@ def create_app(
             )
         response.headers["Cache-Control"] = "no-store"
 
-        async def energy_snapshot() -> dict[str, Any]:
-            try:
-                return safe_energy(await integrations.home_assistant_energy())
-            except IntegrationUnavailable as error:
-                return {"status": "not_configured", "detail": str(error)}
-            except IntegrationRequestFailed as error:
-                return {"status": "unavailable", "detail": str(error)}
+        if energy_manager.configured:
+            energy = home_intelligence.energy_snapshot()
+            now_playing = await media_states.now_playing()
+        else:
+            async def legacy_energy_snapshot() -> dict[str, Any]:
+                try:
+                    return safe_energy(await integrations.home_assistant_energy())
+                except IntegrationUnavailable as error:
+                    return {"status": "not_configured", "detail": str(error)}
+                except IntegrationRequestFailed as error:
+                    return {"status": "unavailable", "detail": str(error)}
 
-        energy, now_playing = await asyncio.gather(
-            energy_snapshot(),
-            media_states.now_playing(),
-        )
+            energy, now_playing = await asyncio.gather(
+                legacy_energy_snapshot(),
+                media_states.now_playing(),
+            )
         return {
             "device_id": device_id,
             "room_id": device["room_id"],
@@ -3692,6 +3881,7 @@ def create_app(
                 language=request.language,
                 session_id=request.conversation_id,
                 device_id=device_id,
+                mode=request.mode,
             )
         except AssistantUnavailable as error:
             raise HTTPException(status_code=503, detail=str(error)) from None
@@ -3799,21 +3989,18 @@ def create_app(
         authorization: str | None = Header(default=None),
     ) -> dict[str, Any]:
         device = authenticated_device(device_id, x_pilot_device_id, authorization)
-        if "home-control" not in device["capabilities"]:
+        required_capability = (
+            "sim-rig-control"
+            if request.action == "set_sim_rig_power"
+            else "home-control"
+        )
+        if required_capability not in device["capabilities"]:
             raise HTTPException(
-                status_code=403, detail="device does not have home-control capability"
+                status_code=403,
+                detail=f"device does not have {required_capability} capability",
             )
         settings_value = settings.integrations
-        if request.action == "set_tesla_charging_mode":
-            if request.value not in {"Grid", "Solar"}:
-                raise HTTPException(
-                    status_code=422, detail="charging mode must be Grid or Solar"
-                )
-            entity_id = settings_value.tesla_charging_mode_entity_id
-            if not entity_id:
-                raise HTTPException(status_code=503, detail="charging mode is not configured")
-            domain, service, data = "input_select", "select_option", {"option": request.value}
-        else:
+        if request.action == "set_media_room_mode":
             enabled = request.value.casefold() in {"on", "true", "enabled"}
             disabled = request.value.casefold() in {"off", "false", "disabled"}
             if not enabled and not disabled:
@@ -3828,6 +4015,23 @@ def create_app(
             if not entity_id:
                 raise HTTPException(status_code=503, detail="media room mode is not configured")
             domain, service, data = "script", "turn_on", {}
+        else:
+            if device["room_id"] != "office":
+                raise HTTPException(
+                    status_code=403,
+                    detail="Sim Rig control is restricted to the Office display",
+                )
+            value = request.value.casefold()
+            if value not in {"on", "off"}:
+                raise HTTPException(
+                    status_code=422, detail="Sim Rig power must be on or off"
+                )
+            entity_id = settings_value.office_sim_rig_switch_entity_id
+            if not entity_id:
+                raise HTTPException(status_code=503, detail="Sim Rig is not configured")
+            domain = "switch"
+            service = "turn_on" if value == "on" else "turn_off"
+            data = {}
         try:
             provider = await integrations.home_assistant_typed_action(
                 domain, service, entity_id, data
@@ -3845,7 +4049,13 @@ def create_app(
                 "entity_id": entity_id,
                 "status": "succeeded",
             },
-            room_id="media-room" if request.action == "set_media_room_mode" else device["room_id"],
+            room_id=(
+                "media-room"
+                if request.action == "set_media_room_mode"
+                else "office"
+                if request.action == "set_sim_rig_power"
+                else device["room_id"]
+            ),
             device_id=device_id,
             required_capability="home-read",
         )
@@ -4403,6 +4613,7 @@ def create_app(
                 or settings.integrations.home_assistant_assist_language,
                 session_id=x_pilot_conversation_id,
                 device_id=device_id,
+                mode="fast",
             )
         except AssistantUnavailable as error:
             raise HTTPException(status_code=503, detail=str(error)) from None
@@ -4700,6 +4911,7 @@ def create_app(
     async def integration_diagnostics() -> dict[str, Any]:
         diagnostics = await integrations.diagnostics()
         diagnostics["tts"] = local_tts.status()
+        diagnostics["energy_manager"] = energy_manager.health()
         return {"integrations": diagnostics}
 
     @app.post("/v1/media/search", dependencies=[Depends(require_admin)])
@@ -4747,6 +4959,7 @@ def create_app(
                 language=request.language,
                 session_id=request.conversation_id,
                 device_id=request.device_id,
+                mode=request.mode,
             )
         except AssistantUnavailable as error:
             raise HTTPException(status_code=503, detail=str(error)) from None

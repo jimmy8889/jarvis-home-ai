@@ -34,6 +34,9 @@ provides:
 - cached last-known media, home, energy and meeting state;
 - an explicit-tap AAC meeting recorder whose retained upload queue survives a
   failed transfer and can be retried;
+- a watchOS 10 meeting companion that records without taking out the iPhone,
+  durably relays through the paired phone, and deletes neither client copy
+  until Pilot Core accepts upload and processing;
 - accessibility labels, Dynamic Type support, haptics, fixtures and previews.
 
 The microphone path records 16 kHz signed 16-bit mono PCM and stops after 45
@@ -62,11 +65,14 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
   xcodebuild \
   -project Pilot.xcodeproj \
   -scheme Pilot \
-  -sdk iphonesimulator \
   -destination 'generic/platform=iOS Simulator' \
   CODE_SIGNING_ALLOWED=NO \
   build
 ```
+
+Do not pass a global `-sdk iphonesimulator` override. The `Pilot` scheme embeds
+the watchOS companion, and Xcode must select the iOS Simulator and watchOS
+Simulator SDKs for their respective targets.
 
 ## Enrolment
 
@@ -105,7 +111,26 @@ origin is required before remote access is enabled.
 
 Energy and monitoring are supplied by the device-scoped `pilot.energy.v1` and
 `pilot.dashboard.v1` contracts. The app does not invent sensor values or
-connect directly to Home Assistant. The phone uses a dedicated bottom control
+connect directly to Home Assistant. Pilot Core reads the standalone energy
+manager directly: `/api/v1/snapshot` and `/api/v1/plan` supply live state and
+planning, `/api/v1/daily` supplies authoritative Brisbane-day totals, and the
+durable five-minute `/api/v1/series` journal supplies chart history. Home
+Assistant can still contribute unrelated dashboard context, but it is not the
+source for Pilot's energy values, daily totals, or history.
+
+Live power mirrors the standalone dashboard's canonical `power_flow` graph:
+`sources_kw`, `sinks_kw`, `site_load_kw`, `submeters_kw`, and graph edges own
+the values, signs, and active paths. Raw inverter telemetry is used only when a
+legacy manager snapshot has no flow graph. Today's three summary totals come
+from the snapshot `daily_energy` object used by the standalone dashboard, with
+the journal-backed `/api/v1/daily` row retained only as a fallback.
+
+Pilot refreshes `/energy` and `/dashboard` every five seconds while its update
+loop is connected. Core's resumable event stream remains responsible for
+event-driven product changes, but energy correctness does not depend on an
+energy event being emitted for every power sample.
+
+The phone uses a dedicated bottom control
 surface: the mini-player is a separate row above Pilot's navigation buttons,
 so neither can overlap the other and both remain stable across screens. The
 compact shell does not instantiate a system `TabView`; Pilot's own bar is the
@@ -130,11 +155,17 @@ control another room: they return through the paired device's authenticated
 `/media/local` boundary. Pilot clears the system Now Playing session when the
 Sendspin client disconnects.
 
-Pilot iOS now includes the first device-scoped meeting recorder and review
-surface. It records AAC only after an explicit tap, supports iOS background
-audio, uploads directly to Pilot Core, queues local processing, and shows
-meeting status without holding Home Assistant or inference credentials.
-Real-device long-recording acceptance is still required.
+Pilot iOS includes a device-scoped meeting recorder and review surface. It
+records AAC only after an explicit tap, supports iOS background audio, uploads
+directly to Pilot Core, queues local processing, and shows meeting status
+without holding Home Assistant or inference credentials. Its watchOS 10
+companion uses the same Core route through the paired iPhone: the Watch owns no
+Core credential, both devices retain durable audio during delivery, and the
+Watch deletes only after Core accepts upload and processing. Reusable device
+authentication remains on the paired Core origin; an advertised off-origin
+uploader receives only a short-lived ticket bound to that recording. See
+[PILOT_WATCH_MEETINGS.md](PILOT_WATCH_MEETINGS.md) for the state contract and
+physical acceptance plan.
 
 ## Acceptance boundary
 
@@ -152,7 +183,10 @@ iPad, verify:
    restart and Wi-Fi loss;
 5. a long real meeting recording, retained failed upload, retry, processing and
    evidence review without data loss.
-6. phone voice capture in quiet and noisy rooms, automatic end-of-speech,
+6. Watch meeting capture with the display down, locked-phone background
+   handoff, phone-out-of-range recovery, interruption handling, duplicate
+   delivery, reinstall/resend, and a live `core_accepted` round trip;
+7. phone voice capture in quiet and noisy rooms, automatic end-of-speech,
    cancellation, TTS playback and music-session restoration; then exercise
    light on/off, brightness and colour in each curated room and confirm the
    resulting Home Assistant state and Pilot audit entry.

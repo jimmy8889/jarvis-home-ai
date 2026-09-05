@@ -205,6 +205,45 @@ tts_provider = "home_assistant"
         with self.assertRaisesRegex(ValueError, "home_assistant_url"):
             self._load(invalid)
 
+    def test_validates_standalone_energy_manager_polling_contract(self) -> None:
+        configured = VALID_CONFIG.replace(
+            "[[rooms]]",
+            """[integrations]
+energy_manager_url = "http://10.0.1.205:8787"
+energy_manager_timeout_seconds = 1.5
+energy_manager_snapshot_interval_seconds = 2
+energy_manager_plan_interval_seconds = 20
+energy_manager_stale_after_seconds = 10
+
+[[rooms]]""",
+            1,
+        )
+        settings = self._load(configured)
+        self.assertEqual(
+            settings.integrations.energy_manager_url,
+            "http://10.0.1.205:8787",
+        )
+        self.assertEqual(settings.integrations.energy_manager_timeout_seconds, 1.5)
+        self.assertEqual(
+            settings.integrations.energy_manager_snapshot_interval_seconds,
+            2,
+        )
+        self.assertEqual(settings.integrations.energy_manager_plan_interval_seconds, 20)
+        self.assertEqual(settings.integrations.energy_manager_stale_after_seconds, 10)
+
+        for invalid_url in (
+            "ftp://10.0.1.205:8787",
+            "http://user:secret@10.0.1.205:8787",
+            "http://10.0.1.205:8787/api/v1",
+        ):
+            with self.subTest(invalid_url=invalid_url), self.assertRaisesRegex(
+                ValueError, "energy_manager_url"
+            ):
+                self._load(configured.replace("http://10.0.1.205:8787", invalid_url))
+
+        with self.assertRaisesRegex(ValueError, "stale_after_seconds"):
+            self._load(configured.replace("energy_manager_stale_after_seconds = 10", "energy_manager_stale_after_seconds = 1"))
+
     def test_validates_local_llm_provider_configuration(self) -> None:
         configured = VALID_CONFIG.replace(
             "[[rooms]]",

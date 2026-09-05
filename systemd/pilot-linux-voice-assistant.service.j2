@@ -22,6 +22,7 @@ Environment=NETWORK_INTERFACE={{ room_endpoint_lva_network_interface }}
 Environment=HOST={{ room_endpoint_lva_host }}
 {% endif %}
 Environment=PORT={{ room_endpoint_lva_port }}
+Environment=DEVICE_RETRY_SECONDS={{ room_endpoint_lva_device_retry_seconds }}
 Environment=AUDIO_INPUT_CHANNELS=1
 Environment=MIC_NOISE_SUPPRESSION=2
 Environment=WAKE_MODEL={{ room_endpoint_lva_wake_model }}
@@ -31,7 +32,7 @@ Environment="AUDIO_INPUT_DEVICE={{ room_endpoint_lva_audio_input_device }}"
 {% if room_endpoint_lva_audio_output_device | length > 0 %}
 Environment="AUDIO_OUTPUT_DEVICE={{ room_endpoint_lva_audio_output_device }}"
 {% endif %}
-ExecStart=/opt/pilot/vendor/linux-voice-assistant-{{ room_endpoint_lva_version }}/docker-entrypoint.sh
+ExecStart=/usr/local/sbin/pilot-lva-supervisor /opt/pilot/vendor/linux-voice-assistant-{{ room_endpoint_lva_version }}/docker-entrypoint.sh
 Restart=on-failure
 RestartSec=5
 NoNewPrivileges=true

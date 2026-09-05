@@ -1,97 +1,791 @@
 - id: energy_optimizer_ev_auto_actuator
-  alias: Energy Optimizer - EV Auto Actuator
+  alias: Energy Optimizer - EV Source-Safe Auto Actuator
   description: >-
-    Controls Tesla charging from the optimizer. Direct-solar charging is capped
-    to verified live solar surplus. Deadline fallback requires an explicitly
-    declared trip and is blocked whenever the stationary battery is discharging.
+    Controls the Tesla through the healthy local BLE entities first, with Tesla
+    Fleet as an automatic fallback, and confirms actual charging from
+    wall-connector power. Both paths remain available for emergency stop
+    containment. With Charge from Grid
+    disabled, only a current direct-solar plan may run and live grid import
+    immediately trims or stops the car. A declared-trip deadline fallback is
+    permitted only when the dashboard grid switch is explicitly enabled.
   triggers:
     - trigger: state
-      entity_id: sensor.energy_optimizer_ev
+      entity_id:
+        - sensor.energy_optimizer_plan
+      id: plan
     - trigger: state
-      entity_id: input_select.energy_optimizer_mode
+      entity_id:
+        - input_boolean.energy_optimizer_production_expected
+        - input_select.energy_optimizer_mode
+        - input_boolean.energy_optimizer_ev_auto
+        - input_boolean.energy_optimizer_ev_allow_grid
+        - input_boolean.energy_optimizer_rollout_approved
+        - input_boolean.energy_optimizer_manual_override
+      id: gate
     - trigger: state
-      entity_id: input_boolean.energy_optimizer_ev_auto
-    - trigger: state
-      entity_id: input_boolean.energy_optimizer_rollout_approved
-    - trigger: state
-      entity_id: input_boolean.energy_optimizer_manual_override
-    - trigger: state
-      entity_id: input_boolean.battery_discharge
-      id: battery_mode
-    - trigger: state
-      entity_id: binary_sensor.tesla_plugged_in
-    - trigger: state
-      entity_id: device_tracker.tesla_location_2
+      entity_id:
+        - sensor.saj_battery_power
+        - sensor.saj_battery_1_soc
+        - sensor.saj_pv_power
+        - sensor.james_pv1_expected_power_from_poa
+        - sensor.james_pv2_plus_pv3_expected_power_from_poa
+        - sensor.saj_home_load
+        - sensor.saj_meter_a_real_power_total
+        - sensor.amber_express_trader_sheena_street_feed_in_price
+        - sensor.tesla_wall_connector_total_power
+        - binary_sensor.tesla_wall_connector_vehicle_connected
+        - switch.jarvis_charge
+        - number.jarvis_charge_current
+        - number.jarvis_charge_limit_2
+        - sensor.jarvis_charging
+        - sensor.jarvis_charger_power_2
+        - sensor.tesla_ble_charge_power
+        - sensor.tesla_ble_039d9c_uptime
+        - switch.tesla_ble_039d9c_charger
+        - number.tesla_ble_039d9c_charging_amps
+        - number.tesla_ble_039d9c_charging_limit
+        - binary_sensor.energy_optimizer_core_telemetry_fresh
+        - binary_sensor.energy_optimizer_ev_local_link_fresh
+      id: physical
     - trigger: time_pattern
-      seconds: /30
+      seconds: /15
+      id: watchdog
     - trigger: homeassistant
       event: start
+      id: startup
   conditions: []
   actions:
     - variables:
-        gates_ok: >-
-          {{ is_state('input_select.energy_optimizer_mode', 'Active') and
-             is_state('input_boolean.energy_optimizer_ev_auto', 'on') and
-             is_state('input_boolean.energy_optimizer_rollout_approved', 'on') and
-             is_state('input_boolean.energy_optimizer_manual_override', 'off') }}
-        car_ready: >-
-          {{ is_state('binary_sensor.tesla_plugged_in', 'on') and
-             is_state('device_tracker.tesla_location_2', 'home') }}
-        # The optimiser publishes its action as the sensor state and the
-        # energy source as `charge_source`; using nonexistent attributes made
-        # every live plan look idle and repeatedly stopped the car.
+        committed_plan_id: "{{ states('sensor.energy_optimizer_plan') }}"
+        ev_plan_id: "{{ state_attr('sensor.energy_optimizer_ev', 'plan_id') | default('', true) }}"
+        command_generated_ts: "{{ as_timestamp(state_attr('sensor.energy_optimizer_ev', 'generated_at'), 0) }}"
+        command_valid_until_ts: "{{ as_timestamp(state_attr('sensor.energy_optimizer_ev', 'valid_until'), 0) }}"
+        committed_generated_ts: >-
+          {{ as_timestamp(state_attr('sensor.energy_optimizer_plan', 'generated_at'), 0) }}
+        plan_stage_age_seconds: >-
+          {% set command_changed = as_timestamp(states['sensor.energy_optimizer_ev'].last_updated, 0) %}
+          {% set plan_changed = as_timestamp(states['sensor.energy_optimizer_plan'].last_updated, 0) %}
+          {{ as_timestamp(now()) - [command_changed, plan_changed] | max }}
         plan_action: "{{ states('sensor.energy_optimizer_ev') | default('idle', true) }}"
         plan_source: "{{ state_attr('sensor.energy_optimizer_ev', 'charge_source') | default('none', true) }}"
+        live_fit: "{{ states('sensor.amber_express_trader_sheena_street_feed_in_price') | float(999) }}"
         planned_amps: "{{ state_attr('sensor.energy_optimizer_ev', 'charge_amps_target') | int(0) }}"
+        grid_allowed: "{{ is_state('input_boolean.energy_optimizer_ev_allow_grid', 'on') }}"
+        ev_mandatory: >-
+          {{ state_attr('sensor.energy_optimizer_ev', 'mandatory') == true
+             or state_attr('sensor.energy_optimizer_plan', 'ev_mandatory') == true }}
         trip_selection: "{{ states('input_select.energy_optimizer_ev_trip') | lower }}"
-        explicit_trip_required: >-
-          {{ trip_selection in ['local / 50 km', '100 km', '200 km'] or
-             ('custom' in trip_selection and
-              states('input_number.energy_optimizer_ev_custom_km') | float(0) > 0) }}
-        fallback_allowed: >-
-          {{ (plan_source in ['deadline_fallback', 'mixed']) and
-             (explicit_trip_required | bool) and
-             is_state('input_boolean.battery_discharge', 'off') }}
-        source_allowed: >-
-          {{ (plan_source == 'direct_solar') or (fallback_allowed | bool) }}
-        # Use the actual PV and household-load meters, both in watts.
-        pv_kw: "{{ states('sensor.pv_power_mqtt_abs') | float(0) / 1000 }}"
-        load_kw: "{{ states('sensor.saj_home_load') | float(0) / 1000 }}"
-        direct_solar_kw: "{{ [0, pv_kw - load_kw] | max }}"
-        # The Tesla control is three phase: kW = 3 × 247 V × A / 1000.
-        direct_solar_amps: "{{ (direct_solar_kw * 1000 / (3 * 247)) | int(0) }}"
-        target_amps: >-
-          {% if plan_source == 'direct_solar' %}
-            {{ [16, planned_amps, direct_solar_amps] | min }}
-          {% elif fallback_allowed | bool %}
-            {{ [16, planned_amps] | min }}
+        battery_discharge_kw: >-
+          {% set raw = states('sensor.saj_battery_power') | float(0) %}
+          {% set unit = state_attr('sensor.saj_battery_power', 'unit_of_measurement') | default('', true) | lower %}
+          {{ [0, raw / 1000 if unit == 'w' else raw if unit == 'kw' else 999] | max }}
+        battery_guard_kw: 0.3
+        battery_target_plan_id: >-
+          {{ state_attr('sensor.energy_optimizer_battery_power_target', 'plan_id') | default('', true) }}
+        planned_battery_discharge_kw: >-
+          {{ [0, state_attr('sensor.energy_optimizer_battery_power_target',
+                           'battery_discharge_target_kw') | float(0)] | max }}
+        pv_kw: >-
+          {% set raw = states('sensor.saj_pv_power') | float(0) %}
+          {% set unit = state_attr('sensor.saj_pv_power', 'unit_of_measurement') | default('', true) | lower %}
+          {{ raw / 1000 if unit == 'w' else raw if unit == 'kw' else -1 }}
+        expected_north_kw: >-
+          {% set raw = states('sensor.james_pv1_expected_power_from_poa') | float(0) %}
+          {% set unit = state_attr('sensor.james_pv1_expected_power_from_poa', 'unit_of_measurement') | default('', true) | lower %}
+          {{ raw / 1000 if unit == 'w' else raw if unit == 'kw' else -1 }}
+        expected_south_kw: >-
+          {% set raw = states('sensor.james_pv2_plus_pv3_expected_power_from_poa') | float(0) %}
+          {% set unit = state_attr('sensor.james_pv2_plus_pv3_expected_power_from_poa', 'unit_of_measurement') | default('', true) | lower %}
+          {{ raw / 1000 if unit == 'w' else raw if unit == 'kw' else -1 }}
+        expected_north_age_seconds: >-
+          {{ as_timestamp(now()) - as_timestamp(states['sensor.james_pv1_expected_power_from_poa'].last_reported, 0)
+             if has_value('sensor.james_pv1_expected_power_from_poa') else 999999 }}
+        expected_south_age_seconds: >-
+          {{ as_timestamp(now()) - as_timestamp(states['sensor.james_pv2_plus_pv3_expected_power_from_poa'].last_reported, 0)
+             if has_value('sensor.james_pv2_plus_pv3_expected_power_from_poa') else 999999 }}
+        home_load_kw: >-
+          {% set raw = states('sensor.saj_home_load') | float(0) %}
+          {% set unit = state_attr('sensor.saj_home_load', 'unit_of_measurement') | default('', true) | lower %}
+          {{ raw / 1000 if unit == 'w' else raw if unit == 'kw' else 999 }}
+        grid_kw: >-
+          {% set raw = states('sensor.saj_meter_a_real_power_total') | float(0) %}
+          {% set unit = state_attr('sensor.saj_meter_a_real_power_total', 'unit_of_measurement') | default('', true) | lower %}
+          {{ raw / 1000 if unit == 'w' else raw if unit == 'kw' else 999 }}
+        wall_ev_kw: >-
+          {% set raw = states('sensor.tesla_wall_connector_total_power') | float(0) %}
+          {% set unit = state_attr('sensor.tesla_wall_connector_total_power', 'unit_of_measurement') | default('', true) | lower %}
+          {{ raw / 1000 if unit == 'w' else raw if unit == 'kw' else -1 }}
+        wall_power_age_seconds: >-
+          {{ as_timestamp(now()) - as_timestamp(states['sensor.tesla_wall_connector_total_power'].last_reported, 0)
+             if has_value('sensor.tesla_wall_connector_total_power') else 999999 }}
+        fleet_ev_kw: >-
+          {% set raw = states('sensor.jarvis_charger_power_2') | float(0) %}
+          {% set unit = state_attr('sensor.jarvis_charger_power_2', 'unit_of_measurement') | default('', true) | lower %}
+          {{ raw / 1000 if unit == 'w' else raw if unit == 'kw' else -1 }}
+        ble_ev_kw: >-
+          {% set raw = states('sensor.tesla_ble_charge_power') | float(0) %}
+          {% set unit = state_attr('sensor.tesla_ble_charge_power', 'unit_of_measurement') | default('', true) | lower %}
+          {{ raw / 1000 if unit == 'w' else raw if unit == 'kw' else -1 }}
+        local_soc_pct: >-
+          {{ states('sensor.tesla_battery_level') | float(
+             states('sensor.tesla_ble_charge_level') | float(-1)) }}
+        stationary_battery_soc_pct: "{{ states('sensor.saj_battery_1_soc') | float(-1) }}"
+        charger_start_grace_seconds: 90
+        prior_start_epoch: >-
+          {% set status = states('input_text.energy_optimizer_ev_actuator_status') %}
+          {% if 'start_epoch=' in status %}
+            {{ status.split('start_epoch=')[1].split(' |')[0] | float(0) }}
+          {% elif is_state('switch.tesla_ble_039d9c_charger', 'on') %}
+            {{ as_timestamp(states['switch.tesla_ble_039d9c_charger'].last_changed, 0) }}
+          {% elif is_state('switch.jarvis_charge', 'on') %}
+            {{ as_timestamp(states['switch.jarvis_charge'].last_changed, 0) }}
           {% else %}
             0
+          {% endif %}
+        prior_stop_epoch: >-
+          {% set status = states('input_text.energy_optimizer_ev_actuator_status') %}
+          {% if 'stop_epoch=' in status %}
+            {{ status.split('stop_epoch=')[1].split(' |')[0] | float(0) }}
+          {% else %}
+            0
+          {% endif %}
+        prior_wake_epoch: >-
+          {% set status = states('input_text.energy_optimizer_ev_actuator_status') %}
+          {% if 'wake_epoch=' in status %}
+            {{ status.split('wake_epoch=')[1].split(' |')[0] | float(0) }}
+          {% else %}
+            0
+          {% endif %}
+        prior_command_amps: >-
+          {% set ns = namespace(value=0) %}
+          {% for field in states('input_text.energy_optimizer_ev_actuator_status').split(' | ') %}
+            {% if field | trim | regex_match('^[0-9]+A$') %}
+              {% set ns.value = field | trim | replace('A', '') | int(0) %}
+            {% endif %}
+          {% endfor %}
+          {{ ns.value }}
+        prior_direct_solar_session: >-
+          {% set status = states('input_text.energy_optimizer_ev_actuator_status') %}
+          {{ 'direct_solar' in status or 'committed_solar_session' in status }}
+    - variables:
+        gates_ok: >-
+          {{ is_state('input_boolean.energy_optimizer_production_expected', 'on')
+             and is_state('input_select.energy_optimizer_mode', 'Active')
+             and is_state('binary_sensor.energy_optimizer_saj_control_contract_ready', 'on')
+             and is_state('input_boolean.energy_optimizer_ev_auto', 'on')
+             and is_state('input_boolean.energy_optimizer_rollout_approved', 'on')
+             and is_state('input_boolean.energy_optimizer_manual_override', 'off') }}
+        plan_authorized: >-
+          {{ is_state('sensor.energy_optimizer_status', 'active')
+             and is_state('binary_sensor.energy_optimizer_plan_fresh', 'on')
+             and state_attr('sensor.energy_optimizer_plan', 'actuation_allowed') == true
+             and committed_plan_id == ev_plan_id
+             and command_generated_ts | float(0) > as_timestamp(now()) - 600
+             and command_generated_ts | float(0) < as_timestamp(now()) + 60
+             and command_valid_until_ts | float(0) > as_timestamp(now()) }}
+        plan_commit_settling: >-
+          {{ is_state('sensor.energy_optimizer_status', 'active')
+             and state_attr('sensor.energy_optimizer_plan', 'actuation_allowed') == true
+             and command_valid_until_ts | float(0) > as_timestamp(now())
+             and as_timestamp(now())
+                 - [command_generated_ts | float(0), committed_generated_ts | float(0)] | max
+                 < 15 }}
+        mandatory_session_transition: >-
+          {{ is_state('sensor.energy_optimizer_status', 'active')
+             and plan_action == 'charge'
+             and plan_source in ['house_battery', 'solar_house_battery']
+             and ev_mandatory | bool
+             and local_soc_pct | float(-1) >= 0
+             and local_soc_pct | float(-1) < 40
+             and command_generated_ts | float(0) > as_timestamp(now()) - 90
+             and command_valid_until_ts | float(0) > as_timestamp(now()) - 15 }}
+        local_link_ok: "{{ is_state('binary_sensor.energy_optimizer_ev_local_link_fresh', 'on') }}"
+        fleet_control_ok: >-
+          {{ is_state('input_boolean.energy_optimizer_ev_allow_fleet_fallback', 'on')
+             and is_state('binary_sensor.energy_optimizer_tesla_fleet_fallback_ready', 'on') }}
+        fleet_values_ready: >-
+          {{ has_value('number.jarvis_charge_current')
+             and has_value('number.jarvis_charge_limit_2') }}
+        ble_control_ok: >-
+          {{ local_link_ok | bool
+             and states('switch.tesla_ble_039d9c_charger') in ['on', 'off']
+             and has_value('number.tesla_ble_039d9c_charging_amps')
+             and has_value('number.tesla_ble_039d9c_charging_limit') }}
+        battery_target_authorized: >-
+          {{ battery_target_plan_id == committed_plan_id
+             and has_value('sensor.energy_optimizer_battery_power_target') }}
+        car_ready: "{{ is_state('binary_sensor.tesla_wall_connector_vehicle_connected', 'on') }}"
+        wall_power_fresh: >-
+          {% set unit = state_attr('sensor.tesla_wall_connector_total_power', 'unit_of_measurement') | default('', true) | lower %}
+          {{ has_value('sensor.tesla_wall_connector_total_power')
+             and unit in ['w', 'kw']
+             and wall_power_age_seconds | float(999999) >= -60
+             and wall_power_age_seconds | float(999999) <= 120 }}
+        explicit_trip_required: >-
+          {{ trip_selection in ['local / 50 km', '100 km', '200 km']
+             or ('custom' in trip_selection
+                 and states('input_number.energy_optimizer_ev_custom_km') | float(0) > 0) }}
+        minimum_reserve_required: >-
+          {{ local_soc_pct | float(-1) >= 0
+             and local_soc_pct | float(-1) < 40 }}
+        core_telemetry_ok: "{{ is_state('binary_sensor.energy_optimizer_core_telemetry_fresh', 'on') }}"
+        stop_reassert_ready: >-
+          {{ prior_stop_epoch | float(0) <= 0
+             or as_timestamp(now()) - prior_stop_epoch | float(0) >= 45 }}
+        wake_reassert_ready: >-
+          {{ prior_wake_epoch | float(0) <= 0
+             or as_timestamp(now()) - prior_wake_epoch | float(0) >= 60 }}
+        ble_stop_fallback_ready: >-
+          {{ ble_control_ok | bool
+             and fleet_control_ok | bool
+             and charger_session_active | bool
+             and prior_stop_epoch | float(0) > 0
+             and as_timestamp(now()) - prior_stop_epoch | float(0) >= 15 }}
+    - variables:
+        control_backend: >-
+          {{ 'ble' if ble_control_ok | bool
+             else 'tesla_fleet' if fleet_control_ok | bool and fleet_values_ready | bool
+             else 'unavailable' }}
+        control_available: >-
+          {{ ble_control_ok | bool
+             or (fleet_control_ok | bool and fleet_values_ready | bool) }}
+        charger_switch_entity: >-
+          {{ 'switch.tesla_ble_039d9c_charger'
+             if ble_control_ok | bool else 'switch.jarvis_charge' }}
+        charging_amps_entity: >-
+          {{ 'number.tesla_ble_039d9c_charging_amps'
+             if ble_control_ok | bool else 'number.jarvis_charge_current' }}
+        configured_limit_pct: >-
+          {{ states('number.tesla_ble_039d9c_charging_limit') | float(0)
+             if ble_control_ok | bool
+             else states('number.jarvis_charge_limit_2') | float(0) }}
+        current_amps: >-
+          {{ states('number.tesla_ble_039d9c_charging_amps') | int(-1)
+             if ble_control_ok | bool
+             else states('number.jarvis_charge_current') | int(-1) }}
+        charger_switch_on: >-
+          {{ is_state('switch.tesla_ble_039d9c_charger', 'on')
+             if ble_control_ok | bool else is_state('switch.jarvis_charge', 'on') }}
+        charger_switch_off: >-
+          {{ is_state('switch.tesla_ble_039d9c_charger', 'off')
+             if ble_control_ok | bool else is_state('switch.jarvis_charge', 'off') }}
+        amp_setting_age_seconds: >-
+          {% set entity = 'number.tesla_ble_039d9c_charging_amps'
+             if ble_control_ok | bool else 'number.jarvis_charge_current' %}
+          {{ as_timestamp(now()) - as_timestamp(states[entity].last_changed, as_timestamp(now())) }}
+        charger_off_seconds: >-
+          {% set entity = 'switch.tesla_ble_039d9c_charger'
+             if ble_control_ok | bool else 'switch.jarvis_charge' %}
+          {{ as_timestamp(now()) - as_timestamp(states[entity].last_changed, as_timestamp(now())) }}
+        charger_on_seconds: >-
+          {% set entity = 'switch.tesla_ble_039d9c_charger'
+             if ble_control_ok | bool else 'switch.jarvis_charge' %}
+          {{ as_timestamp(now()) - as_timestamp(states[entity].last_changed, as_timestamp(now())) }}
+        charger_start_grace_active: >-
+          {% set request_age = as_timestamp(now()) - prior_start_epoch | float(0) %}
+          {{ (prior_start_epoch | float(0) > 0
+              and request_age >= -5
+              and request_age < charger_start_grace_seconds | float(90))
+             or (charger_switch_on | bool
+                 and charger_on_seconds | float(999999) < charger_start_grace_seconds | float(90)) }}
+        off_dwell_complete: >-
+          {{ not charger_switch_off | bool
+             or charger_off_seconds | float(0) >= 300 }}
+        plan_protected_soc_pct: >-
+          {{ state_attr('sensor.energy_optimizer_plan', 'protected_soc_pct') | float(100) }}
+        planned_ev_power_kw: >-
+          {{ state_attr('sensor.energy_optimizer_ev', 'ev_power_target_kw') | float(0) }}
+    - variables:
+        measured_ev_kw: >-
+          {{ wall_ev_kw | float(0) if wall_power_fresh | bool
+             else fleet_ev_kw | float(0) if fleet_ev_kw | float(-1) >= 0
+             else ble_ev_kw | float(0) if ble_ev_kw | float(-1) >= 0 else 0 }}
+        ev_power_confirmed: >-
+          {{ wall_power_fresh | bool and wall_ev_kw | float(-1) > 0.5 }}
+        physical_amps_estimate: >-
+          {{ (wall_ev_kw | float(0) * 1000 / (3 * 247)) | round(0) | int
+             if wall_power_fresh | bool and wall_ev_kw | float(-1) > 0.5 else 0 }}
+        charger_session_active: >-
+          {{ ev_power_confirmed | bool
+             or is_state('switch.jarvis_charge', 'on')
+             or states('sensor.jarvis_charging') | lower in ['charging', 'starting']
+             or is_state('switch.tesla_ble_039d9c_charger', 'on') }}
+        grace_ev_kw: >-
+          {{ ([current_amps | int(0), prior_command_amps | int(0)] | max) * 3 * 247 / 1000
+             if charger_start_grace_active | bool and not ev_power_confirmed | bool else 0 }}
+    - variables:
+        effective_current_amps: >-
+          {% if physical_amps_estimate | int(0) >= 6 %}
+            {{ physical_amps_estimate | int(0) }}
+          {% elif charger_start_grace_active | bool and prior_command_amps | int(0) >= 6 %}
+            {{ prior_command_amps | int(0) }}
+          {% else %}
+            {{ current_amps | int(0) }}
+          {% endif %}
+    - variables:
+        non_ev_load_kw: >-
+          {{ [0, home_load_kw | float(0) -
+             ([measured_ev_kw | float(0), grace_ev_kw | float(0)] | max)] | max }}
+        active_margin_kw: >-
+          {{ 0.2 if charger_session_active | bool
+             else states('input_number.energy_optimizer_ev_solar_start_margin_kw') | float(0.5) }}
+        expected_pv_fresh: >-
+          {{ expected_north_kw | float(-1) >= 0
+             and expected_south_kw | float(-1) >= 0
+             and expected_north_age_seconds | float(999999) >= -60
+             and expected_north_age_seconds | float(999999) <= 120
+             and expected_south_age_seconds | float(999999) >= -60
+             and expected_south_age_seconds | float(999999) <= 120 }}
+        expected_pv_attenuation: 0.92
+        opportunistic_fit_max: 0.01
+        solar_feedforward_reliable: >-
+          {{ expected_pv_fresh | bool
+             or (live_fit | float(999) > 0 and pv_kw | float(-1) >= 0) }}
+        direct_solar_source: "{{ plan_source == 'direct_solar' }}"
+        fallback_source: "{{ plan_source in ['deadline_fallback', 'mixed'] }}"
+        house_battery_source: >-
+          {{ plan_source in ['house_battery', 'solar_house_battery'] }}
+        fallback_authorized: >-
+          {{ grid_allowed | bool
+             and plan_source in ['deadline_fallback', 'mixed']
+             and ev_mandatory | bool
+             and (explicit_trip_required | bool or minimum_reserve_required | bool) }}
+        house_battery_authorized: >-
+          {{ house_battery_source | bool
+             and ev_mandatory | bool
+             and minimum_reserve_required | bool
+             and stationary_battery_soc_pct | float(-1)
+                 > plan_protected_soc_pct | float(100) + 1 }}
+    - variables:
+        battery_discharge_allowance_kw: >-
+          {{ planned_battery_discharge_kw | float(0)
+             if battery_target_authorized | bool else 0 }}
+        battery_discharge_excess_kw: >-
+          {{ [0, battery_discharge_kw | float(0) -
+             battery_discharge_allowance_kw | float(0)] | max }}
+        negative_fit_rollover_grace: >-
+          {{ gates_ok | bool
+             and core_telemetry_ok | bool
+             and control_available | bool
+             and car_ready | bool
+             and charger_session_active | bool
+             and plan_action == 'charge'
+             and live_fit | float(999) < 0
+             and command_valid_until_ts | float(0) <= as_timestamp(now())
+             and command_valid_until_ts | float(0) > as_timestamp(now()) - 60
+             and grid_kw | float(999) <= 0.3
+             and stationary_battery_soc_pct | float(-1)
+                 > plan_protected_soc_pct | float(100) + 1 }}
+    - variables:
+        pv_feedforward_kw: >-
+          {{ (expected_north_kw | float(0) + expected_south_kw | float(0))
+               * expected_pv_attenuation | float(0.92)
+             if expected_pv_fresh | bool else pv_kw | float(0) }}
+        feedforward_solar_amps: >-
+          {{ ([0, pv_feedforward_kw | float(0) - non_ev_load_kw | float(0) - active_margin_kw | float(0)] | max
+              * 1000 / (3 * 247)) | int(0) }}
+        solar_session_continuation: >-
+          {{ plan_authorized | bool
+             and charger_session_active | bool
+             and prior_direct_solar_session | bool
+             and solar_feedforward_reliable | bool
+             and feedforward_solar_amps | int(0) >= 6
+             and live_fit | float(999) <= opportunistic_fit_max | float(0.01)
+             and grid_kw | float(999) <= 0.3
+             and battery_discharge_excess_kw | float(999) <= battery_guard_kw | float(0.3)
+             and (configured_limit_pct | float(0) <= 0
+                  or local_soc_pct | float(-1) < configured_limit_pct | float(0) - 0.5) }}
+        physical_mandatory_solar_session: >-
+          {{ plan_authorized | bool
+             and charger_session_active | bool
+             and ev_mandatory | bool
+             and explicit_trip_required | bool
+             and plan_action == 'insufficient_time'
+             and grid_kw | float(999) <= -0.3
+             and battery_discharge_excess_kw | float(999) <= battery_guard_kw | float(0.3)
+             and (configured_limit_pct | float(0) <= 0
+                  or local_soc_pct | float(-1) < configured_limit_pct | float(0) - 0.5) }}
+        mandatory_expected_solar_override: >-
+          {{ plan_authorized | bool
+             and ev_mandatory | bool
+             and explicit_trip_required | bool
+             and solar_feedforward_reliable | bool
+             and feedforward_solar_amps | int(0) >= 6
+             and grid_kw | float(999) <= 0.3
+             and battery_discharge_excess_kw | float(999) <= battery_guard_kw | float(0.3)
+             and (configured_limit_pct | float(0) <= 0
+                  or local_soc_pct | float(-1) < configured_limit_pct | float(0) - 0.5) }}
+        effective_direct_solar_source: >-
+          {{ direct_solar_source | bool or solar_session_continuation | bool
+             or mandatory_expected_solar_override | bool
+             or physical_mandatory_solar_session | bool }}
+        physical_solar_minimum_hold: >-
+          {{ plan_authorized | bool
+             and charger_session_active | bool
+             and grid_kw | float(999) <= -0.3
+             and battery_discharge_excess_kw | float(999) <= battery_guard_kw | float(0.3)
+             and (ev_mandatory | bool and explicit_trip_required | bool
+                  or live_fit | float(999) <= opportunistic_fit_max | float(0.01))
+             and (configured_limit_pct | float(0) <= 0
+                  or local_soc_pct | float(-1) < configured_limit_pct | float(0) - 0.5) }}
+        active_session_rollover_grace: >-
+          {{ gates_ok | bool
+             and core_telemetry_ok | bool
+             and control_available | bool
+             and car_ready | bool
+             and charger_session_active | bool
+             and solar_feedforward_reliable | bool
+             and feedforward_solar_amps | int(0) >= 6
+             and grid_kw | float(999) <= 0.3
+             and battery_discharge_excess_kw | float(999) <= battery_guard_kw | float(0.3)
+             and (configured_limit_pct | float(0) <= 0
+                  or local_soc_pct | float(-1) < configured_limit_pct | float(0) - 0.5)
+             and ((command_valid_until_ts | float(0) <= as_timestamp(now())
+                   and command_valid_until_ts | float(0) > as_timestamp(now()) - 15)
+                  or as_timestamp(now())
+                     - [command_generated_ts | float(0), committed_generated_ts | float(0)] | max
+                     < 15
+                  or (plan_stage_age_seconds | float(999999) >= -2
+                      and plan_stage_age_seconds | float(999999) < 15
+                      and command_generated_ts | float(0) > as_timestamp(now()) - 600
+                      and command_valid_until_ts | float(0) > as_timestamp(now()))) }}
+        untrimmed_target_amps: >-
+          {% if effective_direct_solar_source | bool %}
+            {{ [16, feedforward_solar_amps | int(0)] | min }}
+          {% elif fallback_authorized | bool %}
+            {{ [16, planned_amps | int(0)] | min }}
+          {% elif house_battery_authorized | bool %}
+            {{ [16, [planned_amps | int(0), feedforward_solar_amps | int(0)] | max] | min }}
+          {% else %}
+            0
+          {% endif %}
+        import_trim_amps: >-
+          {{ (([0, grid_kw | float(0) - 0.15] | max * 1000) / (3 * 247)) | round(0, 'ceil') | int
+             if not grid_allowed | bool and charger_session_active | bool else 0 }}
+        battery_trim_amps: >-
+          {{ (([0, battery_discharge_excess_kw | float(0) - battery_guard_kw | float(0.3)] | max
+               * 1000) / (3 * 247)) | round(0, 'ceil') | int
+             if charger_session_active | bool else 0 }}
+    - variables:
+        target_amps: >-
+          {% set raw = untrimmed_target_amps | int(0)
+             - [import_trim_amps | int(0), battery_trim_amps | int(0)] | max %}
+          {{ [6, raw] | max
+             if house_battery_authorized | bool or physical_solar_minimum_hold | bool
+                or (charger_session_active | bool
+                    and effective_current_amps | int(0) > 6)
+             else [0, raw] | max }}
+        command_amps: >-
+          {% if not charger_switch_on | bool %}
+            {{ target_amps | int(0) }}
+          {% elif target_amps | int(0) < effective_current_amps | int(-1) %}
+            {{ target_amps | int(0) }}
+          {% elif target_amps | int(0) > effective_current_amps | int(-1)
+                   and amp_setting_age_seconds | float(0) >= 60 %}
+            {{ target_amps | int(0) }}
+          {% else %}
+            {{ effective_current_amps | int(0) }}
+          {% endif %}
+    - variables:
+        hard_stop_reason: >-
+          {% if trigger is defined and trigger.id == 'startup' %}
+            startup_reconciliation
+          {% elif not gates_ok | bool %}
+            disarmed
+          {% elif not core_telemetry_ok | bool %}
+            telemetry_stale
+          {% elif not plan_authorized | bool
+               and active_session_rollover_grace | bool %}
+            active_session_rollover_grace
+          {% elif not plan_authorized | bool
+               and negative_fit_rollover_grace | bool %}
+            negative_fit_rollover_grace
+          {% elif not plan_authorized | bool
+               and charger_session_active | bool
+               and mandatory_session_transition | bool %}
+            mandatory_session_transition
+          {% elif not plan_authorized | bool and plan_commit_settling | bool %}
+            plan_commit_settling
+          {% elif not plan_authorized | bool %}
+            plan_stale_or_uncommitted
+          {% elif not control_available | bool
+               and fleet_control_ok | bool and not fleet_values_ready | bool %}
+            vehicle_data_wake_required
+          {% elif not control_available | bool %}
+            tesla_control_unavailable
+          {% elif not car_ready | bool %}
+            vehicle_not_connected_at_home
+          {% elif configured_limit_pct | float(0) > 0
+               and local_soc_pct | float(-1) >= configured_limit_pct | float(0) - 0.5 %}
+            charge_limit_reached
+          {% elif plan_action != 'charge'
+               and not solar_session_continuation | bool
+               and not mandatory_expected_solar_override | bool
+               and not physical_mandatory_solar_session | bool %}
+            plan_not_charging
+          {% elif fallback_source | bool and not grid_allowed | bool %}
+            grid_charging_disabled
+          {% elif not effective_direct_solar_source | bool
+               and not fallback_authorized | bool
+               and not house_battery_authorized | bool %}
+            source_not_authorized
+          {% elif charger_session_active | bool
+               and not charger_start_grace_active | bool
+               and not ev_power_confirmed | bool %}
+            wall_power_not_confirmed
+          {% elif effective_direct_solar_source | bool and target_amps | int(0) < 6 %}
+            insufficient_onsite_energy
+          {% elif target_amps | int(0) < 6 %}
+            target_below_vehicle_minimum
+          {% else %}
+            none
           {% endif %}
     - choose:
         - conditions:
             - condition: template
-              value_template: >-
-                {{ gates_ok | bool and car_ready | bool and source_allowed | bool
-                   and plan_action == 'charge' and target_amps | int(0) >= 6 }}
+              value_template: "{{ hard_stop_reason == 'active_session_rollover_grace' }}"
           sequence:
-            - action: number.set_value
+            - if:
+                - condition: template
+                  value_template: >-
+                    {{ command_amps | int(0) >= 6
+                       and command_amps | int(0) < effective_current_amps | int(0) }}
+              then:
+                - action: number.set_value
+                  target:
+                    entity_id: "{{ charging_amps_entity }}"
+                  data:
+                    value: "{{ command_amps | int }}"
+            - action: input_text.set_value
               target:
-                entity_id: number.tesla_ble_039d9c_charging_amps
+                entity_id: input_text.energy_optimizer_ev_actuator_status
               data:
-                value: "{{ target_amps | int }}"
-            - action: switch.turn_on
+                value: >-
+                  charging_confirmed | active_session_rollover_grace |
+                  {{ command_amps | int(0) }}A | expected_pv={{ pv_feedforward_kw | round(2) }}kW |
+                  grid={{ grid_kw | round(2) }}kW battery={{ battery_discharge_excess_kw | round(2) }}kW |
+                  preserving_current_command
+            - stop: Preserving safe physical EV charging across the plan commit boundary
+
+        - conditions:
+            - condition: template
+              value_template: "{{ hard_stop_reason == 'negative_fit_rollover_grace' }}"
+          sequence:
+            - if:
+                - condition: template
+                  value_template: >-
+                    {{ command_amps | int(0) >= 6
+                       and command_amps | int(0) < effective_current_amps | int(0) }}
+              then:
+                - action: number.set_value
+                  target:
+                    entity_id: "{{ charging_amps_entity }}"
+                  data:
+                    value: "{{ command_amps | int }}"
+            - action: input_text.set_value
               target:
-                entity_id: switch.tesla_ble_039d9c_charger
+                entity_id: input_text.energy_optimizer_ev_actuator_status
+              data:
+                value: >-
+                  holding_negative_fit_rollover | plan={{ committed_plan_id }} |
+                  fit={{ live_fit | round(4) }} | wall={{ wall_ev_kw | round(2) }}kW |
+                  ramp={{ effective_current_amps | int(0) }}A->{{ command_amps | int(0) }}A |
+                  valid_until={{ command_valid_until_ts | timestamp_local }} |
+                  preserving_current_command
+            - stop: Preserving confirmed charging during a bounded negative-FIT plan rollover
+
+        - conditions:
+            - condition: template
+              value_template: "{{ hard_stop_reason == 'mandatory_session_transition' }}"
+          sequence:
+            - action: input_text.set_value
+              target:
+                entity_id: input_text.energy_optimizer_ev_actuator_status
+              data:
+                value: >-
+                  latching_mandatory_session | committed={{ committed_plan_id }} |
+                  ev={{ ev_plan_id }} | source={{ plan_source }} |
+                  wall={{ wall_ev_kw | round(2) }}kW | preserving_current_command
+            - stop: Preserving the confirmed below-40-percent session during plan publication
+
+        - conditions:
+            - condition: template
+              value_template: "{{ hard_stop_reason == 'plan_commit_settling' }}"
+          sequence:
+            - action: input_text.set_value
+              target:
+                entity_id: input_text.energy_optimizer_ev_actuator_status
+              data:
+                value: >-
+                  settling_plan_commit | committed={{ committed_plan_id }} |
+                  ev={{ ev_plan_id }} | source={{ plan_source }} |
+                  preserving_current_command
+            - stop: Waiting for the retained plan commit marker
+
+        - conditions:
+            - condition: template
+              value_template: "{{ hard_stop_reason == 'vehicle_data_wake_required' }}"
+          sequence:
+            - if:
+                - condition: template
+                  value_template: "{{ wake_reassert_ready | bool }}"
+              then:
+                - action: button.press
+                  continue_on_error: true
+                  target:
+                    entity_id: button.jarvis_wake
+            - action: input_text.set_value
+              target:
+                entity_id: input_text.energy_optimizer_ev_actuator_status
+              data:
+                value: >-
+                  waking_awaiting_vehicle_data | plan={{ committed_plan_id }} |
+                  wake_epoch={{ as_timestamp(now()) if wake_reassert_ready | bool else prior_wake_epoch | float(0) }} |
+                  source={{ plan_source }} | grid_allowed={{ grid_allowed }} |
+                  control=tesla_fleet
+            - stop: Waiting for Tesla Fleet current and limit controls
+
+        - conditions:
+            - condition: template
+              value_template: "{{ hard_stop_reason != 'none' }}"
+          sequence:
+            - if:
+                - condition: template
+                  value_template: >-
+                    {{ charger_session_active | bool
+                       and (stop_reassert_ready | bool or ble_stop_fallback_ready | bool) }}
+              then:
+                - if:
+                    - condition: template
+                      value_template: "{{ ble_control_ok | bool }}"
+                  then:
+                    - action: switch.turn_off
+                      continue_on_error: true
+                      target:
+                        entity_id: switch.tesla_ble_039d9c_charger
+                - if:
+                    - condition: template
+                      value_template: >-
+                        {{ fleet_control_ok | bool
+                           and (not ble_control_ok | bool
+                                or ble_stop_fallback_ready | bool) }}
+                  then:
+                    - action: switch.turn_off
+                      continue_on_error: true
+                      target:
+                        entity_id: switch.jarvis_charge
+            - action: input_text.set_value
+              target:
+                entity_id: input_text.energy_optimizer_ev_actuator_status
+              data:
+                value: >-
+                  blocked | {{ hard_stop_reason }} | plan={{ committed_plan_id }} |
+                  stop_epoch={{ as_timestamp(now())
+                    if charger_session_active | bool and stop_reassert_ready | bool
+                    else prior_stop_epoch | float(0) }} |
+                  grid_allowed={{ grid_allowed }} grid={{ grid_kw | round(2) }}kW |
+                  wall={{ wall_ev_kw | round(2) }}kW | control={{ control_backend }}
+            - stop: EV source guard stopped charging
+
         - conditions:
             - condition: template
               value_template: >-
-                {{ not (gates_ok | bool) or not (car_ready | bool) or
-                   not (source_allowed | bool) or plan_action != 'charge' or
-                   target_amps | int(0) < 6 }}
+                {{ (charger_session_active | bool
+                    or off_dwell_complete | bool
+                    or house_battery_authorized | bool)
+                   and target_amps | int(0) >= 6 }}
           sequence:
-            - action: switch.turn_off
+            - if:
+                - condition: template
+                  value_template: "{{ charger_switch_off | bool }}"
+              then:
+                - if:
+                    - condition: template
+                      value_template: >-
+                        {{ not charger_start_grace_active | bool
+                           and not ev_power_confirmed | bool }}
+                  then:
+                    - if:
+                        - condition: template
+                          value_template: "{{ control_backend == 'tesla_fleet' }}"
+                      then:
+                        - action: button.press
+                          continue_on_error: true
+                          target:
+                            entity_id: button.jarvis_wake
+                    - action: number.set_value
+                      target:
+                        entity_id: "{{ charging_amps_entity }}"
+                      data:
+                        value: "{{ command_amps | int }}"
+                    - action: switch.turn_on
+                      target:
+                        entity_id: "{{ charger_switch_entity }}"
+              else:
+                - if:
+                    - condition: template
+                      value_template: >-
+                        {{ effective_current_amps | int(0) != command_amps | int(0) }}
+                  then:
+                    - action: number.set_value
+                      target:
+                        entity_id: "{{ charging_amps_entity }}"
+                      data:
+                        value: "{{ command_amps | int }}"
+            - action: input_text.set_value
               target:
-                entity_id: switch.tesla_ble_039d9c_charger
+                entity_id: input_text.energy_optimizer_ev_actuator_status
+              data:
+                value: >-
+                  {{ 'charging_confirmed' if ev_power_confirmed | bool else 'starting_awaiting_wall_power' }} |
+                  start_epoch={{ prior_start_epoch | float(0)
+                    if prior_start_epoch | float(0) > 0
+                    else as_timestamp(now()) }} |
+                  {{ 'physical_mandatory_solar' if physical_mandatory_solar_session | bool
+                     else 'mandatory_expected_solar' if mandatory_expected_solar_override | bool
+                     and not direct_solar_source | bool
+                     else 'committed_solar_session' if solar_session_continuation | bool
+                     else plan_source }} |
+                  {{ command_amps | int }}A |
+                  expected_pv={{ pv_feedforward_kw | round(2) }}kW |
+                  grid_allowed={{ grid_allowed }} grid={{ grid_kw | round(2) }}kW |
+                  wall={{ wall_ev_kw | round(2) }}kW | control={{ control_backend }}
+      default:
+        - if:
+            - condition: template
+              value_template: >-
+                {{ charger_session_active | bool
+                   and (stop_reassert_ready | bool or ble_stop_fallback_ready | bool) }}
+          then:
+            - if:
+                - condition: template
+                  value_template: "{{ ble_control_ok | bool }}"
+              then:
+                - action: switch.turn_off
+                  continue_on_error: true
+                  target:
+                    entity_id: switch.tesla_ble_039d9c_charger
+            - if:
+                - condition: template
+                  value_template: >-
+                    {{ fleet_control_ok | bool
+                       and (not ble_control_ok | bool
+                            or ble_stop_fallback_ready | bool) }}
+              then:
+                - action: switch.turn_off
+                  continue_on_error: true
+                  target:
+                    entity_id: switch.jarvis_charge
+        - action: input_text.set_value
+          target:
+            entity_id: input_text.energy_optimizer_ev_actuator_status
+          data:
+            value: >-
+              waiting | off_dwell={{ charger_off_seconds | int(0) }}s/300s |
+              stop_epoch={{ as_timestamp(now())
+                if charger_session_active | bool and stop_reassert_ready | bool
+                else prior_stop_epoch | float(0) }} |
+              source={{ plan_source }} target={{ target_amps | int(0) }}A |
+              grid_allowed={{ grid_allowed }} | control={{ control_backend }}
   mode: single
   max_exceeded: silent

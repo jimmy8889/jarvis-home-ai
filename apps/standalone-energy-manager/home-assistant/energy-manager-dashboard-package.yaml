@@ -1,0 +1,301 @@
+# Package this file under Home Assistant's `homeassistant: packages:` directory.
+# Typed manager settings are writable on the trusted local network without a
+# token. Direct actuator overrides remain bearer-token protected, and no
+# command is accepted over MQTT.
+
+energy_manager_tesla:
+  url: http://10.0.1.205:8787
+
+input_select:
+  energy_manager_ev_trip_profile:
+    name: Energy manager trip preparation
+    icon: mdi:map-marker-distance
+    options:
+      - No trip
+      - 100 km
+      - 200 km
+      - Charge to 80%
+      - Ensure 100%
+
+input_number:
+  energy_manager_ev_opportunistic_fit_cents:
+    name: Tesla opportunity FIT
+    icon: mdi:car-electric
+    min: 0
+    max: 100
+    step: 0.1
+    unit_of_measurement: c/kWh
+    mode: box
+  energy_manager_ev_charge_limit:
+    name: Tesla charge limit
+    icon: mdi:battery-charging-80
+    min: 50
+    max: 100
+    step: 1
+    unit_of_measurement: "%"
+    mode: slider
+  energy_manager_min_sell_price_cents:
+    name: Minimum battery sell price
+    icon: mdi:cash-fast
+    min: 0
+    max: 2000
+    step: 0.1
+    unit_of_measurement: c/kWh
+    mode: box
+
+input_boolean:
+  # Retain this historical entity_id for existing HA installations. Its
+  # semantics are now the hot-water enabled/Away master, not timer selection.
+  energy_manager_hot_water_fixed_timer:
+    name: Hot water enabled
+    icon: mdi:water-boiler
+  energy_manager_ev_grid_allowed:
+    name: Allow Tesla grid charging
+    icon: mdi:transmission-tower-import
+  energy_manager_settings_syncing:
+    name: Energy manager settings synchronising
+    icon: mdi:sync
+  energy_manager_control_enabled:
+    name: Energy automation
+    icon: mdi:home-lightning-bolt
+
+rest:
+  # Poll only the small authoritative settings document. The live/plan
+  # dashboard embeds use their dedicated endpoints, so Home Assistant does
+  # not need to download the wider operational snapshot every two seconds.
+  - resource: http://10.0.1.205:8787/api/v1/settings
+    scan_interval: 2
+    timeout: 5
+    sensor:
+      - name: Energy Manager Settings Source
+        unique_id: energy_manager_settings_source
+        value_template: >-
+          {% set s = value_json | default({}, true) %}
+          {{ [s.ev_trip_profile | default(s.ev_trip_requirement | default('No trip', true), true),
+              s.hot_water_enabled | default(true, true),
+              s.ev_opportunistic_fit_max_per_kwh | default('unavailable', true),
+              s.ev_charge_limit_pct | default('unavailable', true),
+              s.min_sell_price_per_kwh | default('unavailable', true),
+              s.ev_grid_allowed | default(false, true),
+              s.control_enabled | default(false, true)] | join('|') }}
+        json_attributes_path: "$"
+        json_attributes:
+          - ev_trip_profile
+          - ev_trip_requirement
+          - hot_water_enabled
+          - ev_opportunistic_fit_max_per_kwh
+          - ev_charge_limit_pct
+          - min_sell_price_per_kwh
+          - ev_grid_allowed
+          - control_enabled
+
+rest_command:
+  energy_manager_update_settings:
+    url: http://10.0.1.205:8787/api/v1/settings
+    method: put
+    timeout: 10
+    headers:
+      content-type: application/json
+    payload: >-
+      {% set profiles = {'No trip': 'no_trip', '100 km': 'distance_100_km',
+                         '200 km': 'distance_200_km', 'Charge to 80%': 'target_80',
+                         'Ensure 100%': 'target_100'} %}
+      {"ev_trip_profile": {{ profiles.get(ev_trip_profile, 'no_trip') | to_json }},
+       "hot_water_enabled": {{ hot_water_enabled | bool | to_json }},
+       "ev_opportunistic_fit_max_per_kwh": {{ ev_opportunistic_fit_max_per_kwh | float }},
+       "ev_charge_limit_pct": {{ ev_charge_limit_pct | int }},
+       "min_sell_price_per_kwh": {{ min_sell_price_per_kwh | float }},
+       "ev_grid_allowed": {{ ev_grid_allowed | bool | to_json }},
+       "control_enabled": {{ control_enabled | bool | to_json }}}
+
+template:
+  - sensor:
+      - name: Energy Manager Battery SOC Rounded
+        unique_id: energy_manager_battery_soc_rounded
+        device_class: battery
+        state_class: measurement
+        unit_of_measurement: "%"
+        availability: >-
+          {{ is_number(states('sensor.standalone_energy_manager_energy_manager_battery_soc')) }}
+        state: >-
+          {{ states('sensor.standalone_energy_manager_energy_manager_battery_soc') | float | round(1) }}
+      - name: Energy Manager Amber FIT Cents
+        unique_id: energy_manager_amber_fit_cents
+        state_class: measurement
+        unit_of_measurement: c/kWh
+        availability: >-
+          {{ is_number(states('sensor.standalone_energy_manager_energy_manager_amber_fit')) }}
+        state: >-
+          {{ (states('sensor.standalone_energy_manager_energy_manager_amber_fit') | float * 100) | round(1) }}
+      - name: Energy Manager Amber Import Cents
+        unique_id: energy_manager_amber_import_cents
+        state_class: measurement
+        unit_of_measurement: c/kWh
+        availability: >-
+          {{ is_number(states('sensor.standalone_energy_manager_energy_manager_amber_import')) }}
+        state: >-
+          {{ (states('sensor.standalone_energy_manager_energy_manager_amber_import') | float * 100) | round(1) }}
+      - name: Energy Manager AEMO Cents
+        unique_id: energy_manager_aemo_cents
+        state_class: measurement
+        unit_of_measurement: c/kWh
+        availability: >-
+          {{ is_number(states('sensor.standalone_energy_manager_energy_manager_aemo_wholesale')) }}
+        state: >-
+          {{ (states('sensor.standalone_energy_manager_energy_manager_aemo_wholesale') | float * 100) | round(1) }}
+
+automation:
+  - id: energy_manager_sync_settings_from_manager
+    alias: Energy manager - synchronise dashboard settings
+    mode: restart
+    triggers:
+      - trigger: homeassistant
+        event: start
+      - trigger: state
+        entity_id: sensor.energy_manager_settings_source
+    actions:
+      - variables:
+          source: "{{ state_attr('sensor.energy_manager_settings_source', 'ev_trip_profile') | default(state_attr('sensor.energy_manager_settings_source', 'ev_trip_requirement'), true) | default('no_trip', true) }}"
+          trip_profile: >-
+            {% set profiles = {'no_trip': 'No trip', 'distance_100_km': '100 km',
+                               'distance_200_km': '200 km', 'target_80': 'Charge to 80%',
+                               'target_100': 'Ensure 100%'} %}
+            {{ profiles.get(source, source if source in profiles.values() else 'No trip') }}
+          opportunity_fit_cents: "{{ (state_attr('sensor.energy_manager_settings_source', 'ev_opportunistic_fit_max_per_kwh') | float(0)) * 100 }}"
+          charge_limit: "{{ state_attr('sensor.energy_manager_settings_source', 'ev_charge_limit_pct') | float(80) }}"
+          sell_price_cents: "{{ (state_attr('sensor.energy_manager_settings_source', 'min_sell_price_per_kwh') | float(0)) * 100 }}"
+          grid_allowed: "{{ state_attr('sensor.energy_manager_settings_source', 'ev_grid_allowed') | bool(false) }}"
+          control_enabled: "{{ state_attr('sensor.energy_manager_settings_source', 'control_enabled') | bool(false) }}"
+          hot_water_enabled: "{{ state_attr('sensor.energy_manager_settings_source', 'hot_water_enabled') | bool(true) }}"
+      - action: input_boolean.turn_on
+        target:
+          entity_id: input_boolean.energy_manager_settings_syncing
+      - action: input_select.select_option
+        target:
+          entity_id: input_select.energy_manager_ev_trip_profile
+        data:
+          option: "{{ trip_profile }}"
+      - choose:
+          - conditions: "{{ hot_water_enabled }}"
+            sequence:
+              - action: input_boolean.turn_on
+                target:
+                  entity_id: input_boolean.energy_manager_hot_water_fixed_timer
+        default:
+          - action: input_boolean.turn_off
+            target:
+              entity_id: input_boolean.energy_manager_hot_water_fixed_timer
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.energy_manager_ev_opportunistic_fit_cents
+        data:
+          value: "{{ opportunity_fit_cents }}"
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.energy_manager_ev_charge_limit
+        data:
+          value: "{{ charge_limit }}"
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.energy_manager_min_sell_price_cents
+        data:
+          value: "{{ sell_price_cents }}"
+      - choose:
+          - conditions: "{{ grid_allowed }}"
+            sequence:
+              - action: input_boolean.turn_on
+                target:
+                  entity_id: input_boolean.energy_manager_ev_grid_allowed
+        default:
+          - action: input_boolean.turn_off
+            target:
+              entity_id: input_boolean.energy_manager_ev_grid_allowed
+      - choose:
+          - conditions: "{{ control_enabled }}"
+            sequence:
+              - action: input_boolean.turn_on
+                target:
+                  entity_id: input_boolean.energy_manager_control_enabled
+        default:
+          - action: input_boolean.turn_off
+            target:
+              entity_id: input_boolean.energy_manager_control_enabled
+      - delay: "00:00:01"
+      - action: input_boolean.turn_off
+        target:
+          entity_id: input_boolean.energy_manager_settings_syncing
+
+  - id: energy_manager_apply_dashboard_settings
+    alias: Energy manager - apply dashboard settings
+    mode: restart
+    triggers:
+      - trigger: state
+        entity_id:
+          - input_select.energy_manager_ev_trip_profile
+          - input_number.energy_manager_ev_opportunistic_fit_cents
+          - input_number.energy_manager_ev_charge_limit
+          - input_number.energy_manager_min_sell_price_cents
+          - input_boolean.energy_manager_ev_grid_allowed
+          - input_boolean.energy_manager_control_enabled
+          - input_boolean.energy_manager_hot_water_fixed_timer
+    conditions:
+      - condition: state
+        entity_id: input_boolean.energy_manager_settings_syncing
+        state: "off"
+    actions:
+      - delay:
+          milliseconds: 200
+      - action: rest_command.energy_manager_update_settings
+        # The helpers are only a local editing surface. If the validated REST
+        # write fails, continue to the reconciliation below so Home Assistant
+        # cannot keep displaying a value the standalone manager rejected.
+        continue_on_error: true
+        data:
+          ev_trip_profile: "{{ states('input_select.energy_manager_ev_trip_profile') }}"
+          hot_water_enabled: "{{ is_state('input_boolean.energy_manager_hot_water_fixed_timer', 'on') }}"
+          ev_opportunistic_fit_max_per_kwh: "{{ states('input_number.energy_manager_ev_opportunistic_fit_cents') | float / 100 }}"
+          ev_charge_limit_pct: "{{ states('input_number.energy_manager_ev_charge_limit') | int }}"
+          min_sell_price_per_kwh: "{{ states('input_number.energy_manager_min_sell_price_cents') | float / 100 }}"
+          ev_grid_allowed: "{{ is_state('input_boolean.energy_manager_ev_grid_allowed', 'on') }}"
+          control_enabled: "{{ is_state('input_boolean.energy_manager_control_enabled', 'on') }}"
+      - delay:
+          milliseconds: 750
+      - action: homeassistant.update_entity
+        target:
+          entity_id: sensor.energy_manager_settings_source
+      - delay:
+          milliseconds: 250
+      - action: automation.trigger
+        target:
+          entity_id: automation.energy_manager_synchronise_dashboard_settings
+
+  - id: energy_manager_resilience_notifications
+    alias: Energy manager - grid resilience notifications
+    mode: queued
+    max: 20
+    triggers:
+      - trigger: mqtt
+        topic: energy-manager/events
+    conditions:
+      - condition: template
+        value_template: >-
+          {{ trigger.payload_json.kind in
+             ['grid_lost', 'grid_source_disagreement', 'resilience_stage_changed',
+              'node_shutdown_signals', 'node_shutdown_signal_failed',
+              'grid_restoration_detected', 'grid_recovery_complete'] }}
+    actions:
+      - variables:
+          event: "{{ trigger.payload_json.kind }}"
+          stage: "{{ trigger.payload_json.payload.stage | default('') }}"
+          messages:
+            grid_lost: "Grid power has been lost. Flexible loads and battery export have stopped; the UPS is being monitored."
+            grid_source_disagreement: "Grid sources disagree. The manager will not initiate shutdown from conflicting evidence."
+            resilience_stage_changed: "Grid resilience stage changed to {{ stage | replace('_', ' ') }}."
+            node_shutdown_signals: "Orderly Proxmox node shutdown signals were accepted."
+            node_shutdown_signal_failed: "A Proxmox orderly shutdown signal failed. Check the energy manager outage journal."
+            grid_restoration_detected: "Grid supply has returned. Energy automation will wait for five stable minutes."
+            grid_recovery_complete: "Grid recovery is complete and normal energy planning has resumed."
+      - action: notify.mobile_app_iphone
+        data:
+          title: Home energy resilience
+          message: "{{ messages.get(event, 'Energy resilience state changed.') }}"

@@ -416,6 +416,17 @@
     - Reload systemd
     - Restart Pilot Linux Voice Assistant
 
+- name: Install Linux Voice Assistant device supervisor
+  ansible.builtin.copy:
+    src: "{{ room_endpoint_project_root }}/deploy/scripts/pilot-lva-supervisor"
+    dest: /usr/local/sbin/pilot-lva-supervisor
+    owner: root
+    group: root
+    mode: "0755"
+  when: room_endpoint_lva_install | bool
+  notify:
+    - Restart Pilot Linux Voice Assistant
+
 - name: Disable distribution Shairport Sync service
   ansible.builtin.systemd_service:
     name: shairport-sync.service

@@ -389,6 +389,21 @@ final class DriveModel {
         )
     }
 
+    func send(_ draft: DestinationDraft) async {
+        var parameters: [String: PilotJSONValue] = [
+            "latitude": .number(draft.latitude),
+            "longitude": .number(draft.longitude),
+            "climate_enabled": .boolean(draft.climateEnabled),
+        ]
+        if draft.climateEnabled, let temperature = draft.temperatureC {
+            parameters["temperature_c"] = .number(temperature)
+        }
+        if draft.climateEnabled, let seatMode = draft.seatClimateMode {
+            parameters["seat_climate_mode"] = .string(seatMode.rawValue)
+        }
+        _ = await perform("destination_workflow", parameters: parameters)
+    }
+
     func retryActiveAction() async {
         guard let activeAction else { return }
         _ = await perform(activeAction.action, parameters: activeAction.parameters)

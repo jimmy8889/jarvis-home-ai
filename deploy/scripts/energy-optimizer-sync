@@ -16,9 +16,22 @@ done
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "$script_dir/../.." && pwd)"
+git_sha="$(git -C "$repo_root" rev-parse --short=12 HEAD)"
+content_hash="$({
+  find "$repo_root/apps/energy-optimizer" "$repo_root/infra/energy-optimizer" \
+    -type f \
+    ! -path '*/.venv/*' \
+    ! -path '*/.pytest_cache/*' \
+    ! -path '*/__pycache__/*' \
+    ! -name '*.pyc' \
+    -print0 \
+    | sort -z \
+    | xargs -0 shasum -a 256
+} | shasum -a 256 | awk '{print $1}')"
+release_id="${git_sha}-${content_hash:0:12}"
+release_root="$target_root/releases/energy-optimizer/$release_id"
 rsync_args=(
   --archive
-  --delete
   --itemize-changes
   --exclude .venv/
   --exclude .pytest_cache/
@@ -30,12 +43,94 @@ if [[ "$apply" != true ]]; then
   rsync_args+=(--dry-run)
 fi
 
-ssh -o BatchMode=yes "$target_host" "install -d -m 0755 '$target_root/apps/energy-optimizer' '$target_root/infra/energy-optimizer'; install -d -o 10003 -g 10003 -m 0750 /opt/energy-optimizer/data; install -d -o 10003 -g 10003 -m 0700 /opt/energy-optimizer/secrets; install -o 10003 -g 10003 -m 0400 '$target_root/infra/secrets/home_assistant_token' /opt/energy-optimizer/secrets/home_assistant_token"
-rsync "${rsync_args[@]}" "$repo_root/apps/energy-optimizer/" "$target_host:$target_root/apps/energy-optimizer/"
-rsync "${rsync_args[@]}" "$repo_root/infra/energy-optimizer/" "$target_host:$target_root/infra/energy-optimizer/"
+echo "Energy optimiser release: $release_id"
 
-if [[ "$apply" == true ]]; then
-  ssh -o BatchMode=yes "$target_host" "cd '$target_root' && docker compose -f infra/energy-optimizer/docker-compose.yml up -d --build"
-else
-  echo "Dry run only. Re-run with --apply to sync and deploy."
+if [[ "$apply" != true ]]; then
+  echo "Dry run only: no remote directories, credentials, images, or containers will be changed."
+  if ssh -o BatchMode=yes "$target_host" "test -d '$release_root'"; then
+    rsync "${rsync_args[@]}" "$repo_root/apps/energy-optimizer/" "$target_host:$release_root/apps/energy-optimizer/"
+    rsync "${rsync_args[@]}" "$repo_root/infra/energy-optimizer/" "$target_host:$release_root/infra/energy-optimizer/"
+  else
+    echo "Remote release directory does not yet exist; apply would create $release_root"
+    file_count="$({
+      find "$repo_root/apps/energy-optimizer" "$repo_root/infra/energy-optimizer" \
+        -type f \
+        ! -path '*/.venv/*' \
+        ! -path '*/.pytest_cache/*' \
+        ! -path '*/__pycache__/*' \
+        ! -path '*/pilot_energy_optimizer.egg-info/*' \
+        ! -name '*.pyc'
+    } | wc -l | tr -d ' ')"
+    echo "Apply would stage $file_count scoped files under that immutable release."
+  fi
+  echo "Re-run with --apply to stage, validate, and activate this immutable release."
+  exit 0
 fi
+
+ssh -o BatchMode=yes "$target_host" "
+  set -eu
+  install -d -m 0755 '$release_root/apps/energy-optimizer' '$release_root/infra/energy-optimizer'
+  install -d -o 10003 -g 10003 -m 0750 /opt/energy-optimizer/data
+  install -d -o 10003 -g 10003 -m 0700 /opt/energy-optimizer/secrets /opt/energy-optimizer/releases
+  install -o 10003 -g 10003 -m 0400 '$target_root/infra/secrets/home_assistant_token' /opt/energy-optimizer/secrets/home_assistant_token
+"
+rsync "${rsync_args[@]}" --delete "$repo_root/apps/energy-optimizer/" "$target_host:$release_root/apps/energy-optimizer/"
+rsync "${rsync_args[@]}" --delete "$repo_root/infra/energy-optimizer/" "$target_host:$release_root/infra/energy-optimizer/"
+
+ssh -o BatchMode=yes "$target_host" "
+  set -eu
+  previous_image=\$(docker inspect energy-optimizer --format '{{.Image}}' 2>/dev/null || true)
+  previous_release=\$(readlink '$target_root/current-energy-optimizer' 2>/dev/null || true)
+  compose_hash=\$(sha256sum '$release_root/infra/energy-optimizer/docker-compose.yml' | awk '{print \$1}')
+  created_at=\$(date -Iseconds)
+  python3 - \"/opt/energy-optimizer/releases/$release_id.json\" \
+    \"$release_id\" \"$git_sha\" \"$content_hash\" \"\$compose_hash\" \
+    \"\$previous_image\" \"\$previous_release\" \"\$created_at\" <<'PY'
+import json
+import sys
+
+path, release_id, git_sha, content_hash, compose_hash, previous_image, previous_release, created_at = sys.argv[1:]
+with open(path, 'w', encoding='utf-8') as handle:
+    json.dump({
+        'release_id': release_id,
+        'git_sha': git_sha,
+        'content_hash': content_hash,
+        'compose_hash': compose_hash,
+        'previous_image': previous_image or None,
+        'previous_release': previous_release or None,
+        'created_at': created_at,
+        'status': 'staged',
+    }, handle, indent=2, sort_keys=True)
+PY
+  cd '$release_root'
+  ENERGY_OPTIMIZER_IMAGE_TAG='$release_id' docker compose -p energy-optimizer \
+    -f infra/energy-optimizer/docker-compose.yml config --quiet
+  ENERGY_OPTIMIZER_IMAGE_TAG='$release_id' docker compose -p energy-optimizer \
+    -f infra/energy-optimizer/docker-compose.yml build
+  ENERGY_OPTIMIZER_IMAGE_TAG='$release_id' docker compose -p energy-optimizer \
+    -f infra/energy-optimizer/docker-compose.yml up -d --no-build
+  for attempt in \$(seq 1 30); do
+    if curl -fsS http://127.0.0.1:8785/readyz >/dev/null; then
+      ln -sfn '$release_root' '$target_root/current-energy-optimizer'
+      python3 - \"/opt/energy-optimizer/releases/$release_id.json\" <<'PY'
+import json
+import sys
+
+path = sys.argv[1]
+with open(path, encoding='utf-8') as handle:
+    manifest = json.load(handle)
+manifest['status'] = 'active'
+with open(path, 'w', encoding='utf-8') as handle:
+    json.dump(manifest, handle, indent=2, sort_keys=True)
+PY
+      docker image prune -f --filter 'until=720h' >/dev/null
+      exit 0
+    fi
+    sleep 2
+  done
+  docker logs --tail 200 energy-optimizer >&2 || true
+  echo 'New energy optimiser release did not become ready; production gates must remain disarmed.' >&2
+  exit 1
+"
+
+echo "Activated energy optimiser release $release_id"

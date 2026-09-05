@@ -1,0 +1,8 @@
+.pytest_cache/
+.venv/
+__pycache__/
+*.egg-info/
+build/
+firmware/hot-water/.pio/
+firmware/tesla-ble/.esphome/
+firmware/tesla-ble/secrets.yaml

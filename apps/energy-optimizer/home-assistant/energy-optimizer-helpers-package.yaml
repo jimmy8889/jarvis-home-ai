@@ -1,0 +1,905 @@
+# Version-controlled Home Assistant package for the energy optimiser helpers and
+# derived safety/source entities. Deploy under `homeassistant.packages`, merging
+# existing helpers with the same entity IDs instead of defining them twice.
+#
+# Runtime intent and notification latches deliberately omit `initial` so Home
+# Assistant restores their last value after restart. The validated auto-resume
+# automation is the only component that translates `production_expected` into
+# active control gates.
+
+input_boolean:
+  energy_optimizer_production_expected:
+    name: Energy Optimizer Production Expected
+    icon: mdi:shield-check
+  energy_optimizer_manual_override:
+    name: Energy Optimizer Manual Override
+    icon: mdi:hand-back-right
+  energy_optimizer_battery_control:
+    name: Energy Optimizer Battery Control
+    icon: mdi:battery-lock
+  energy_optimizer_hot_water_control:
+    name: Energy Optimizer Hot Water Control
+    icon: mdi:water-boiler
+  energy_optimizer_ev_auto:
+    name: Energy Optimizer EV Auto
+    icon: mdi:car-electric
+  energy_optimizer_ev_allow_fleet_fallback:
+    name: Allow Paid Tesla Fleet Fallback
+    icon: mdi:cloud-lock-outline
+  energy_optimizer_rollout_approved:
+    name: Energy Optimizer Rollout Approved
+    icon: mdi:check-decagram-outline
+  energy_optimizer_hot_water_service_rescue:
+    name: Energy Optimizer Hot Water Service Rescue
+    icon: mdi:water-boiler-alert
+  energy_optimizer_hot_water_thermostat_satisfied:
+    name: Energy Optimizer Hot Water Thermostat Satisfied
+    icon: mdi:thermometer-check
+
+  # Persistent notification/session latches. Separate rearm automations clear
+  # them only after the corresponding physical condition has ended.
+  energy_optimizer_notify_battery_selling_active:
+    name: Energy Optimizer Battery Selling Notification Active
+    icon: mdi:battery-arrow-up
+  energy_optimizer_notify_ev_charging_active:
+    name: Energy Optimizer EV Charging Notification Active
+    icon: mdi:ev-station
+  energy_optimizer_notify_hot_water_active:
+    name: Energy Optimizer Hot Water Notification Active
+    icon: mdi:water-boiler
+  energy_optimizer_notify_hot_water_complete_sent:
+    name: Energy Optimizer Hot Water Complete Notification Sent
+    icon: mdi:check-circle-outline
+  energy_optimizer_notify_hot_water_rescue_sent:
+    name: Energy Optimizer Hot Water Rescue Notification Sent
+    icon: mdi:lifebuoy
+  energy_optimizer_alert_degraded_active:
+    name: Energy Optimizer Degraded Alert Active
+    icon: mdi:alert-circle
+  energy_optimizer_alert_hot_water_battery_active:
+    name: Energy Optimizer Hot Water Battery Alert Active
+    icon: mdi:battery-alert
+  energy_optimizer_alert_ev_battery_active:
+    name: Energy Optimizer EV Battery Alert Active
+    icon: mdi:car-battery
+  energy_optimizer_alert_negative_export_active:
+    name: Energy Optimizer Negative FIT Export Alert Active
+    icon: mdi:transmission-tower-off
+  energy_optimizer_alert_hot_water_deadline_sent:
+    name: Energy Optimizer Hot Water Deadline Alert Sent
+    icon: mdi:clock-alert-outline
+  energy_optimizer_alert_saj_contract_active:
+    name: Energy Optimizer SAJ Control Contract Alert Active
+    icon: mdi:puzzle-alert
+
+input_number:
+  energy_optimizer_min_sell_price_c_per_kwh:
+    name: Minimum Battery Sell Price
+    min: 8
+    max: 200
+    step: 0.5
+    unit_of_measurement: "¢/kWh"
+    mode: box
+    icon: mdi:cash-multiple
+  energy_optimizer_max_discharge_kw:
+    name: Energy Optimizer Max Discharge kW
+    min: 0
+    max: 28
+    step: 1
+    unit_of_measurement: kW
+    mode: slider
+    icon: mdi:speedometer
+  energy_optimizer_ev_custom_km:
+    name: Energy Optimizer EV Custom km
+    min: 0
+    max: 500
+    step: 10
+    unit_of_measurement: km
+    mode: box
+    icon: mdi:map-marker-distance
+  energy_optimizer_hot_water_solar_margin_kw:
+    name: Energy Optimizer Hot Water Solar Margin
+    min: 0.5
+    max: 3
+    step: 0.1
+    unit_of_measurement: kW
+    mode: box
+    icon: mdi:weather-sunny-alert
+  energy_optimizer_ev_solar_start_margin_kw:
+    name: Energy Optimizer EV Solar Start Margin
+    min: 0.5
+    max: 3
+    step: 0.1
+    unit_of_measurement: kW
+    mode: box
+    icon: mdi:solar-power-variant
+
+input_select:
+  energy_optimizer_mode:
+    name: Energy Optimizer Mode
+    options:
+      - Shadow
+      - Active
+      - Disabled
+    icon: mdi:shield-half-full
+  energy_optimizer_ev_trip:
+    name: Energy Optimizer EV Trip
+    options:
+      - No trip / opportunistic
+      - Local / 50 km
+      - 100 km
+      - 200 km
+      - Custom
+    icon: mdi:map-marker-distance
+
+input_datetime:
+  energy_optimizer_ev_departure:
+    name: Energy Optimizer EV Departure
+    has_date: true
+    has_time: true
+    icon: mdi:clock-fast
+  energy_optimizer_shadow_started:
+    name: Energy Optimizer Shadow Started
+    has_date: true
+    has_time: true
+    icon: mdi:timer-sand
+  energy_optimizer_last_auto_resume:
+    name: Energy Optimizer Last Auto Resume
+    has_date: true
+    has_time: true
+    icon: mdi:restart-alert
+  energy_optimizer_home_assistant_started:
+    name: Energy Optimizer Home Assistant Started
+    has_date: true
+    has_time: true
+    icon: mdi:home-clock
+
+input_text:
+  energy_optimizer_actuator_status:
+    name: Energy Optimizer Actuator Status
+    max: 255
+    icon: mdi:list-status
+  energy_optimizer_auto_resume_status:
+    name: Energy Optimizer Auto Resume Status
+    max: 255
+    icon: mdi:restart
+  energy_optimizer_hot_water_status:
+    name: Energy Optimizer Hot Water Status
+    max: 255
+    icon: mdi:water-boiler-alert
+  energy_optimizer_ev_actuator_status:
+    name: Energy Optimizer EV Actuator Status
+    max: 255
+    icon: mdi:car-cog
+
+sensor:
+  - platform: history_stats
+    name: Hot Water Confirmed Runtime Today
+    unique_id: energy_optimizer_hot_water_confirmed_runtime_today
+    entity_id: binary_sensor.hot_water_heating_active
+    state: "on"
+    type: time
+    start: "{{ today_at('00:00') }}"
+    end: "{{ now() }}"
+
+template:
+  - binary_sensor:
+      - name: Energy Optimizer Hot Water Service Complete
+        unique_id: energy_optimizer_hot_water_service_complete
+        device_class: running
+        icon: mdi:water-boiler-check
+        state: >-
+          {{ states('sensor.hot_water_confirmed_runtime_today') | float(0) >= 3
+             or is_state('input_boolean.energy_optimizer_hot_water_thermostat_satisfied', 'on') }}
+        attributes:
+          completion_basis: >-
+            {% if states('sensor.hot_water_confirmed_runtime_today') | float(0) >= 3 %}
+              three_element_hours
+            {% elif is_state('input_boolean.energy_optimizer_hot_water_thermostat_satisfied', 'on') %}
+              tank_thermostat_satisfied
+            {% else %}
+              incomplete
+            {% endif %}
+          confirmed_element_hours: "{{ states('sensor.hot_water_confirmed_runtime_today') | float(0) | round(2) }}"
+
+      - name: Hot Water Heating Active
+        default_entity_id: binary_sensor.hot_water_heating_active
+        # Reuse the existing live template entity's registry identity so the
+        # source-aware replacement cannot be allocated an unsafe `_2` suffix.
+        unique_id: hot_water_heating_active
+        device_class: power
+        icon: mdi:water-boiler
+        availability: >-
+          {% set unit = state_attr('sensor.saj_home_load', 'unit_of_measurement') | default('', true) | lower %}
+          {% set load_reported = as_timestamp(states['sensor.saj_home_load'].last_reported, 0)
+             if has_value('sensor.saj_home_load') else 0 %}
+          {% set relay_changed = as_timestamp(states['switch.hot_water'].last_changed, 0)
+             if states('switch.hot_water') in ['on', 'off'] else 0 %}
+          {% set load_age = as_timestamp(now()) - load_reported %}
+          {{ has_value('sensor.saj_home_load')
+             and unit in ['w', 'kw']
+             and states('switch.hot_water') in ['on', 'off']
+             and (is_state('switch.hot_water', 'off')
+                  or (load_age >= -60 and load_age <= 60
+                      and load_reported >= relay_changed - 2)) }}
+        state: >-
+          {% set raw = states('sensor.saj_home_load') | float(0) %}
+          {% set unit = state_attr('sensor.saj_home_load', 'unit_of_measurement') | lower %}
+          {% set load_kw = raw / 1000 if unit == 'w' else raw %}
+          {% set nominal_kw = states('input_number.hot_water_nominal_kw') | float(3.7) %}
+          {{ is_state('switch.hot_water', 'on') and load_kw >= nominal_kw - 0.5 }}
+        attributes:
+          measured_power_kw: >-
+            {% set raw = states('sensor.saj_home_load') | float(0) %}
+            {% set unit = state_attr('sensor.saj_home_load', 'unit_of_measurement') | lower %}
+            {% set load_kw = raw / 1000 if unit == 'w' else raw %}
+            {% set nominal_kw = states('input_number.hot_water_nominal_kw') | float(3.7) %}
+            {{ nominal_kw if is_state('switch.hot_water', 'on') and load_kw >= nominal_kw - 0.5 else 0 }}
+          evidence_source: saj_home_load_post_relay
+          source_unit: "{{ state_attr('sensor.saj_home_load', 'unit_of_measurement') }}"
+          power_age_seconds: >-
+            {{ (as_timestamp(now()) - as_timestamp(states['sensor.saj_home_load'].last_reported)) | round(0)
+               if has_value('sensor.saj_home_load') else none }}
+          report_after_relay_on: >-
+            {{ as_timestamp(states['sensor.saj_home_load'].last_reported, 0) >=
+               as_timestamp(states['switch.hot_water'].last_changed, 0) - 2
+               if has_value('sensor.saj_home_load') and is_state('switch.hot_water', 'on') else false }}
+
+      - name: Energy Optimizer Hot Water Solar Start Ready
+        unique_id: energy_optimizer_hot_water_solar_start_ready
+        icon: mdi:solar-power-variant
+        # Ordinary heating may start only after this raw source calculation has
+        # remained continuously true for thirty seconds. There is deliberately
+        # no delay_off: the governor uses its own raw margin and battery checks
+        # for immediate source-protection stops once the element is running.
+        delay_on:
+          seconds: 30
+        availability: >-
+          {% set pv_unit = state_attr('sensor.saj_pv_power', 'unit_of_measurement') | default('', true) | lower %}
+          {% set load_unit = state_attr('sensor.saj_home_load', 'unit_of_measurement') | default('', true) | lower %}
+          {% set battery_unit = state_attr('sensor.saj_battery_power', 'unit_of_measurement') | default('', true) | lower %}
+          {% set element_unit = state_attr('sensor.energy_optimizer_hot_water_confirmed_power', 'unit_of_measurement') | default('', true) | lower %}
+          {{ is_state('binary_sensor.energy_optimizer_core_telemetry_fresh', 'on')
+             and has_value('sensor.saj_pv_power') and pv_unit in ['w', 'kw']
+             and has_value('sensor.saj_home_load') and load_unit in ['w', 'kw']
+             and has_value('sensor.saj_battery_power') and battery_unit in ['w', 'kw']
+             and has_value('sensor.energy_optimizer_hot_water_confirmed_power') and element_unit in ['w', 'kw']
+             and has_value('input_number.hot_water_nominal_kw')
+             and has_value('input_number.energy_optimizer_hot_water_solar_margin_kw') }}
+        state: >-
+          {% set pv_raw = states('sensor.saj_pv_power') | float(0) %}
+          {% set pv_unit = state_attr('sensor.saj_pv_power', 'unit_of_measurement') | lower %}
+          {% set pv_kw = pv_raw / 1000 if pv_unit == 'w' else pv_raw %}
+          {% set load_raw = states('sensor.saj_home_load') | float(0) %}
+          {% set load_unit = state_attr('sensor.saj_home_load', 'unit_of_measurement') | lower %}
+          {% set load_kw = load_raw / 1000 if load_unit == 'w' else load_raw %}
+          {% set battery_raw = states('sensor.saj_battery_power') | float(0) %}
+          {% set battery_unit = state_attr('sensor.saj_battery_power', 'unit_of_measurement') | lower %}
+          {% set battery_kw = battery_raw / 1000 if battery_unit == 'w' else battery_raw %}
+          {% set element_raw = states('sensor.energy_optimizer_hot_water_confirmed_power') | float(0) %}
+          {% set element_unit = state_attr('sensor.energy_optimizer_hot_water_confirmed_power', 'unit_of_measurement') | lower %}
+          {% set measured_element_kw = element_raw / 1000 if element_unit == 'w' else element_raw %}
+          {% set nominal_element_kw = states('input_number.hot_water_nominal_kw') | float(3.7) %}
+          {% set relay_on_age = as_timestamp(now()) - as_timestamp(states['switch.hot_water'].last_changed, 0)
+             if is_state('switch.hot_water', 'on') else 999999 %}
+          {% set active_element_kw = measured_element_kw
+             if is_state('binary_sensor.hot_water_heating_active', 'on')
+             else nominal_element_kw if is_state('switch.hot_water', 'on') and relay_on_age < 60
+             else 0 %}
+          {% set non_hot_water_load_kw = [0, load_kw - active_element_kw] | max %}
+          {% set charge_reservation_kw =
+             state_attr('sensor.energy_optimizer_plan', 'battery_charge_target_kw') | float(0)
+             if state_attr('sensor.energy_optimizer_plan', 'battery_mode') in ['pv_charge', 'grid_charge']
+             else 0 %}
+          {% set required_kw = nominal_element_kw
+             + states('input_number.energy_optimizer_hot_water_solar_margin_kw') | float(0.5) %}
+          {% set headroom_kw = pv_kw - non_hot_water_load_kw - charge_reservation_kw %}
+          {{ battery_kw <= 0.3 and headroom_kw >= required_kw }}
+        attributes:
+          sustained_seconds_required: 30
+          source_rule: direct_solar_after_house_and_battery_charge_reservation
+
+      - name: Energy Optimizer SAJ Control Contract Ready
+        unique_id: energy_optimizer_saj_control_contract_ready
+        device_class: connectivity
+        icon: mdi:puzzle-check-outline
+        # Deployment prerequisite: enable the currently registry-disabled SAJ
+        # integration sensor with unique_id SAJ_BatDischargePower.
+        state: >-
+          {% set required = [
+            'number.saj_anti_reflux_mode_input',
+            'number.saj_export_limit_input',
+            'number.saj_grid_max_discharge_power_input',
+            'number.saj_battery_on_grid_discharge_depth_input',
+            'sensor.saj_battery_on_grid_discharge_depth',
+            'switch.saj_charging_control',
+            'switch.saj_discharging_control',
+            'number.saj_charge1_power_percent_input',
+            'number.saj_discharge1_power_percent_input',
+            'number.saj_battery_charge_power_limit_input',
+            'number.saj_battery_discharge_power_limit_input',
+            'sensor.saj_battery_discharge_power_limit'
+          ] %}
+          {% set ns = namespace(ok=true) %}
+          {% for entity_id in required %}
+            {% if not has_value(entity_id) %}{% set ns.ok = false %}{% endif %}
+          {% endfor %}
+          {{ ns.ok }}
+        attributes:
+          required_entities: >-
+            {{ [
+              'number.saj_anti_reflux_mode_input',
+              'number.saj_export_limit_input',
+              'number.saj_grid_max_discharge_power_input',
+              'number.saj_battery_on_grid_discharge_depth_input',
+              'sensor.saj_battery_on_grid_discharge_depth',
+              'switch.saj_charging_control',
+              'switch.saj_discharging_control',
+              'number.saj_charge1_power_percent_input',
+              'number.saj_discharge1_power_percent_input',
+              'number.saj_battery_charge_power_limit_input',
+              'number.saj_battery_discharge_power_limit_input',
+              'sensor.saj_battery_discharge_power_limit'
+            ] }}
+          missing_entities: >-
+            {% set required = [
+              'number.saj_anti_reflux_mode_input',
+              'number.saj_export_limit_input',
+              'number.saj_grid_max_discharge_power_input',
+              'number.saj_battery_on_grid_discharge_depth_input',
+              'sensor.saj_battery_on_grid_discharge_depth',
+              'switch.saj_charging_control',
+              'switch.saj_discharging_control',
+              'number.saj_charge1_power_percent_input',
+              'number.saj_discharge1_power_percent_input',
+              'number.saj_battery_charge_power_limit_input',
+              'number.saj_battery_discharge_power_limit_input',
+              'sensor.saj_battery_discharge_power_limit'
+            ] %}
+            {% set ns = namespace(missing=[]) %}
+            {% for entity_id in required %}
+              {% if not has_value(entity_id) %}
+                {% set ns.missing = ns.missing + [entity_id] %}
+              {% endif %}
+            {% endfor %}
+            {{ ns.missing }}
+
+      - name: Energy Optimizer Core Telemetry Fresh
+        unique_id: energy_optimizer_core_telemetry_fresh
+        device_class: connectivity
+        icon: mdi:heart-pulse
+        state: >-
+          {% set now_ts = as_timestamp(now()) %}
+          {% set heartbeat_entities = [
+            'sensor.saj_battery_power',
+            'sensor.saj_pv_power',
+            'sensor.saj_home_load',
+            'sensor.saj_meter_a_real_power_total'
+          ] %}
+          {% set ns = namespace(ok=has_value('sensor.saj_battery_1_soc'), oldest=0) %}
+          {% for entity_id in heartbeat_entities %}
+            {% if not has_value(entity_id) %}
+              {% set ns.ok = false %}
+            {% else %}
+              {% set obj = states[entity_id] %}
+              {% set age = now_ts - as_timestamp(obj.last_reported, 0) %}
+              {% set unit = obj.attributes.unit_of_measurement | default('', true) | lower %}
+              {% if age < -60 or age > 330 or unit not in ['w', 'kw'] %}
+                {% set ns.ok = false %}
+              {% endif %}
+              {% if age > ns.oldest %}{% set ns.oldest = age %}{% endif %}
+            {% endif %}
+          {% endfor %}
+          {{ ns.ok }}
+        attributes:
+          maximum_age_seconds: 330
+          battery_soc_value_available: "{{ has_value('sensor.saj_battery_1_soc') }}"
+          battery_power_age_seconds: >-
+            {{ (as_timestamp(now()) - as_timestamp(states['sensor.saj_battery_power'].last_reported)) | round(0)
+               if has_value('sensor.saj_battery_power') else none }}
+          pv_age_seconds: >-
+            {{ (as_timestamp(now()) - as_timestamp(states['sensor.saj_pv_power'].last_reported)) | round(0)
+               if has_value('sensor.saj_pv_power') else none }}
+          load_age_seconds: >-
+            {{ (as_timestamp(now()) - as_timestamp(states['sensor.saj_home_load'].last_reported)) | round(0)
+               if has_value('sensor.saj_home_load') else none }}
+
+      - name: Energy Optimizer Plan Fresh
+        unique_id: energy_optimizer_plan_fresh
+        device_class: connectivity
+        icon: mdi:clock-check-outline
+        state: >-
+          {% set committed = states('sensor.energy_optimizer_plan') %}
+          {% set generated_value = state_attr('sensor.energy_optimizer_plan', 'generated_at') %}
+          {% set valid_until_value = state_attr('sensor.energy_optimizer_plan', 'valid_until') %}
+          {% set generated = as_timestamp(generated_value)
+             if generated_value not in [none, '', 'unknown', 'unavailable'] else none %}
+          {% set valid_until = as_timestamp(valid_until_value)
+             if valid_until_value not in [none, '', 'unknown', 'unavailable'] else none %}
+          {% set ids = [
+            state_attr('sensor.energy_optimizer_status', 'plan_id'),
+            state_attr('sensor.energy_optimizer_battery_power_target', 'plan_id'),
+            state_attr('sensor.energy_optimizer_site_export_target', 'plan_id'),
+            state_attr('sensor.energy_optimizer_pv_export', 'plan_id'),
+            state_attr('sensor.energy_optimizer_hot_water', 'plan_id'),
+            state_attr('sensor.energy_optimizer_ev', 'plan_id')
+          ] %}
+          {{ state_attr('sensor.energy_optimizer_plan', 'schema_version') | string == '2'
+             and committed not in ['unknown', 'unavailable', 'none', '']
+             and committed in ids and ids | reject('equalto', committed) | list | count == 0
+             and generated is number and valid_until is number
+             and generated > as_timestamp(now()) - 600
+             and generated < as_timestamp(now()) + 60
+             and valid_until > as_timestamp(now()) }}
+        attributes:
+          committed_plan_id: "{{ states('sensor.energy_optimizer_plan') }}"
+          schema_version: "{{ state_attr('sensor.energy_optimizer_plan', 'schema_version') | default(none, true) }}"
+          age_seconds: >-
+            {% set value = state_attr('sensor.energy_optimizer_plan', 'generated_at') %}
+            {{ (as_timestamp(now()) - as_timestamp(value)) | round(1)
+               if value not in [none, '', 'unknown', 'unavailable'] else none }}
+          valid_for_seconds: >-
+            {% set value = state_attr('sensor.energy_optimizer_plan', 'valid_until') %}
+            {{ (as_timestamp(value) - as_timestamp(now())) | round(1)
+               if value not in [none, '', 'unknown', 'unavailable'] else none }}
+
+      - name: Energy Optimizer EV Local Link Fresh
+        unique_id: energy_optimizer_ev_local_link_fresh
+        device_class: connectivity
+        icon: mdi:bluetooth-connect
+        state: >-
+          {% set now_ts = as_timestamp(now()) %}
+          {% set uptime_age = now_ts - as_timestamp(states['sensor.tesla_ble_039d9c_uptime'].last_reported, 0)
+             if has_value('sensor.tesla_ble_039d9c_uptime') else 999999 %}
+          {% set ble_ok = has_value('sensor.tesla_ble_039d9c_uptime')
+             and uptime_age >= -60 and uptime_age <= 120
+             and is_state('binary_sensor.tesla_ble_039d9c_status', 'on')
+             and states('switch.tesla_ble_039d9c_charger') in ['on', 'off'] %}
+          {{ ble_ok
+             and states('binary_sensor.tesla_wall_connector_vehicle_connected') in ['on', 'off'] }}
+        attributes:
+          maximum_age_seconds: 120
+          freshness_basis: ble_primary_and_wall_connection
+          control_path: >-
+            {{ 'ble' if has_value('sensor.tesla_ble_039d9c_uptime')
+               and states('switch.tesla_ble_039d9c_charger') in ['on', 'off']
+               and has_value('number.tesla_ble_039d9c_charging_amps')
+               and has_value('number.tesla_ble_039d9c_charging_limit')
+               else 'unavailable' }}
+          fleet_control_available: >-
+            {{ is_state('input_boolean.energy_optimizer_ev_allow_fleet_fallback', 'on')
+               and is_state('binary_sensor.energy_optimizer_tesla_fleet_fallback_ready', 'on') }}
+          fleet_vehicle_data_available: >-
+            {{ has_value('number.jarvis_charge_current')
+               and has_value('number.jarvis_charge_limit_2') }}
+          ble_control_available: >-
+            {% set uptime_age = as_timestamp(now()) - as_timestamp(states['sensor.tesla_ble_039d9c_uptime'].last_reported, 0)
+               if has_value('sensor.tesla_ble_039d9c_uptime') else 999999 %}
+            {{ uptime_age >= -60 and uptime_age <= 120
+               and is_state('binary_sensor.tesla_ble_039d9c_status', 'on')
+               and states('switch.tesla_ble_039d9c_charger') in ['on', 'off']
+               and has_value('number.tesla_ble_039d9c_charging_amps')
+               and has_value('number.tesla_ble_039d9c_charging_limit') }}
+          vehicle_data_required_after_wake: true
+          vehicle_data_available: >-
+            {{ has_value('sensor.tesla_ble_last_update')
+               and has_value('sensor.tesla_ble_charge_level')
+               and has_value('number.tesla_ble_039d9c_charging_amps')
+               and has_value('number.tesla_ble_039d9c_charging_limit') }}
+          ble_age_seconds: >-
+            {{ (as_timestamp(now()) - as_timestamp(states['sensor.tesla_ble_039d9c_uptime'].last_reported)) | round(0)
+               if has_value('sensor.tesla_ble_039d9c_uptime') else none }}
+          vehicle_data_age_seconds: >-
+            {{ (as_timestamp(now()) - as_timestamp(states['sensor.tesla_ble_last_update'].last_changed)) | round(0)
+               if has_value('sensor.tesla_ble_last_update') else none }}
+          soc_age_seconds: >-
+            {{ (as_timestamp(now()) - as_timestamp(states['sensor.tesla_ble_charge_level'].last_reported)) | round(0)
+               if has_value('sensor.tesla_ble_charge_level') else none }}
+          wall_connector_age_seconds: >-
+            {{ (as_timestamp(now()) - as_timestamp(states['sensor.tesla_wall_connector_wifi_rssi'].last_reported)) | round(0)
+               if has_value('sensor.tesla_wall_connector_wifi_rssi') else none }}
+          charge_power_age_seconds: >-
+            {{ (as_timestamp(now()) - as_timestamp(states['sensor.tesla_ble_charge_power'].last_reported)) | round(0)
+               if has_value('sensor.tesla_ble_charge_power') else none }}
+          charge_power_fresh: >-
+            {% set unit = state_attr('sensor.tesla_ble_charge_power', 'unit_of_measurement') | default('', true) | lower %}
+            {% set age = as_timestamp(now()) - as_timestamp(states['sensor.tesla_ble_charge_power'].last_reported, 0)
+               if has_value('sensor.tesla_ble_charge_power') else 999999 %}
+            {{ has_value('sensor.tesla_ble_charge_power')
+               and unit in ['w', 'kw'] and age >= -60 and age <= 120 }}
+
+      - name: Energy Optimizer Tesla Fleet Fallback Ready
+        unique_id: energy_optimizer_tesla_fleet_fallback_ready
+        device_class: connectivity
+        icon: mdi:cloud-check-outline
+        state: >-
+          {% set soc_age = as_timestamp(now()) - as_timestamp(states['sensor.jarvis_battery_level_2'].last_reported, 0)
+             if has_value('sensor.jarvis_battery_level_2') else 999999 %}
+          {{ is_state('input_boolean.energy_optimizer_ev_allow_fleet_fallback', 'on')
+             and states('switch.jarvis_charge') in ['on', 'off']
+             and has_value('number.jarvis_charge_current')
+             and has_value('number.jarvis_charge_limit_2')
+             and has_value('sensor.jarvis_battery_level_2')
+             and soc_age >= -60 and soc_age <= 300 }}
+        attributes:
+          paid_api: true
+          default_policy: disabled_last_resort_only
+
+      - name: Energy Optimizer Actuation Ready
+        unique_id: energy_optimizer_actuation_ready
+        device_class: connectivity
+        icon: mdi:shield-check-outline
+        state: >-
+          {% set actuator = states('input_text.energy_optimizer_actuator_status') %}
+          {% set actuator_fields = actuator.split(' | ') %}
+          {% set expected_mode = state_attr('sensor.energy_optimizer_plan', 'battery_mode') | default('', true) %}
+          {{ is_state('input_boolean.energy_optimizer_production_expected', 'on')
+             and is_state('input_boolean.energy_optimizer_manual_override', 'off')
+             and is_state('input_select.energy_optimizer_mode', 'Active')
+             and is_state('input_boolean.energy_optimizer_rollout_approved', 'on')
+             and is_state('input_boolean.energy_optimizer_battery_control', 'on')
+             and is_state('input_boolean.energy_optimizer_hot_water_control', 'on')
+             and is_state('sensor.energy_optimizer_status', 'active')
+             and state_attr('sensor.energy_optimizer_plan', 'actuation_allowed') == true
+             and is_state('binary_sensor.energy_optimizer_saj_control_contract_ready', 'on')
+             and is_state('binary_sensor.energy_optimizer_plan_fresh', 'on')
+             and is_state('binary_sensor.energy_optimizer_core_telemetry_fresh', 'on')
+             and is_state('binary_sensor.energy_optimizer_actuator_current_plan', 'on')
+             and actuator_fields | count >= 3
+             and actuator_fields[0] in ['feedback_confirmed', 'semantic_noop_confirmed']
+             and expected_mode in ['hold', 'self_consume', 'pv_charge', 'grid_charge', 'export']
+             and ('mode=' ~ expected_mode) in actuator_fields }}
+        attributes:
+          expected_battery_mode: >-
+            {{ state_attr('sensor.energy_optimizer_plan', 'battery_mode') | default(none, true) }}
+          actuator_status: "{{ states('input_text.energy_optimizer_actuator_status') }}"
+
+      - name: Energy Optimizer Actuator Current Plan
+        unique_id: energy_optimizer_actuator_current_plan
+        device_class: connectivity
+        icon: mdi:connection
+        state: >-
+          {% set plan_id = states('sensor.energy_optimizer_plan') %}
+          {% set status = states('input_text.energy_optimizer_actuator_status') %}
+          {% set status_fields = status.split(' | ') %}
+          {% set reported = as_timestamp(
+            states['input_text.energy_optimizer_actuator_status'].last_reported, 0
+          ) %}
+          {% set started_value = states('input_datetime.energy_optimizer_home_assistant_started') %}
+          {% set started = as_timestamp(started_value, 0) %}
+          {{ plan_id not in ['unknown', 'unavailable', 'none', '']
+             and status not in ['unknown', 'unavailable', 'not_installed', '']
+             and status_fields | count >= 2
+             and status_fields[1] == plan_id
+             and started > 0
+             and reported >= started
+             and as_timestamp(now()) - reported <= 600 }}
+        attributes:
+          committed_plan_id: "{{ states('sensor.energy_optimizer_plan') }}"
+          status: "{{ states('input_text.energy_optimizer_actuator_status') }}"
+          reported_at: >-
+            {{ states['input_text.energy_optimizer_actuator_status'].last_reported.isoformat() }}
+          home_assistant_started: "{{ states('input_datetime.energy_optimizer_home_assistant_started') }}"
+
+      - name: Energy Optimizer Negative FIT Export Violation
+        unique_id: energy_optimizer_negative_fit_export_violation
+        device_class: problem
+        icon: mdi:transmission-tower-off
+        availability: >-
+          {% set grid_unit = state_attr('sensor.saj_meter_a_real_power_total', 'unit_of_measurement') | default('', true) | lower %}
+          {{ has_value('sensor.amber_express_trader_sheena_street_feed_in_price')
+             and has_value('sensor.saj_meter_a_real_power_total')
+             and grid_unit in ['w', 'kw']
+             and is_state('binary_sensor.energy_optimizer_core_telemetry_fresh', 'on')
+             and as_timestamp(now()) - as_timestamp(
+               states['sensor.amber_express_trader_sheena_street_feed_in_price'].last_reported, 0
+             ) <= 360 }}
+        state: >-
+          {% set price = states['sensor.amber_express_trader_sheena_street_feed_in_price'] %}
+          {% set raw_grid = states('sensor.saj_meter_a_real_power_total') | float(0) %}
+          {% set grid_unit = state_attr('sensor.saj_meter_a_real_power_total', 'unit_of_measurement') | lower %}
+          {% set grid_kw = raw_grid / 1000 if grid_unit == 'w' else raw_grid %}
+          {{ price.state | float(999) < 0
+             and grid_kw < -0.1 }}
+        attributes:
+          export_w: >-
+            {% set raw = states('sensor.saj_meter_a_real_power_total') | float(0) %}
+            {% set unit = state_attr('sensor.saj_meter_a_real_power_total', 'unit_of_measurement') | lower %}
+            {{ [0, -(raw if unit == 'w' else raw * 1000)] | max | round(0) }}
+          fit_c_per_kwh: >-
+            {{ (states('sensor.amber_express_trader_sheena_street_feed_in_price') | float(0) * 100) | round(3) }}
+
+      - name: Energy Optimizer Hot Water Battery Violation
+        unique_id: energy_optimizer_hot_water_battery_violation
+        device_class: problem
+        icon: mdi:battery-alert
+        availability: >-
+          {% set battery_unit = state_attr('sensor.saj_battery_power', 'unit_of_measurement') | default('', true) | lower %}
+          {{ states('binary_sensor.hot_water_heating_active') in ['on', 'off']
+             and has_value('sensor.saj_battery_power')
+             and battery_unit in ['w', 'kw']
+             and is_state('binary_sensor.energy_optimizer_core_telemetry_fresh', 'on') }}
+        state: >-
+          {% set raw = states('sensor.saj_battery_power') | float(0) %}
+          {% set unit = state_attr('sensor.saj_battery_power', 'unit_of_measurement') | lower %}
+          {% set battery_kw = raw / 1000 if unit == 'w' else raw %}
+          {% set planned_kw = state_attr('sensor.energy_optimizer_plan', 'battery_discharge_target_kw') | float(0) %}
+          {{ is_state('binary_sensor.hot_water_heating_active', 'on')
+             and is_state('binary_sensor.energy_optimizer_plan_fresh', 'on')
+             and state_attr('sensor.energy_optimizer_hot_water', 'plan_id') == states('sensor.energy_optimizer_plan')
+             and battery_kw > planned_kw + 0.3 }}
+
+      - name: Energy Optimizer EV Battery Violation
+        unique_id: energy_optimizer_ev_battery_violation
+        device_class: problem
+        icon: mdi:car-battery
+        availability: >-
+          {% set battery_unit = state_attr('sensor.saj_battery_power', 'unit_of_measurement') | default('', true) | lower %}
+          {{ has_value('sensor.saj_battery_power')
+             and battery_unit in ['w', 'kw']
+             and is_state('binary_sensor.energy_optimizer_core_telemetry_fresh', 'on')
+             and is_state('binary_sensor.energy_optimizer_ev_local_link_fresh', 'on') }}
+        state: >-
+          {% set battery_raw = states('sensor.saj_battery_power') | float(0) %}
+          {% set battery_unit = state_attr('sensor.saj_battery_power', 'unit_of_measurement') | lower %}
+          {% set battery_kw = battery_raw / 1000 if battery_unit == 'w' else battery_raw %}
+          {% set planned_kw = state_attr('sensor.energy_optimizer_plan', 'battery_discharge_target_kw') | float(0) %}
+          {% set wall_raw = states('sensor.tesla_wall_connector_total_power') | float(0) %}
+          {% set wall_unit = state_attr('sensor.tesla_wall_connector_total_power', 'unit_of_measurement') | default('', true) | lower %}
+          {% set wall_kw = wall_raw / 1000 if wall_unit == 'w' else wall_raw if wall_unit == 'kw' else 0 %}
+          {{ wall_kw > 0.5
+             and is_state('binary_sensor.energy_optimizer_plan_fresh', 'on')
+             and state_attr('sensor.energy_optimizer_ev', 'plan_id') == states('sensor.energy_optimizer_plan')
+             and battery_kw > planned_kw + 0.3 }}
+
+  - sensor:
+      - name: Energy Optimizer Hot Water Confirmed Power
+        unique_id: energy_optimizer_hot_water_confirmed_power
+        icon: mdi:water-boiler
+        device_class: power
+        state_class: measurement
+        unit_of_measurement: kW
+        availability: >-
+          {{ states('binary_sensor.hot_water_heating_active') in ['on', 'off']
+             and has_value('input_number.hot_water_nominal_kw') }}
+        state: >-
+          {{ states('input_number.hot_water_nominal_kw') | float(3.7)
+             if is_state('binary_sensor.hot_water_heating_active', 'on') else 0 }}
+        attributes:
+          evidence_source: "{{ state_attr('binary_sensor.hot_water_heating_active', 'evidence_source') | default('unavailable', true) }}"
+          evidence_age_seconds: "{{ state_attr('binary_sensor.hot_water_heating_active', 'power_age_seconds') }}"
+          report_after_relay_on: "{{ state_attr('binary_sensor.hot_water_heating_active', 'report_after_relay_on') }}"
+
+      - name: Energy Optimizer Readiness
+        unique_id: energy_optimizer_readiness
+        icon: mdi:shield-home
+        state: >-
+          {% set actuator = states('input_text.energy_optimizer_actuator_status') %}
+          {% set fields = actuator.split(' | ') %}
+          {% set expected_mode = state_attr('sensor.energy_optimizer_plan', 'battery_mode') | default('', true) %}
+          {% set confirmation_pending = fields | count >= 3
+             and fields[0] in ['requested', 'applied', 'confirmed_direction']
+             and fields[1] == states('sensor.energy_optimizer_plan')
+             and ('mode=' ~ expected_mode) in fields
+             and as_timestamp(now()) - as_timestamp(
+               states['input_text.energy_optimizer_actuator_status'].last_reported, 0
+             ) <= 60 %}
+          {% if not is_state('input_boolean.energy_optimizer_production_expected', 'on') %}
+            standby
+          {% elif is_state('input_boolean.energy_optimizer_manual_override', 'on') %}
+            manual_override
+          {% elif not is_state('binary_sensor.energy_optimizer_saj_control_contract_ready', 'on') %}
+            saj_control_contract_missing
+          {% elif not is_state('binary_sensor.energy_optimizer_core_telemetry_fresh', 'on') %}
+            telemetry_stale
+          {% elif not is_state('binary_sensor.energy_optimizer_plan_fresh', 'on') %}
+            plan_stale
+          {% elif not is_state('binary_sensor.energy_optimizer_actuator_current_plan', 'on') %}
+            actuator_stale_or_wrong_plan
+          {% elif not is_state('input_select.energy_optimizer_mode', 'Active') %}
+            awaiting_active_mode
+          {% elif not is_state('sensor.energy_optimizer_status', 'active') %}
+            awaiting_active_plan
+          {% elif not is_state('input_boolean.energy_optimizer_rollout_approved', 'on')
+               or not is_state('input_boolean.energy_optimizer_battery_control', 'on')
+               or not is_state('input_boolean.energy_optimizer_hot_water_control', 'on') %}
+            gates_incomplete
+          {% elif states('input_text.energy_optimizer_actuator_status') in
+               ['unknown', 'unavailable', 'not_installed', ''] %}
+            actuator_unavailable
+          {% elif confirmation_pending %}
+            actuator_confirmation_pending
+          {% elif not is_state('binary_sensor.energy_optimizer_actuation_ready', 'on') %}
+            actuator_not_confirmed_for_plan_mode
+          {% else %}
+            ready
+          {% endif %}
+        attributes:
+          production_expected: "{{ states('input_boolean.energy_optimizer_production_expected') }}"
+          mode: "{{ states('input_select.energy_optimizer_mode') }}"
+          status: "{{ states('sensor.energy_optimizer_status') }}"
+          plan_fresh: "{{ states('binary_sensor.energy_optimizer_plan_fresh') }}"
+          telemetry_fresh: "{{ states('binary_sensor.energy_optimizer_core_telemetry_fresh') }}"
+          saj_control_contract: "{{ states('binary_sensor.energy_optimizer_saj_control_contract_ready') }}"
+          actuator_current_plan: "{{ states('binary_sensor.energy_optimizer_actuator_current_plan') }}"
+          actuator: "{{ states('input_text.energy_optimizer_actuator_status') }}"
+
+      - name: Energy Optimizer Hot Water Source
+        unique_id: energy_optimizer_hot_water_source
+        icon: mdi:water-boiler
+        availability: >-
+          {% set unit = state_attr('sensor.energy_optimizer_hot_water_confirmed_power', 'unit_of_measurement') | default('', true) | lower %}
+          {% set battery_unit = state_attr('sensor.saj_battery_power', 'unit_of_measurement') | default('', true) | lower %}
+          {% set grid_unit = state_attr('sensor.saj_meter_a_real_power_total', 'unit_of_measurement') | default('', true) | lower %}
+          {{ states('binary_sensor.hot_water_heating_active') in ['on', 'off']
+             and has_value('sensor.energy_optimizer_hot_water_confirmed_power')
+             and unit in ['w', 'kw']
+             and has_value('sensor.saj_battery_power')
+             and battery_unit in ['w', 'kw']
+             and has_value('sensor.saj_meter_a_real_power_total')
+             and grid_unit in ['w', 'kw']
+             and is_state('binary_sensor.energy_optimizer_core_telemetry_fresh', 'on')
+             and as_timestamp(now()) - as_timestamp(
+               states['sensor.energy_optimizer_hot_water_confirmed_power'].last_reported, 0
+             ) <= 330 }}
+        state: >-
+          {% set raw_hw = states('sensor.energy_optimizer_hot_water_confirmed_power') | float(0) %}
+          {% set hw_unit = state_attr('sensor.energy_optimizer_hot_water_confirmed_power', 'unit_of_measurement') | lower %}
+          {% set hw_kw = raw_hw / 1000 if hw_unit == 'w' else raw_hw %}
+          {% set battery_raw = states('sensor.saj_battery_power') | float(0) %}
+          {% set battery_unit = state_attr('sensor.saj_battery_power', 'unit_of_measurement') | lower %}
+          {% set battery_kw = battery_raw / 1000 if battery_unit == 'w' else battery_raw %}
+          {% set grid_raw = states('sensor.saj_meter_a_real_power_total') | float(0) %}
+          {% set grid_unit = state_attr('sensor.saj_meter_a_real_power_total', 'unit_of_measurement') | lower %}
+          {% set grid_kw = grid_raw / 1000 if grid_unit == 'w' else grid_raw %}
+          {% set mode = state_attr('sensor.energy_optimizer_hot_water', 'control_mode') | default('off', true) %}
+          {% if not is_state('binary_sensor.hot_water_heating_active', 'on') or hw_kw < 0.3 %}
+            off
+          {% elif mode == 'service_rescue' and grid_kw > 0.3 %}
+            grid
+          {% elif mode == 'service_rescue' %}
+            rescue_source_violation
+          {% elif mode == 'solar_surplus' and grid_kw <= 0.3 %}
+            solar
+          {% elif mode == 'solar_surplus' %}
+            solar_source_violation
+          {% elif grid_kw > 0.3 %}
+            grid
+          {% else %}
+            solar
+          {% endif %}
+        attributes:
+          element_kw: >-
+            {% set raw = states('sensor.energy_optimizer_hot_water_confirmed_power') | float(0) %}
+            {% set unit = state_attr('sensor.energy_optimizer_hot_water_confirmed_power', 'unit_of_measurement') | lower %}
+            {{ (raw / 1000 if unit == 'w' else raw) | round(2) }}
+          battery_discharge_kw: >-
+            {% set raw = states('sensor.saj_battery_power') | float(0) %}
+            {% set unit = state_attr('sensor.saj_battery_power', 'unit_of_measurement') | lower %}
+            {{ [0, raw / 1000 if unit == 'w' else raw] | max | round(2) }}
+          grid_import_kw: >-
+            {% set raw = states('sensor.saj_meter_a_real_power_total') | float(0) %}
+            {% set unit = state_attr('sensor.saj_meter_a_real_power_total', 'unit_of_measurement') | lower %}
+            {{ [0, raw / 1000 if unit == 'w' else raw] | max | round(2) }}
+          control_mode: "{{ state_attr('sensor.energy_optimizer_hot_water', 'control_mode') | default('unknown', true) }}"
+
+      - name: Energy Optimizer Hot Water Outcome
+        unique_id: energy_optimizer_hot_water_outcome
+        icon: mdi:water-check
+        availability: >-
+          {{ has_value('sensor.hot_water_confirmed_runtime_today')
+             and states('binary_sensor.hot_water_heating_active') in ['on', 'off'] }}
+        state: >-
+          {% set runtime = states('sensor.hot_water_confirmed_runtime_today') | float(0) %}
+          {% if is_state('binary_sensor.energy_optimizer_hot_water_service_complete', 'on') %}
+            complete
+          {% elif as_timestamp(now()) >= as_timestamp(today_at('16:00')) %}
+            overdue
+          {% elif is_state('input_boolean.energy_optimizer_hot_water_service_rescue', 'on')
+               and is_state('binary_sensor.hot_water_heating_active', 'on') %}
+            heating_service_rescue
+          {% elif is_state('binary_sensor.hot_water_heating_active', 'on') %}
+            heating
+          {% elif states('input_text.energy_optimizer_hot_water_status').startswith('blocked') %}
+            blocked
+          {% elif is_state('sensor.energy_optimizer_hot_water', 'on') %}
+            scheduled
+          {% else %}
+            pending
+          {% endif %}
+        attributes:
+          confirmed_runtime_hours: "{{ states('sensor.hot_water_confirmed_runtime_today') | float(0) | round(2) }}"
+          remaining_hours: "{{ [0, 3 - states('sensor.hot_water_confirmed_runtime_today') | float(0)] | max | round(2) }}"
+          deadline: "{{ today_at('16:00').isoformat() }}"
+          governor_status: "{{ states('input_text.energy_optimizer_hot_water_status') }}"
+          completion_basis: "{{ state_attr('binary_sensor.energy_optimizer_hot_water_service_complete', 'completion_basis') | default('incomplete', true) }}"
+
+      - name: Energy Optimizer EV Source
+        unique_id: energy_optimizer_ev_source
+        icon: mdi:car-electric
+        availability: >-
+          {% set battery_unit = state_attr('sensor.saj_battery_power', 'unit_of_measurement') | default('', true) | lower %}
+          {% set grid_unit = state_attr('sensor.saj_meter_a_real_power_total', 'unit_of_measurement') | default('', true) | lower %}
+          {% set ble_unit = state_attr('sensor.tesla_ble_charge_power', 'unit_of_measurement') | default('', true) | lower %}
+          {% set ble_age = as_timestamp(now()) - as_timestamp(states['sensor.tesla_ble_charge_power'].last_reported, 0)
+             if has_value('sensor.tesla_ble_charge_power') else 999999 %}
+          {% set wall_unit = state_attr('sensor.tesla_wall_connector_total_power', 'unit_of_measurement') | default('', true) | lower %}
+          {% set wall_age = as_timestamp(now()) - as_timestamp(states['sensor.tesla_wall_connector_total_power'].last_reported, 0)
+             if has_value('sensor.tesla_wall_connector_total_power') else 999999 %}
+          {{ has_value('sensor.saj_battery_power')
+             and battery_unit in ['w', 'kw']
+             and has_value('sensor.saj_meter_a_real_power_total')
+             and grid_unit in ['w', 'kw']
+             and is_state('binary_sensor.energy_optimizer_core_telemetry_fresh', 'on')
+             and is_state('binary_sensor.energy_optimizer_ev_local_link_fresh', 'on')
+             and ((has_value('sensor.tesla_wall_connector_total_power')
+                   and wall_unit in ['w', 'kw'] and wall_age >= -60 and wall_age <= 120)
+                  or (has_value('sensor.tesla_ble_charge_power') and ble_unit in ['w', 'kw'])) }}
+        state: >-
+          {% set ble_raw = states('sensor.tesla_ble_charge_power') | float(0) %}
+          {% set ble_unit = state_attr('sensor.tesla_ble_charge_power', 'unit_of_measurement') | default('', true) | lower %}
+          {% set ble_kw = ble_raw / 1000 if ble_unit == 'w' else ble_raw if ble_unit == 'kw' else 0 %}
+          {% set wall_raw = states('sensor.tesla_wall_connector_total_power') | float(0) %}
+          {% set wall_unit = state_attr('sensor.tesla_wall_connector_total_power', 'unit_of_measurement') | default('', true) | lower %}
+          {% set wall_age = as_timestamp(now()) - as_timestamp(states['sensor.tesla_wall_connector_total_power'].last_reported, 0)
+             if has_value('sensor.tesla_wall_connector_total_power') else 999999 %}
+          {% set wall_kw = wall_raw / 1000 if wall_unit == 'w' else wall_raw if wall_unit == 'kw' else 0 %}
+          {% set ev_kw = wall_kw if wall_age >= -60 and wall_age <= 120 else ble_kw %}
+          {% set battery_raw = states('sensor.saj_battery_power') | float(0) %}
+          {% set battery_unit = state_attr('sensor.saj_battery_power', 'unit_of_measurement') | lower %}
+          {% set battery_kw = battery_raw / 1000 if battery_unit == 'w' else battery_raw %}
+          {% set grid_raw = states('sensor.saj_meter_a_real_power_total') | float(0) %}
+          {% set grid_unit = state_attr('sensor.saj_meter_a_real_power_total', 'unit_of_measurement') | lower %}
+          {% set grid_kw = grid_raw / 1000 if grid_unit == 'w' else grid_raw %}
+          {% if ev_kw < 0.5 %}
+            off
+          {% elif battery_kw > 0.3 %}
+            battery
+          {% elif grid_kw > 0.3 %}
+            grid
+          {% else %}
+            solar
+          {% endif %}
+        attributes:
+          charging_kw: >-
+            {% set ble_raw = states('sensor.tesla_ble_charge_power') | float(0) %}
+            {% set ble_unit = state_attr('sensor.tesla_ble_charge_power', 'unit_of_measurement') | default('', true) | lower %}
+            {% set ble_kw = ble_raw / 1000 if ble_unit == 'w' else ble_raw if ble_unit == 'kw' else 0 %}
+            {% set wall_raw = states('sensor.tesla_wall_connector_total_power') | float(0) %}
+            {% set wall_unit = state_attr('sensor.tesla_wall_connector_total_power', 'unit_of_measurement') | default('', true) | lower %}
+            {% set wall_age = as_timestamp(now()) - as_timestamp(states['sensor.tesla_wall_connector_total_power'].last_reported, 0)
+               if has_value('sensor.tesla_wall_connector_total_power') else 999999 %}
+            {% set wall_kw = wall_raw / 1000 if wall_unit == 'w' else wall_raw if wall_unit == 'kw' else 0 %}
+            {{ (wall_kw if wall_age >= -60 and wall_age <= 120 else ble_kw) | round(2) }}
+          battery_discharge_kw: >-
+            {% set raw = states('sensor.saj_battery_power') | float(0) %}
+            {% set unit = state_attr('sensor.saj_battery_power', 'unit_of_measurement') | lower %}
+            {{ [0, raw / 1000 if unit == 'w' else raw] | max | round(2) }}
+          grid_import_kw: >-
+            {% set raw = states('sensor.saj_meter_a_real_power_total') | float(0) %}
+            {% set unit = state_attr('sensor.saj_meter_a_real_power_total', 'unit_of_measurement') | lower %}
+            {{ [0, raw / 1000 if unit == 'w' else raw] | max | round(2) }}
+
+      - name: Energy Optimizer EV Outcome
+        unique_id: energy_optimizer_ev_outcome
+        icon: mdi:car-clock
+        state: >-
+          {% if not is_state('binary_sensor.energy_optimizer_ev_local_link_fresh', 'on') %}
+            local_link_stale
+          {% elif is_state('binary_sensor.energy_optimizer_ev_battery_violation', 'on') %}
+            blocked_battery_draw
+          {% elif states('sensor.energy_optimizer_ev_source') in ['solar', 'grid', 'battery'] %}
+            charging
+          {% elif is_state('switch.jarvis_charge', 'on') %}
+            enabled_waiting_for_power
+          {% elif states('input_text.energy_optimizer_ev_actuator_status').startswith('blocked') %}
+            blocked
+          {% elif is_state('sensor.energy_optimizer_ev', 'charge') %}
+            scheduled
+          {% else %}
+            idle
+          {% endif %}
+        attributes:
+          actuator_status: "{{ states('input_text.energy_optimizer_ev_actuator_status') }}"
+          local_link_fresh: "{{ states('binary_sensor.energy_optimizer_ev_local_link_fresh') }}"
+          source: "{{ states('sensor.energy_optimizer_ev_source') }}"

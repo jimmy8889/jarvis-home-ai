@@ -93,29 +93,64 @@ def build_dispatch_grid(
     return result
 
 
-def _price_points(entity: dict[str, Any], timezone: ZoneInfo) -> list[tuple[datetime, float]]:
+PricePoint = tuple[datetime, datetime, float]
+
+
+def _price_points(entity: dict[str, Any], timezone: ZoneInfo) -> list[PricePoint]:
     attrs = entity.get("attributes", {})
     if not isinstance(attrs, dict):
         return []
     raw = attrs.get("forecast") or attrs.get("forecasts") or attrs.get("chartForecast") or []
     if not isinstance(raw, list):
         return []
-    points: list[tuple[datetime, float]] = []
+    pending: list[tuple[datetime, datetime | None, float]] = []
     for item in raw:
         if not isinstance(item, dict):
             continue
         when = parse_datetime(
-            item.get("time") or item.get("x") or item.get("start_time") or item.get("nem_date"),
+            item.get("start_time")
+            or item.get("startTime")
+            or item.get("time")
+            or item.get("x")
+            or item.get("nem_date"),
             timezone,
         )
+        end = parse_datetime(item.get("end_time") or item.get("endTime"), timezone)
+        if when and (end is None or end <= when):
+            try:
+                duration_minutes = float(item.get("duration"))
+            except (TypeError, ValueError):
+                duration_minutes = 0.0
+            if math.isfinite(duration_minutes) and 0 < duration_minutes <= 24 * 60:
+                end = when + timedelta(minutes=duration_minutes)
         price_raw = item.get("value", item.get("y", item.get("per_kwh", item.get("price"))))
         try:
             price = float(price_raw)
         except (TypeError, ValueError):
             continue
         if when and math.isfinite(price):
-            points.append((when, price))
-    points.sort(key=lambda item: item[0])
+            pending.append((when, end, price))
+    pending.sort(key=lambda item: item[0])
+    # Deduplicate provider payloads that repeat the same settlement interval.
+    unique = {item[0]: item for item in pending}
+    ordered = [unique[key] for key in sorted(unique)]
+    points: list[PricePoint] = []
+    previous_duration = timedelta(minutes=5)
+    for index, (start, explicit_end, price) in enumerate(ordered):
+        next_start = ordered[index + 1][0] if index + 1 < len(ordered) else None
+        end = explicit_end
+        if end is None and next_start is not None and next_start > start:
+            end = next_start
+        if end is None:
+            end = start + previous_duration
+        if next_start is not None:
+            # Never let a malformed duration overlap and double-weight the next
+            # settlement interval.
+            end = min(end, next_start)
+        if end <= start:
+            continue
+        previous_duration = end - start
+        points.append((start, end, price))
     return points
 
 
@@ -223,7 +258,7 @@ def _fallback_price(when: datetime, *, export: bool) -> float:
 
 
 def _sample_price(
-    points: list[tuple[datetime, float]],
+    points: list[PricePoint],
     when: datetime,
     *,
     export: bool,
@@ -231,24 +266,58 @@ def _sample_price(
     if points:
         times = [item[0] for item in points]
         index = bisect_right(times, when) - 1
-        if index >= 0 and when - times[index] <= timedelta(minutes=35):
-            return points[index][1], "amber"
+        if index >= 0 and points[index][0] <= when < points[index][1]:
+            return points[index][2], "amber"
+        if index >= 0 and when - points[index][1] <= timedelta(minutes=35):
+            return points[index][2], "amber"
         future = index + 1
         if 0 <= future < len(points) and times[future] - when <= timedelta(minutes=15):
-            return points[future][1], "amber"
+            return points[future][2], "amber"
     return _fallback_price(when, export=export), "historical_fallback"
 
 
 def _slot_price(
-    points: list[tuple[datetime, float]],
+    points: list[PricePoint],
     when: datetime,
     duration: timedelta,
     *,
     export: bool,
 ) -> tuple[float, str]:
-    within = [price for timestamp, price in points if when <= timestamp < when + duration]
-    if within:
-        return sum(within) / len(within), "amber"
+    slot_end = when + duration
+    weighted_price = 0.0
+    covered_seconds = 0.0
+    overlaps: list[tuple[datetime, datetime, float]] = []
+    for start, end, price in points:
+        overlap_start = max(when, start)
+        overlap_end = min(slot_end, end)
+        overlap_seconds = max(0.0, (overlap_end - overlap_start).total_seconds())
+        if overlap_seconds <= 0:
+            continue
+        overlaps.append((overlap_start, overlap_end, price))
+    cursor = when
+    used_fallback = False
+    for overlap_start, overlap_end, price in sorted(overlaps):
+        if overlap_start > cursor:
+            gap_seconds = (overlap_start - cursor).total_seconds()
+            weighted_price += _fallback_price(cursor, export=export) * gap_seconds
+            used_fallback = True
+        segment_start = max(cursor, overlap_start)
+        if overlap_end <= segment_start:
+            continue
+        overlap_seconds = (overlap_end - segment_start).total_seconds()
+        weighted_price += price * overlap_seconds
+        covered_seconds += overlap_seconds
+        cursor = overlap_end
+    if overlaps and cursor < slot_end:
+        gap_seconds = (slot_end - cursor).total_seconds()
+        weighted_price += _fallback_price(cursor, export=export) * gap_seconds
+        used_fallback = True
+    if covered_seconds > 0:
+        total_seconds = duration.total_seconds()
+        return (
+            weighted_price / max(total_seconds, 1.0),
+            "partial_amber_fallback" if used_fallback else "amber",
+        )
     return _sample_price(points, when, export=export)
 
 

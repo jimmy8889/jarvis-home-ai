@@ -1,0 +1,71 @@
+#!/usr/bin/env bash
+# Root-only: compare production model contexts, then restore llama-35b.service.
+set -uo pipefail
+
+LAB_HOME=/home/jameshazell/pilot-model-lab
+RUNTIME=/opt/llama-35b/bin/llama-server
+MODEL=/srv/models/llama-35b/Qwen3.6-35B-A3B-UD-IQ4_NL.gguf
+RESULTS="$LAB_HOME/results/context-windows"
+LOGS="$LAB_HOME/logs/context-windows"
+CONTEXTS=(8192 16384 32768 65536 131072)
+[[ $# -gt 0 ]] && CONTEXTS=("$@")
+mkdir -p "$RESULTS" "$LOGS"
+chown -R jameshazell:jameshazell "$RESULTS" "$LOGS"
+chmod 0755 "$RESULTS" "$LOGS"
+
+restore() {
+  systemctl start llama-35b || true
+}
+cleanup_server() {
+  if [[ -n ${server_pid:-} ]]; then
+    kill -- -"$server_pid" 2>/dev/null || true
+    wait "$server_pid" 2>/dev/null || true
+    unset server_pid
+  fi
+  for _ in $(seq 1 30); do
+    used="$(nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits | head -n1 | tr -dc '0-9')"
+    [[ -n "$used" && "$used" -le 512 ]] && return
+    sleep 1
+  done
+}
+trap 'cleanup_server; restore' EXIT INT TERM
+
+systemctl stop llama-35b
+cleanup_server
+
+for context in "${CONTEXTS[@]}"; do
+  output="$RESULTS/${context}.json"
+  telemetry="$RESULTS/${context}-gpu.csv"
+  log="$LOGS/${context}.log"
+  echo "=== context=$context $(date -Is) ==="
+  setsid runuser -u jameshazell -- env HOME=/home/jameshazell \
+    "$RUNTIME" --model "$MODEL" --alias primary --host 127.0.0.1 --port 8081 \
+    --ctx-size "$context" --gpu-layers 99 --flash-attn on --parallel 1 \
+    --spec-type draft-mtp --spec-draft-n-max 2 >"$log" 2>&1 &
+  server_pid=$!
+
+  healthy=false
+  for _ in $(seq 1 180); do
+    if curl --fail --silent http://127.0.0.1:8081/health >/dev/null; then
+      healthy=true
+      break
+    fi
+    if ! kill -0 "$server_pid" 2>/dev/null; then
+      break
+    fi
+    sleep 1
+  done
+  if [[ $healthy != true ]]; then
+    printf '{"configured_context_tokens":%s,"error":"server failed to initialise; see %s"}\n' "$context" "$log" >"$output"
+    echo "context=$context server-start-failed"
+    cleanup_server
+    continue
+  fi
+
+  nvidia-smi --query-gpu=name,memory.used,memory.total,utilization.gpu,temperature.gpu,power.draw --format=csv >"$telemetry"
+  runuser -u jameshazell -- env HOME=/home/jameshazell \
+    python3 "$LAB_HOME/context_window_benchmark.py" --url http://127.0.0.1:8081/v1 \
+    --model primary --context-size "$context" --output "$output" || true
+  nvidia-smi --query-gpu=name,memory.used,memory.total,utilization.gpu,temperature.gpu,power.draw --format=csv >>"$telemetry"
+  cleanup_server
+done

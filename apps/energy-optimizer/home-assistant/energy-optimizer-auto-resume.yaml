@@ -1,0 +1,386 @@
+- id: energy_optimizer_validated_auto_resume
+  alias: Energy Optimizer - Validated Production Auto Resume
+  description: >-
+    Restores production only when the persistent production-expected latch is on,
+    manual override is clear, the committed schema-v2 plan and core telemetry are
+    fresh, and the guarded actuator is available. Active mode is selected last;
+    failure to receive a matching active plan rolls every production gate back to
+    Shadow for a later retry.
+  triggers:
+    - trigger: homeassistant
+      event: start
+      id: startup
+    - trigger: state
+      entity_id: input_boolean.energy_optimizer_production_expected
+      id: production_intent
+    - trigger: state
+      entity_id: input_boolean.energy_optimizer_manual_override
+      id: manual_override
+    - trigger: state
+      entity_id:
+        - binary_sensor.energy_optimizer_plan_fresh
+        - binary_sensor.energy_optimizer_core_telemetry_fresh
+        - binary_sensor.energy_optimizer_saj_control_contract_ready
+        - binary_sensor.energy_optimizer_actuator_current_plan
+      to: "on"
+      id: health_recovered
+    - trigger: time_pattern
+      minutes: /5
+      id: watchdog
+  conditions: []
+  actions:
+    - choose:
+        - conditions:
+            - condition: template
+              value_template: "{{ trigger is defined and trigger.id == 'startup' }}"
+          sequence:
+            - action: input_datetime.set_datetime
+              target:
+                entity_id: input_datetime.energy_optimizer_home_assistant_started
+              data:
+                datetime: "{{ now().strftime('%Y-%m-%d %H:%M:%S') }}"
+            - action: input_boolean.turn_off
+              target:
+                entity_id:
+                  - input_boolean.energy_optimizer_rollout_approved
+                  - input_boolean.energy_optimizer_battery_control
+                  - input_boolean.energy_optimizer_hot_water_control
+                  - input_boolean.energy_optimizer_ev_auto
+                  - input_boolean.energy_optimizer_hot_water_service_rescue
+            - action: input_select.select_option
+              target:
+                entity_id: input_select.energy_optimizer_mode
+              data:
+                option: Shadow
+            - delay: "00:00:20"
+    - choose:
+        - conditions:
+            - condition: state
+              entity_id: input_boolean.energy_optimizer_production_expected
+              state: "off"
+          sequence:
+            - action: input_boolean.turn_off
+              target:
+                entity_id:
+                  - input_boolean.energy_optimizer_rollout_approved
+                  - input_boolean.energy_optimizer_battery_control
+                  - input_boolean.energy_optimizer_hot_water_control
+                  - input_boolean.energy_optimizer_ev_auto
+                  - input_boolean.energy_optimizer_hot_water_service_rescue
+            - action: input_select.select_option
+              target:
+                entity_id: input_select.energy_optimizer_mode
+              data:
+                option: Disabled
+            - action: input_text.set_value
+              target:
+                entity_id: input_text.energy_optimizer_auto_resume_status
+              data:
+                value: standby | production not expected
+            - stop: Production is not expected
+        - conditions:
+            - condition: state
+              entity_id: input_boolean.energy_optimizer_manual_override
+              state: "on"
+          sequence:
+            - action: input_boolean.turn_off
+              target:
+                entity_id:
+                  - input_boolean.energy_optimizer_rollout_approved
+                  - input_boolean.energy_optimizer_battery_control
+                  - input_boolean.energy_optimizer_hot_water_control
+                  - input_boolean.energy_optimizer_ev_auto
+                  - input_boolean.energy_optimizer_hot_water_service_rescue
+            - action: input_select.select_option
+              target:
+                entity_id: input_select.energy_optimizer_mode
+              data:
+                option: Shadow
+            - action: input_text.set_value
+              target:
+                entity_id: input_text.energy_optimizer_auto_resume_status
+              data:
+                value: paused | manual override
+            - stop: Manual override is active
+        - conditions:
+            - condition: state
+              entity_id: input_boolean.energy_optimizer_production_expected
+              state: "on"
+            - condition: state
+              entity_id: input_boolean.energy_optimizer_manual_override
+              state: "off"
+            - condition: state
+              entity_id: input_select.energy_optimizer_mode
+              state: Active
+            - condition: state
+              entity_id: input_boolean.energy_optimizer_rollout_approved
+              state: "on"
+            - condition: state
+              entity_id: input_boolean.energy_optimizer_battery_control
+              state: "on"
+            - condition: state
+              entity_id: input_boolean.energy_optimizer_hot_water_control
+              state: "on"
+            - condition: state
+              entity_id: input_boolean.energy_optimizer_ev_auto
+              state: "on"
+          sequence:
+            - action: input_text.set_value
+              target:
+                entity_id: input_text.energy_optimizer_auto_resume_status
+              data:
+                value: >-
+                  ready | {{ states('sensor.energy_optimizer_plan') }} | production already active
+            - stop: Production is already active; do not replay the arming sequence
+    - action: input_text.set_value
+      target:
+        entity_id: input_text.energy_optimizer_auto_resume_status
+      data:
+        value: validating | waiting for fresh plan, telemetry and actuator
+    - wait_template: >-
+        {{ is_state('input_boolean.energy_optimizer_production_expected', 'on')
+           and is_state('input_boolean.energy_optimizer_manual_override', 'off')
+           and is_state('binary_sensor.energy_optimizer_saj_control_contract_ready', 'on')
+           and is_state('binary_sensor.energy_optimizer_plan_fresh', 'on')
+           and is_state('binary_sensor.energy_optimizer_core_telemetry_fresh', 'on')
+           and is_state('binary_sensor.energy_optimizer_actuator_current_plan', 'on') }}
+      timeout: "00:04:30"
+      continue_on_timeout: true
+    - choose:
+        - conditions:
+            - condition: template
+              value_template: "{{ not wait.completed }}"
+          sequence:
+            - action: input_boolean.turn_off
+              target:
+                entity_id:
+                  - input_boolean.energy_optimizer_rollout_approved
+                  - input_boolean.energy_optimizer_battery_control
+                  - input_boolean.energy_optimizer_hot_water_control
+                  - input_boolean.energy_optimizer_ev_auto
+                  - input_boolean.energy_optimizer_hot_water_service_rescue
+            - action: input_select.select_option
+              target:
+                entity_id: input_select.energy_optimizer_mode
+              data:
+                option: Shadow
+            - action: input_text.set_value
+              target:
+                entity_id: input_text.energy_optimizer_auto_resume_status
+              data:
+                value: blocked | preflight health timeout; retrying in five minutes
+            - stop: Production preflight did not become healthy
+    - action: input_number.set_value
+      target:
+        entity_id: input_number.energy_optimizer_max_discharge_kw
+      data:
+        value: 28
+    - action: input_boolean.turn_on
+      target:
+        entity_id:
+          - input_boolean.energy_optimizer_rollout_approved
+          - input_boolean.energy_optimizer_battery_control
+          - input_boolean.energy_optimizer_hot_water_control
+          - input_boolean.energy_optimizer_ev_auto
+    - action: input_select.select_option
+      target:
+        entity_id: input_select.energy_optimizer_mode
+      data:
+        option: Active
+    - action: input_text.set_value
+      target:
+        entity_id: input_text.energy_optimizer_auto_resume_status
+      data:
+        value: arming | waiting for matching active plan
+    - wait_template: >-
+        {% set actuator = states('input_text.energy_optimizer_actuator_status') %}
+        {% set actuator_fields = actuator.split(' | ') %}
+        {% set expected_mode = state_attr('sensor.energy_optimizer_plan', 'battery_mode') | default('', true) %}
+        {{ is_state('input_boolean.energy_optimizer_production_expected', 'on')
+           and is_state('input_boolean.energy_optimizer_manual_override', 'off')
+           and is_state('sensor.energy_optimizer_status', 'active')
+           and is_state('binary_sensor.energy_optimizer_saj_control_contract_ready', 'on')
+           and is_state('binary_sensor.energy_optimizer_plan_fresh', 'on')
+           and is_state('binary_sensor.energy_optimizer_core_telemetry_fresh', 'on')
+           and state_attr('sensor.energy_optimizer_plan', 'actuation_allowed') == true
+           and is_state('binary_sensor.energy_optimizer_actuator_current_plan', 'on')
+           and actuator_fields | count >= 3
+           and actuator_fields[0] in ['feedback_confirmed', 'semantic_noop_confirmed']
+           and expected_mode in ['hold', 'self_consume', 'pv_charge', 'grid_charge', 'export']
+           and ('mode=' ~ expected_mode) in actuator_fields }}
+      timeout: "00:02:00"
+      continue_on_timeout: true
+    - choose:
+        - conditions:
+            - condition: template
+              value_template: "{{ wait.completed }}"
+          sequence:
+            - action: input_datetime.set_datetime
+              target:
+                entity_id: input_datetime.energy_optimizer_last_auto_resume
+              data:
+                datetime: "{{ now().strftime('%Y-%m-%d %H:%M:%S') }}"
+            - action: input_text.set_value
+              target:
+                entity_id: input_text.energy_optimizer_auto_resume_status
+              data:
+                value: >-
+                  ready | {{ states('sensor.energy_optimizer_plan') }} | production restored
+      default:
+        - action: input_boolean.turn_off
+          target:
+            entity_id:
+              - input_boolean.energy_optimizer_rollout_approved
+              - input_boolean.energy_optimizer_battery_control
+              - input_boolean.energy_optimizer_hot_water_control
+              - input_boolean.energy_optimizer_ev_auto
+              - input_boolean.energy_optimizer_hot_water_service_rescue
+        - action: input_select.select_option
+          target:
+            entity_id: input_select.energy_optimizer_mode
+          data:
+            option: Shadow
+        - action: input_text.set_value
+          target:
+            entity_id: input_text.energy_optimizer_auto_resume_status
+          data:
+            value: blocked | active schema-v2 plan did not arrive; rolled back
+  mode: restart
+  max_exceeded: silent
+
+- id: energy_optimizer_saj_control_readback_refresh
+  alias: Energy Optimizer - Refresh SAJ Control Readbacks
+  description: >-
+    Refresh the two independent SAJ control sensors after their optimistic
+    writable numbers change. The custom integration does not otherwise poll
+    these configuration registers continuously, so this provides physical
+    readback evidence without writing another inverter setting.
+  triggers:
+    - trigger: state
+      entity_id:
+        - number.saj_battery_on_grid_discharge_depth_input
+        - number.saj_battery_discharge_power_limit_input
+      id: control_changed
+    - trigger: homeassistant
+      event: start
+      id: startup
+  conditions: []
+  actions:
+    - delay: "00:00:03"
+    - action: homeassistant.update_entity
+      target:
+        entity_id:
+          - sensor.saj_battery_on_grid_discharge_depth
+          - sensor.saj_battery_discharge_power_limit
+  mode: restart
+  max_exceeded: silent
+
+- id: energy_optimizer_saj_control_contract_guard
+  alias: Energy Optimizer - SAJ Control Contract Guard
+  description: >-
+    Fails closed if a HACS integration change removes any SAJ entity required by
+    the sole Node-RED inverter actuator. A missing input, switch or reserve readback turns
+    on manual override, disarms all controls, retains production intent for
+    diagnosis, and requires a person to clear the override after recovery. Both
+    independent readback sensors must be enabled in the entity registry.
+  triggers:
+    - trigger: homeassistant
+      event: start
+      id: startup
+    - trigger: state
+      entity_id:
+        - binary_sensor.energy_optimizer_saj_control_contract_ready
+        - number.saj_anti_reflux_mode_input
+        - number.saj_export_limit_input
+        - number.saj_grid_max_discharge_power_input
+        - number.saj_battery_on_grid_discharge_depth_input
+        - sensor.saj_battery_on_grid_discharge_depth
+        - switch.saj_charging_control
+        - switch.saj_discharging_control
+        - number.saj_charge1_power_percent_input
+        - number.saj_discharge1_power_percent_input
+        - number.saj_battery_charge_power_limit_input
+        - number.saj_battery_discharge_power_limit_input
+        - sensor.saj_battery_discharge_power_limit
+        - input_boolean.energy_optimizer_manual_override
+      id: contract_drift
+    - trigger: time_pattern
+      minutes: /1
+      id: watchdog
+  conditions: []
+  actions:
+    - if:
+        - condition: template
+          value_template: "{{ trigger is defined and trigger.id == 'startup' }}"
+      then:
+        - delay: "00:00:20"
+    - choose:
+        - conditions:
+            - condition: template
+              value_template: >-
+                {{ not is_state('binary_sensor.energy_optimizer_saj_control_contract_ready', 'on') }}
+          sequence:
+            - action: input_boolean.turn_on
+              target:
+                entity_id: input_boolean.energy_optimizer_manual_override
+            - action: input_boolean.turn_off
+              target:
+                entity_id:
+                  - input_boolean.energy_optimizer_rollout_approved
+                  - input_boolean.energy_optimizer_battery_control
+                  - input_boolean.energy_optimizer_hot_water_control
+                  - input_boolean.energy_optimizer_ev_auto
+                  - input_boolean.energy_optimizer_hot_water_service_rescue
+            - action: input_select.select_option
+              target:
+                entity_id: input_select.energy_optimizer_mode
+              data:
+                option: Shadow
+            - action: input_text.set_value
+              target:
+                entity_id: input_text.energy_optimizer_auto_resume_status
+              data:
+                value: blocked | required SAJ control entity unavailable; manual approval required
+            - if:
+                - condition: state
+                  entity_id: input_boolean.energy_optimizer_alert_saj_contract_active
+                  state: "off"
+              then:
+                - action: input_boolean.turn_on
+                  target:
+                    entity_id: input_boolean.energy_optimizer_alert_saj_contract_active
+                - action: notify.mobile_app_iphone
+                  data:
+                    title: Energy optimiser safely disarmed
+                    message: >-
+                      A required SAJ control entity is unavailable. Manual override
+                      is now on and all automatic controls are off. Missing:
+                      {{ state_attr('binary_sensor.energy_optimizer_saj_control_contract_ready', 'missing_entities') }}.
+                      Check the SAJ HACS integration before clearing override.
+                    data:
+                      tag: energy-optimizer-saj-contract
+                      push:
+                        sound:
+                          name: default
+                          critical: 1
+                          volume: 1.0
+            - stop: Missing SAJ control entity; production remains disarmed
+        - conditions:
+            - condition: state
+              entity_id: input_boolean.energy_optimizer_alert_saj_contract_active
+              state: "on"
+          sequence:
+            - action: input_boolean.turn_off
+              target:
+                entity_id: input_boolean.energy_optimizer_alert_saj_contract_active
+            - action: notify.mobile_app_iphone
+              data:
+                title: SAJ control entities restored
+                message: >-
+                  The required SAJ control entities are available again. Manual
+                  override remains on; inspect the integration and clear it only
+                  when safe to let validated production auto-resume.
+                data:
+                  tag: energy-optimizer-saj-contract
+  mode: restart
+  max_exceeded: silent

@@ -491,7 +491,7 @@ class Integrations:
             "number": {"set_value"},
             "select": {"select_option"},
             "update": {"install"},
-            "tesla_custom": {"api"},
+            "pilot_vehicle": {"send_navigation"},
         }
         if service not in allowed.get(domain, set()):
             raise IntegrationRequestFailed("Home Assistant vehicle action is not allowed")
@@ -500,59 +500,31 @@ class Integrations:
             or not entity_id.startswith(f"{domain}.")
         ):
             raise IntegrationRequestFailed("Home Assistant vehicle entity is invalid")
-        if not entity_id and not device_id and domain != "tesla_custom":
+        if not entity_id and not device_id:
             raise IntegrationRequestFailed("Home Assistant vehicle target is missing")
         data = dict(service_data or {})
-        permitted_keys = {
-            "temperature",
-            "hvac_mode",
-            "value",
-            "option",
-            "level",
-            "command",
-            "parameters",
-        }
+        permitted_keys = (
+            {"latitude", "longitude", "order"}
+            if domain == "pilot_vehicle"
+            else {"temperature", "hvac_mode", "value", "option", "level"}
+        )
         if set(data) - permitted_keys:
             raise IntegrationRequestFailed("Home Assistant vehicle data is invalid")
-        if domain == "tesla_custom":
-            if data.get("command") != "SEND_GPS_TO_VEHICLE":
-                raise IntegrationRequestFailed("Tesla Custom command is not allowed")
-            parameters = data.get("parameters")
-            if not isinstance(parameters, dict) or set(parameters) != {
-                "path_vars",
-                "lat",
-                "lon",
-                "order",
-            }:
-                raise IntegrationRequestFailed("Tesla navigation parameters are invalid")
-            path_vars = parameters.get("path_vars")
-            if (
-                not isinstance(path_vars, dict)
-                or set(path_vars) != {"vehicle_id"}
-                or not isinstance(path_vars.get("vehicle_id"), str)
-                or not path_vars["vehicle_id"]
-                or len(path_vars["vehicle_id"]) > 64
-            ):
-                raise IntegrationRequestFailed("Tesla navigation target is invalid")
+        if domain == "pilot_vehicle":
+            if not device_id or entity_id or set(data) != permitted_keys:
+                raise IntegrationRequestFailed("Pilot navigation requires a device target")
             try:
-                latitude = float(parameters["lat"])
-                longitude = float(parameters["lon"])
+                latitude = float(data["latitude"])
+                longitude = float(data["longitude"])
             except (TypeError, ValueError) as error:
                 raise IntegrationRequestFailed(
-                    "Tesla navigation coordinates are invalid"
+                    "Pilot navigation coordinates are invalid"
                 ) from error
             if not -90 <= latitude <= 90 or not -180 <= longitude <= 180:
-                raise IntegrationRequestFailed("Tesla navigation coordinates are invalid")
-            if parameters["order"] != 0:
-                raise IntegrationRequestFailed("Tesla navigation order is invalid")
-            data["parameters"] = {
-                "path_vars": {"vehicle_id": path_vars["vehicle_id"]},
-                "lat": latitude,
-                "lon": longitude,
-                "order": 0,
-            }
-        elif "command" in data or "parameters" in data:
-            raise IntegrationRequestFailed("Home Assistant vehicle data is invalid")
+                raise IntegrationRequestFailed("Pilot navigation coordinates are invalid")
+            if data["order"] != 0:
+                raise IntegrationRequestFailed("Pilot navigation order is invalid")
+            data = {"latitude": latitude, "longitude": longitude, "order": 0}
         if not self.settings.home_assistant_url:
             raise IntegrationUnavailable("Home Assistant URL is not configured")
         token = read_secret(self.settings.home_assistant_token_env)
@@ -580,6 +552,21 @@ class Integrations:
                 if isinstance(result, dict):
                     return {"accepted": True}
                 raise ValueError("service response is not an object or array")
+        except httpx.HTTPStatusError as error:
+            detail = ""
+            try:
+                body = error.response.json()
+                if isinstance(body, dict):
+                    detail = str(body.get("message") or body.get("error") or "").strip()
+            except ValueError:
+                detail = ""
+            if domain == "pilot_vehicle" and detail:
+                raise IntegrationRequestFailed(
+                    f"Home Assistant vehicle action failed: {detail[:300]}"
+                ) from error
+            raise IntegrationRequestFailed(
+                f"Home Assistant vehicle action failed: {error}"
+            ) from error
         except (httpx.HTTPError, ValueError) as error:
             raise IntegrationRequestFailed(
                 f"Home Assistant vehicle action failed: {error}"

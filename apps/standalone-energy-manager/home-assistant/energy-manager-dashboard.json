@@ -1,0 +1,128 @@
+{
+  "title": "Home Energy",
+  "views": [
+    {
+      "title": "Energy",
+      "path": "overview",
+      "icon": "mdi:home-lightning-bolt",
+      "type": "sections",
+      "max_columns": 4,
+      "sections": [
+        {
+          "type": "grid",
+          "cards": [
+            {"type": "heading", "heading": "Right now", "icon": "mdi:home-lightning-bolt-outline"},
+            {"type": "entities", "title": "Master controls", "show_header_toggle": false, "entities": [
+              {"entity": "input_boolean.energy_manager_control_enabled", "name": "Energy automation", "icon": "mdi:home-lightning-bolt"},
+              {"entity": "input_boolean.energy_manager_hot_water_fixed_timer", "name": "Hot water enabled", "icon": "mdi:water-boiler"}
+            ], "grid_options": {"columns": 12, "rows": 3}},
+            {"type": "iframe", "url": "http://10.0.1.205:8787/?embed=flow", "aspect_ratio": "76%", "title": "Live home energy flow", "grid_options": {"columns": 12, "rows": 9}},
+            {"type": "entities", "show_header_toggle": false, "entities": [
+              {"entity": "sensor.energy_manager_current_action", "name": "Current action", "icon": "mdi:state-machine"},
+              {"entity": "sensor.energy_manager_current_reason", "name": "Why", "icon": "mdi:text-box-search-outline"},
+              {"entity": "sensor.standalone_energy_manager_energy_manager_status", "name": "Actuator confirmation", "icon": "mdi:shield-check-outline"}
+            ], "grid_options": {"columns": 12, "rows": 4}},
+            {"type": "tile", "entity": "sensor.standalone_energy_manager_energy_manager_pv_power", "name": "Solar", "icon": "mdi:solar-power"},
+            {"type": "tile", "entity": "sensor.standalone_energy_manager_energy_manager_load_power", "name": "Normal house total · SAJ TotalLoad", "icon": "mdi:home-lightning-bolt"},
+            {"type": "tile", "entity": "sensor.standalone_energy_manager_energy_manager_battery_power", "name": "Battery", "icon": "mdi:battery-charging"},
+            {"type": "tile", "entity": "sensor.standalone_energy_manager_energy_manager_grid_power", "name": "Grid", "icon": "mdi:transmission-tower"},
+            {"type": "tile", "entity": "sensor.energy_manager_server_rack_power", "name": "Server rack + desk", "icon": "mdi:server-network"},
+            {"type": "tile", "entity": "sensor.energy_manager_server_rack_energy_today", "name": "Rack energy today", "icon": "mdi:server-network-outline"},
+            {"type": "tile", "entity": "sensor.energy_manager_battery_soc_rounded", "name": "Battery SOC", "icon": "mdi:battery-high"}
+          ]
+        },
+        {
+          "type": "grid",
+          "cards": [
+            {"type": "heading", "heading": "The plan", "icon": "mdi:timeline-clock-outline"},
+            {"type": "iframe", "url": "http://10.0.1.205:8787/?embed=brief", "aspect_ratio": "48%", "title": "What happens next", "grid_options": {"columns": 12, "rows": 5}},
+            {"type": "iframe", "url": "http://10.0.1.205:8787/?embed=plan", "aspect_ratio": "58%", "title": "36-hour dispatch plan", "grid_options": {"columns": 12, "rows": 7}},
+            {"type": "entities", "title": "Battery and export", "show_header_toggle": false, "entities": [
+              {"entity": "sensor.energy_manager_protected_reserve", "name": "Protected battery reserve"},
+              {"entity": "sensor.energy_manager_predicted_soc_min", "name": "Predicted minimum SOC"},
+              {"entity": "sensor.energy_manager_predicted_soc_end", "name": "SOC at horizon end"},
+              {"entity": "sensor.energy_manager_next_export_start", "name": "Next export starts"},
+              {"entity": "sensor.energy_manager_next_export_price", "name": "Best FIT in next window"},
+              {"entity": "sensor.energy_manager_planned_battery_export_energy", "name": "Battery energy to sell"},
+              {"entity": "sensor.energy_manager_planned_battery_export_revenue", "name": "Battery export revenue"},
+              {"entity": "sensor.energy_manager_planned_battery_export_wear", "name": "Battery wear allowance"},
+              {"entity": "sensor.energy_manager_planned_battery_export_net", "name": "Battery net benefit"},
+              {"entity": "sensor.energy_manager_planned_total_export_revenue", "name": "Total planned export revenue"},
+              {"entity": "sensor.energy_manager_realised_battery_export_revenue_today", "name": "Battery export revenue today"},
+              {"entity": "sensor.energy_manager_realised_net_benefit_today", "name": "Realised net benefit today"}
+            ], "grid_options": {"columns": 12, "rows": 12}}
+          ]
+        },
+        {
+          "type": "grid",
+          "cards": [
+            {"type": "heading", "heading": "Flexible loads and settings", "icon": "mdi:tune-variant"},
+            {"type": "entities", "title": "Optimiser settings", "show_header_toggle": false, "entities": [
+              {"entity": "input_select.energy_manager_ev_trip_profile", "name": "Trip preparation", "icon": "mdi:map-marker-distance"},
+              {"entity": "input_number.energy_manager_ev_opportunistic_fit_cents", "name": "Tesla opportunity FIT", "icon": "mdi:car-electric"},
+              {"entity": "input_number.energy_manager_ev_charge_limit", "name": "Tesla charge limit", "icon": "mdi:battery-charging-80"},
+              {"entity": "input_number.energy_manager_min_sell_price_cents", "name": "Minimum battery sell price", "icon": "mdi:cash-fast"},
+              {"entity": "input_boolean.energy_manager_ev_grid_allowed", "name": "Allow Tesla grid charging", "icon": "mdi:transmission-tower-import"}
+            ], "grid_options": {"columns": 12, "rows": 7}},
+            {"type": "entities", "title": "Tesla", "show_header_toggle": false, "entities": [
+              {"entity": "sensor.energy_manager_ev_recommendation", "name": "Plan"},
+              {"entity": "sensor.standalone_energy_manager_energy_manager_ev_soc", "name": "Vehicle SOC"},
+              {"entity": "sensor.energy_manager_ev_target_soc", "name": "Charge limit"},
+              {"entity": "sensor.standalone_energy_manager_energy_manager_ev_charging_current", "name": "Configured current"},
+              {"entity": "climate.james_tesla_climate", "name": "Cabin climate"},
+              {"entity": "lock.james_tesla_vehicle_lock", "name": "Vehicle lock"},
+              {"entity": "button.james_tesla_unlock_car", "name": "Unlock car"},
+              {"entity": "button.james_tesla_unlock_charge_port", "name": "Unlock charge cable"},
+              {"entity": "cover.james_tesla_charge_port", "name": "Charge-port door"},
+              {"entity": "cover.james_tesla_windows", "name": "Window vent"},
+              {"entity": "switch.james_tesla_steering_wheel_heat", "name": "Steering-wheel heat"},
+              {"entity": "switch.james_tesla_defrost", "name": "Defrost"},
+              {"entity": "button.james_tesla_wake", "name": "Wake car"},
+              {"entity": "button.james_tesla_flash_lights", "name": "Flash lights"},
+              {"entity": "button.james_tesla_sound_horn", "name": "Sound horn"},
+              {"entity": "sensor.energy_manager_tesla_charge_port_latch", "name": "Charge-port latch"},
+              {"entity": "sensor.energy_manager_tesla_interior_temperature", "name": "Interior temperature"},
+              {"entity": "sensor.energy_manager_tesla_exterior_temperature", "name": "Exterior temperature"}
+            ], "grid_options": {"columns": 12, "rows": 14}},
+            {"type": "entities", "title": "Hot water", "show_header_toggle": false, "entities": [
+              {"entity": "binary_sensor.energy_manager_hot_water_relay", "name": "Relay", "icon": "mdi:water-boiler"},
+              {"entity": "sensor.standalone_energy_manager_energy_manager_hot_water_runtime", "name": "Confirmed runtime"},
+              {"entity": "sensor.standalone_energy_manager_energy_manager_hot_water_element_power", "name": "Element power"},
+              {"entity": "sensor.energy_manager_hot_water_plan_start", "name": "Planned start"},
+              {"entity": "sensor.energy_manager_hot_water_plan_end", "name": "Planned finish"},
+              {"entity": "sensor.energy_manager_hot_water_remaining", "name": "Service remaining"},
+              {"entity": "sensor.energy_manager_hot_water_source", "name": "Current source"}
+            ], "grid_options": {"columns": 12, "rows": 8}}
+          ]
+        },
+        {
+          "type": "grid",
+          "cards": [
+            {"type": "heading", "heading": "Prices and solar", "icon": "mdi:weather-sunny-clock"},
+            {"type": "tile", "entity": "sensor.energy_manager_amber_fit_cents", "name": "Amber FIT", "icon": "mdi:transmission-tower-export"},
+            {"type": "tile", "entity": "sensor.energy_manager_amber_import_cents", "name": "Amber import", "icon": "mdi:transmission-tower-import"},
+            {"type": "tile", "entity": "sensor.energy_manager_aemo_cents", "name": "AEMO wholesale", "icon": "mdi:chart-line"},
+            {"type": "iframe", "url": "http://10.0.1.205:8787/?embed=prices", "aspect_ratio": "58%", "title": "Predicted Amber pricing", "grid_options": {"columns": 12, "rows": 7}},
+            {"type": "entities", "title": "Solar inputs", "show_header_toggle": false, "entities": [
+              {"entity": "sensor.standalone_energy_manager_energy_manager_pv_power", "name": "Total PV"},
+              {"entity": "sensor.energy_manager_pv1_power", "name": "PV1 · north · 11.8 kWp"},
+              {"entity": "sensor.energy_manager_pv1_expected", "name": "PV1 expected now"},
+              {"entity": "sensor.energy_manager_pv2_power", "name": "PV2 · south · 8.26 kWp"},
+              {"entity": "sensor.energy_manager_pv2_expected", "name": "PV2 expected now"},
+              {"entity": "sensor.energy_manager_pv3_power", "name": "PV3 · south · 16.52 kWp"},
+              {"entity": "sensor.energy_manager_pv3_expected", "name": "PV3 expected now"}
+            ], "grid_options": {"columns": 12, "rows": 8}},
+            {"type": "entities", "title": "Health", "show_header_toggle": false, "entities": [
+              {"entity": "sensor.standalone_energy_manager_energy_manager_status", "name": "Actuator"},
+              {"entity": "sensor.energy_manager_plan_generated", "name": "Plan generated"},
+              {"entity": "sensor.energy_manager_forecast_coverage_end", "name": "Amber forecast available to"},
+              {"entity": "sensor.energy_manager_influx_backlog", "name": "Influx rows queued"},
+              {"entity": "sensor.energy_manager_load_source", "name": "Whole-house load source"}
+            ]},
+            {"type": "button", "name": "Open full energy manager", "icon": "mdi:open-in-new", "show_state": false, "tap_action": {"action": "url", "url_path": "http://10.0.1.205:8787/"}, "grid_options": {"columns": 12, "rows": 2}}
+          ]
+        }
+      ]
+    }
+  ]
+}

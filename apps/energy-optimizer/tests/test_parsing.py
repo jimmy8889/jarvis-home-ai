@@ -1,7 +1,14 @@
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
-from energy_optimizer.parsing import build_dispatch_grid, build_slots
+import pytest
+
+from energy_optimizer.parsing import (
+    _price_points,
+    _slot_price,
+    build_dispatch_grid,
+    build_slots,
+)
 
 
 BRISBANE = ZoneInfo("Australia/Brisbane")
@@ -228,3 +235,62 @@ def test_fit_and_import_must_describe_the_same_live_interval():
     )
 
     assert result[0].price_source != "amber_live"
+
+
+def test_coarse_slot_price_is_weighted_by_actual_amber_interval_overlap():
+    now = datetime(2026, 8, 11, 12, 7, tzinfo=BRISBANE)
+    forecast = [
+        {
+            "start_time": "2026-08-11T12:00:00+10:00",
+            "end_time": "2026-08-11T12:10:00+10:00",
+            "value": 0.10,
+        },
+        {
+            "start_time": "2026-08-11T12:10:00+10:00",
+            "end_time": "2026-08-11T12:30:00+10:00",
+            "value": 0.40,
+        },
+        {
+            "start_time": "2026-08-11T12:30:00+10:00",
+            "end_time": "2026-08-11T12:37:00+10:00",
+            "value": -0.20,
+        },
+    ]
+
+    price, source = _slot_price(
+        _price_points({"attributes": {"forecast": forecast}}, BRISBANE),
+        now,
+        timedelta(minutes=30),
+        export=True,
+    )
+
+    # The 12:07-12:37 slot overlaps 3, 20 and 7 minutes respectively.
+    expected = (3 * 0.10 + 20 * 0.40 + 7 * -0.20) / 30
+    assert price == pytest.approx(expected)
+    assert source == "amber"
+
+
+def test_partial_amber_overlap_cannot_dominate_uncovered_slot_duration():
+    start = datetime(2026, 8, 11, 12, 0, tzinfo=BRISBANE)
+    points = _price_points({
+        "attributes": {
+            "forecast": [{
+                "start_time": start.isoformat(),
+                "end_time": (start + timedelta(minutes=5)).isoformat(),
+                "value": 0.64,
+            }],
+        },
+    }, BRISBANE)
+
+    price, source = _slot_price(
+        points,
+        start,
+        timedelta(minutes=30),
+        export=True,
+    )
+
+    # Midday fallback FIT is zero, so only the covered five minutes carry the
+    # Amber value.  Averaging over covered seconds alone would incorrectly
+    # report the entire half-hour at $0.64/kWh.
+    assert price == pytest.approx(0.64 * 5 / 30)
+    assert source == "partial_amber_fallback"

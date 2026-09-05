@@ -25,9 +25,9 @@
 - name: Assert supported display performance profile
   ansible.builtin.assert:
     that:
-      - display_node_performance_profile in ['auto', 'balanced', 'low-power']
+      - display_node_performance_profile in ['auto', 'balanced', 'smooth', 'low-power']
     fail_msg: >-
-      display_node_performance_profile must be auto, balanced, or low-power.
+      display_node_performance_profile must be auto, balanced, smooth, or low-power.
 
 - name: Install minimal display appliance packages
   ansible.builtin.apt:
@@ -68,6 +68,24 @@
   ansible.builtin.command: "timedatectl set-timezone {{ display_node_timezone }}"
   when: display_node_current_timezone.stdout != display_node_timezone
   changed_when: true
+
+- name: Force active NetworkManager connections to accept DHCP DNS
+  ansible.builtin.shell: |
+    set -o pipefail
+    nmcli -t -f NAME,DEVICE con show --active | \
+    while IFS=':' read -r profile _device; do
+      [ -z "$profile" ] && continue
+      if [ "$_device" != "lo" ]; then
+        nmcli con modify "$profile" \
+          ipv4.ignore-auto-dns no \
+          ipv6.ignore-auto-dns no \
+          ipv4.dns "" \
+          ipv6.dns ""
+      fi
+    done
+  args:
+    executable: /bin/bash
+  when: display_node_use_dhcp_dns | bool
 
 - name: Create unprivileged display user
   ansible.builtin.user:
@@ -205,6 +223,23 @@
     group: "{{ display_node_user }}"
     mode: "0640"
   no_log: true
+  notify: Restart Pilot display web
+
+- name: Validate Office Audio trust settings
+  ansible.builtin.assert:
+    that:
+      - display_node_office_audio_url | length == 0 or display_node_office_audio_ca_source_file | length > 0
+    fail_msg: >-
+      Set display_node_office_audio_ca_source_file when enabling Office Audio control.
+
+- name: Install Office Audio trust certificate
+  ansible.builtin.copy:
+    src: "{{ display_node_office_audio_ca_source_file }}"
+    dest: /etc/pilot-display/office-audio-ca.crt
+    owner: root
+    group: "{{ display_node_user }}"
+    mode: "0640"
+  when: display_node_office_audio_url | length > 0
   notify: Restart Pilot display web
 
 - name: Back up boot configuration

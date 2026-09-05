@@ -2,18 +2,20 @@
   {
     "id": "eop_guard_tab_002",
     "type": "tab",
-    "label": "Energy Optimizer Guarded Actuator (Production v2)",
+    "label": "Energy Optimizer - Guarded SAJ Actuator v3",
     "disabled": false,
-    "info": "Production v2 guarded actuator. Every disarmed or rejected state actively cancels forced modes. Discharge translates a semantically validated site-export target (conservatively bounded at 100 kW) from live PV/load and immediately applies the battery balance clamped to the verified 28 kW limit, disables PV charging while exporting, and after a 15-second post-command observation window confirms fresh direct sensor.saj_battery_power with the expected sign, achieved-power threshold and exclusive helper mode. Grid charge immediately applies its full clamped target up to 30 kW. The observation window never delays command application; it only verifies the already-issued command after the SAJ polling cycle. The bounded battery SOC value uses the numeric sensor.saj_battery_power poll from the same SAJ Modbus integration as its liveness heartbeat; that heartbeat, PV and load must have a last_reported (preferred) or last_updated timestamp no older than 330 seconds. Missing, unavailable or stale heartbeats safe-stop; static limits and helpers are not aged. Every allow or curtail decision directly reasserts the raw SAJ export-limit register before synchronizing the helper, so an unchanged optimistic helper cannot suppress the hardware write. Each accepted plan also replaces a one-shot valid-until timer that safe-stops exactly at expiry; the independent 60-second stale-plan watchdog remains. The disabled v1 tab is retained for rollback."
+    "info": "Schema-v2 production actuator and sole SAJ writer. Every SAJ integration service is serialized in dependency order on one latest-wins lock, preventing concurrent Modbus transactions. A semantic command hash confirms physically unchanged plans without rewriting registers. Confirmed same-mode export-rate changes use the one-register fast path. Every mode keeps normal battery discharge and PV charging available; hot-water service rescue forces only the non-element household tranche so grid supplies the element. Inverter-native zero export is requested only for a fresh signed-negative FIT. Rejects, expiry, errors and persistent feedback mismatches run the complete fail-safe transaction while preserving the independent reserve floor.",
+    "env": []
   },
   {
     "id": "eop_plan_changed_002",
     "type": "server-state-changed",
     "z": "eop_guard_tab_002",
-    "name": "New optimizer plan",
+    "name": "New schema-v2 optimizer plan",
     "server": "srv_ha_001",
     "version": 6,
     "outputs": 1,
+    "exposeAsEntityConfig": "",
     "entities": {
       "entity": [
         "sensor.energy_optimizer_plan"
@@ -33,8 +35,8 @@
     "ignorePrevStateNull": false,
     "ignorePrevStateUnknown": true,
     "ignorePrevStateUnavailable": true,
-    "ignoreCurrentStateUnknown": true,
-    "ignoreCurrentStateUnavailable": true,
+    "ignoreCurrentStateUnknown": false,
+    "ignoreCurrentStateUnavailable": false,
     "outputProperties": [
       {
         "property": "payload",
@@ -59,14 +61,13 @@
     "server": "srv_ha_001",
     "version": 6,
     "outputs": 1,
+    "exposeAsEntityConfig": "",
     "entities": {
       "entity": [
         "input_select.energy_optimizer_mode",
         "input_boolean.energy_optimizer_rollout_approved",
         "input_boolean.energy_optimizer_battery_control",
-        "input_boolean.energy_optimizer_manual_override",
-        "input_number.energy_optimizer_max_discharge_kw",
-        "sensor.saj_battery_discharge_soc_lower_limit"
+        "input_boolean.energy_optimizer_manual_override"
       ],
       "substring": [],
       "regex": []
@@ -81,8 +82,8 @@
     "forType": "num",
     "forUnits": "minutes",
     "ignorePrevStateNull": false,
-    "ignorePrevStateUnknown": false,
-    "ignorePrevStateUnavailable": false,
+    "ignorePrevStateUnknown": true,
+    "ignorePrevStateUnavailable": true,
     "ignoreCurrentStateUnknown": false,
     "ignoreCurrentStateUnavailable": false,
     "outputProperties": [
@@ -94,7 +95,72 @@
       }
     ],
     "x": 170,
-    "y": 140,
+    "y": 130,
+    "wires": [
+      [
+        "eop_read_live_state_002"
+      ]
+    ]
+  },
+  {
+    "id": "eop_price_changed_002",
+    "type": "server-state-changed",
+    "z": "eop_guard_tab_002",
+    "name": "Negative FIT emergency edge",
+    "server": "srv_ha_001",
+    "version": 6,
+    "outputs": 1,
+    "exposeAsEntityConfig": "",
+    "entities": {
+      "entity": [
+        "sensor.amber_express_trader_sheena_street_feed_in_price"
+      ],
+      "substring": [],
+      "regex": []
+    },
+    "outputInitially": true,
+    "stateType": "str",
+    "ifState": "",
+    "ifStateType": "str",
+    "ifStateOperator": "is",
+    "outputOnlyOnStateChange": true,
+    "for": "0",
+    "forType": "num",
+    "forUnits": "minutes",
+    "ignorePrevStateNull": false,
+    "ignorePrevStateUnknown": true,
+    "ignorePrevStateUnavailable": true,
+    "ignoreCurrentStateUnknown": false,
+    "ignoreCurrentStateUnavailable": false,
+    "outputProperties": [
+      {
+        "property": "payload",
+        "propertyType": "msg",
+        "value": "",
+        "valueType": "entityState"
+      }
+    ],
+    "x": 160,
+    "y": 180,
+    "wires": [
+      [
+        "eop_negative_fit_edge_002"
+      ]
+    ]
+  },
+  {
+    "id": "eop_negative_fit_edge_002",
+    "type": "function",
+    "z": "eop_guard_tab_002",
+    "name": "Pass only a signed-negative live FIT edge",
+    "func": "const fit=Number(msg.payload); return Number.isFinite(fit) && fit < 0 ? msg : null;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 430,
+    "y": 180,
     "wires": [
       [
         "eop_read_live_state_002"
@@ -105,7 +171,7 @@
     "id": "eop_watchdog_002",
     "type": "inject",
     "z": "eop_guard_tab_002",
-    "name": "Stale-plan watchdog",
+    "name": "Price/plan freshness watchdog",
     "props": [
       {
         "p": "payload"
@@ -118,12 +184,12 @@
     "repeat": "60",
     "crontab": "",
     "once": true,
-    "onceDelay": "15",
+    "onceDelay": "5",
     "topic": "watchdog",
     "payload": "",
     "payloadType": "date",
-    "x": 150,
-    "y": 200,
+    "x": 170,
+    "y": 230,
     "wires": [
       [
         "eop_read_live_state_002"
@@ -134,15 +200,15 @@
     "id": "eop_read_live_state_002",
     "type": "function",
     "z": "eop_guard_tab_002",
-    "name": "Read guarded HA state",
-    "func": "const ha=global.get('homeassistant');\nconst states=ha?.homeAssistant?.states || ha?.states || {};\nfunction entity(entityId) { return states[entityId] || {}; }\nfunction raw(entityId) { return entity(entityId).state; }\nfunction finite(value) { if (value===null || value===undefined || (typeof value==='string' && (!value.trim() || ['unknown','unavailable','none','null'].includes(value.trim().toLowerCase())))) return null; const parsed=Number(value); return Number.isFinite(parsed)?parsed:null; }\nfunction powerKw(entityId) { const value=finite(raw(entityId)); if (value===null) return null; const unit=String(entity(entityId).attributes?.unit_of_measurement || '').trim().toLowerCase(); if (unit==='w') return value/1000; if (unit==='kw') return value; if (unit==='mw') return value*1000; return null; }\nfunction measurementAtMs(entityId) { const value=entity(entityId); for (const candidate of [value.last_reported,value.last_updated]) { const parsed=typeof candidate==='number'?candidate:Date.parse(candidate||''); if (Number.isFinite(parsed)) return parsed; } return null; }\nmsg.planEntity=entity('sensor.energy_optimizer_plan');\nmsg.mode=raw('input_select.energy_optimizer_mode');\nmsg.rolloutApproved=raw('input_boolean.energy_optimizer_rollout_approved');\nmsg.batteryControl=raw('input_boolean.energy_optimizer_battery_control');\nmsg.manualOverride=raw('input_boolean.energy_optimizer_manual_override');\nmsg.soc=raw('sensor.saj_battery_1_soc');\nconst socHeartbeat=finite(raw('sensor.saj_battery_power'));\nmsg.socHeartbeatMeasuredAtMs=socHeartbeat===null?null:measurementAtMs('sensor.saj_battery_power');\nmsg.minSocPct=raw('sensor.saj_battery_discharge_soc_lower_limit');\nmsg.maxDischargeCapKw=raw('input_number.energy_optimizer_max_discharge_kw');\nmsg.pvPowerKw=powerKw('sensor.pv_power_mqtt_abs');\nmsg.pvMeasuredAtMs=measurementAtMs('sensor.pv_power_mqtt_abs');\nmsg.homeLoadKw=powerKw('sensor.saj_home_load');\nmsg.homeLoadMeasuredAtMs=measurementAtMs('sensor.saj_home_load');\nreturn msg;",
+    "name": "Read guarded HA state and physical reserve",
+    "func": "\"use strict\";\n\nfunction finite(value) {\n  if (value === null || value === undefined) return null;\n  if (\n    typeof value === \"string\" &&\n    (!value.trim() || [\"unknown\", \"unavailable\", \"none\", \"null\"].includes(value.trim().toLowerCase()))\n  ) return null;\n  const parsed = Number(value);\n  return Number.isFinite(parsed) ? parsed : null;\n}\n\nfunction binaryOn(value) {\n  const normalized = String(value || \"\").toLowerCase();\n  if (normalized === \"on\") return true;\n  if (normalized === \"off\") return false;\n  return null;\n}\n\nfunction timestampMs(value) {\n  if (typeof value === \"number\") return Number.isFinite(value) ? value : null;\n  const parsed = Date.parse(value || \"\");\n  return Number.isFinite(parsed) ? parsed : null;\n}\n\nfunction batteryDischargeLimitSensorToRegister(value, unit) {\n  const percent = finite(value);\n  const normalizedUnit = String(unit ?? \"\").trim().toLowerCase();\n  // The writable 0x364E number uses 0..1100 while its independent sensor is\n  // exposed by the integration as 0..110 %. Never guess when the unit is\n  // absent: an ambiguous unit would make a dangerous 100 look like 10%.\n  if (percent === null || normalizedUnit !== \"%\" || percent < 0 || percent > 110) return null;\n  const registerValue = percent * 10;\n  return registerValue >= 0 && registerValue <= 1100 ? registerValue : null;\n}\n\nconst ha=global.get(\"homeassistant\");\nconst states=ha?.homeAssistant?.states || ha?.states || {};\nfunction entity(id){return states[id]||{};}\nfunction raw(id){return entity(id).state;}\nfunction measuredAt(id){const value=entity(id);for(const candidate of [value.last_reported,value.last_updated]){const parsed=timestampMs(candidate);if(parsed!==null)return parsed;}return null;}\nfunction powerKw(id){const value=finite(raw(id));if(value===null)return null;const unit=String(entity(id).attributes?.unit_of_measurement||\"\").trim().toLowerCase();if(unit===\"w\")return value/1000;if(unit===\"kw\")return value;if(unit===\"mw\")return value*1000;return null;}\nconst preferredPv=entity(\"sensor.saj_pv_power\");\nconst pvEntity=preferredPv.state!==undefined?\"sensor.saj_pv_power\":\"sensor.pv_power_mqtt_abs\";\nmsg.planEntity=entity(\"sensor.energy_optimizer_plan\");\nmsg.mode=raw(\"input_select.energy_optimizer_mode\");\nmsg.rolloutApproved=raw(\"input_boolean.energy_optimizer_rollout_approved\");\nmsg.batteryControl=raw(\"input_boolean.energy_optimizer_battery_control\");\nmsg.manualOverride=raw(\"input_boolean.energy_optimizer_manual_override\");\nmsg.soc=raw(\"sensor.saj_battery_1_soc\");\nmsg.socHeartbeatMeasuredAtMs=finite(raw(\"sensor.saj_battery_power\"))===null?null:measuredAt(\"sensor.saj_battery_power\");\nmsg.minSocPct=raw(\"sensor.saj_battery_discharge_soc_lower_limit\");\nmsg.maxDischargeCapKw=raw(\"input_number.energy_optimizer_max_discharge_kw\");\nmsg.pvPowerKw=powerKw(pvEntity);\nmsg.pvMeasuredAtMs=measuredAt(pvEntity);\nmsg.homeLoadKw=powerKw(\"sensor.saj_home_load\");\nmsg.homeLoadMeasuredAtMs=measuredAt(\"sensor.saj_home_load\");\nmsg.liveFitPrice=raw(\"sensor.amber_express_trader_sheena_street_feed_in_price\");\nmsg.liveFitMeasuredAtMs=measuredAt(\"sensor.amber_express_trader_sheena_street_feed_in_price\");\nmsg.liveImportPrice=raw(\"sensor.amber_express_trader_sheena_street_general_price\");\nmsg.liveImportMeasuredAtMs=measuredAt(\"sensor.amber_express_trader_sheena_street_general_price\");\nmsg.sunState=raw(\"sun.sun\");\nmsg.reserveNumberPct=raw(\"number.saj_battery_on_grid_discharge_depth_input\");\nmsg.reserveSensorPct=raw(\"sensor.saj_battery_on_grid_discharge_depth\");\nmsg.reserveSensorMeasuredAtMs=measuredAt(\"sensor.saj_battery_on_grid_discharge_depth\");\nmsg.reserveControlAvailable=finite(msg.reserveNumberPct)!==null&&finite(msg.reserveSensorPct)!==null&&msg.reserveSensorMeasuredAtMs!==null;\nmsg.batteryDischargeLimitNumber=raw(\"number.saj_battery_discharge_power_limit_input\");\nmsg.batteryDischargeLimitSensor=batteryDischargeLimitSensorToRegister(raw(\"sensor.saj_battery_discharge_power_limit\"),entity(\"sensor.saj_battery_discharge_power_limit\").attributes?.unit_of_measurement);\nmsg.batteryDischargeLimitSensorMeasuredAtMs=measuredAt(\"sensor.saj_battery_discharge_power_limit\");\nmsg.batteryDischargeLimitControlAvailable=finite(msg.batteryDischargeLimitNumber)!==null&&finite(msg.batteryDischargeLimitSensor)!==null&&msg.batteryDischargeLimitSensorMeasuredAtMs!==null;\nmsg.watchdogActual={\n reserveNumberPct:msg.reserveNumberPct,reserveSensorPct:msg.reserveSensorPct,\n batteryDischargeLimitNumber:msg.batteryDischargeLimitNumber,batteryDischargeLimitSensor:msg.batteryDischargeLimitSensor,\n antiRefluxMode:raw(\"number.saj_anti_reflux_mode_input\"),exportLimit:raw(\"number.saj_export_limit_input\"),gridMaxDischarge:raw(\"number.saj_grid_max_discharge_power_input\"),\n exportHelperOn:binaryOn(raw(\"input_boolean.export_power\")),pvChargeOn:binaryOn(raw(\"input_boolean.battery_pv_charge\")),forceChargeOn:binaryOn(raw(\"input_boolean.battery_charge\")),forceDischargeOn:binaryOn(raw(\"input_boolean.battery_discharge\")),\n physicalChargeOn:binaryOn(raw(\"switch.saj_charging_control\")),physicalDischargeOn:binaryOn(raw(\"switch.saj_discharging_control\")),\n chargePowerPercent:raw(\"number.saj_charge1_power_percent_input\"),dischargePowerPercent:raw(\"number.saj_discharge1_power_percent_input\"),pvChargePowerLimit:raw(\"number.saj_battery_charge_power_limit_input\")\n};\nmsg.nowMs=Date.now();\nreturn msg;",
     "outputs": 1,
     "noerr": 0,
     "initialize": "",
     "finalize": "",
     "libs": [],
-    "x": 430,
-    "y": 140,
+    "x": 460,
+    "y": 150,
     "wires": [
       [
         "eop_validate_002"
@@ -153,34 +219,24 @@
     "id": "eop_validate_002",
     "type": "function",
     "z": "eop_guard_tab_002",
-    "name": "Validate, translate and apply plan immediately",
-    "func": "const MAX_DISCHARGE_KW=28, MAX_CHARGE_KW=30, DEFAULT_DISCHARGE_CAP_KW=28, MAX_SITE_EXPORT_TARGET_KW=100, MAX_TELEMETRY_AGE_MS=330000, MAX_TELEMETRY_FUTURE_SKEW_MS=60000;\nfunction finite(value) { if (value===null || value===undefined || (typeof value==='string' && (!value.trim() || ['unknown','unavailable','none','null'].includes(value.trim().toLowerCase())))) return null; const parsed=Number(value); return Number.isFinite(parsed)?parsed:null; }\nfunction on(value) { return String(value||'').toLowerCase()==='on'; }\nfunction rejected(result,status) { return {...result,actuate:false,safeStop:true,stopForced:true,status,action:'none',targetKw:0,requestedTargetKw:0,pvExportCommand:'allow'}; }\nfunction validatePlan(input) {\n  const nowMs=input.nowMs??Date.now(), entity=input.planEntity||{}, plan=entity.attributes||{}, mode=String(input.mode||plan.mode||'shadow').toLowerCase();\n  const result={actuate:false,safeStop:true,stopForced:true,status:'shadow',action:'none',targetKw:0,requestedTargetKw:0,plannedBatteryTargetKw:null,siteExportTargetKw:null,livePvKw:null,liveLoadKw:null,pvExportCommand:'allow',planId:String(plan.plan_id||entity.state||'unknown')};\n  if (on(input.manualOverride)) return {...result,status:'manual_override'};\n  if (mode!=='active') return {...result,status:mode||'disabled'};\n  if (!on(input.rolloutApproved)) return {...result,status:'rollout_not_approved'};\n  if (!on(input.batteryControl)) return {...result,status:'battery_control_off'};\n  const validUntil=Date.parse(plan.valid_until||''), generatedAt=Date.parse(plan.generated_at||'');\n  if (plan.schema_version!==1 || !Number.isFinite(validUntil) || !Number.isFinite(generatedAt)) return rejected(result,'rejected_schema');\n  if (nowMs>=validUntil || nowMs-generatedAt>600000 || generatedAt>nowMs+60000) return rejected(result,'rejected_stale');\n  if (plan.actuation_allowed!==true || String(plan.mode).toLowerCase()!=='active') return rejected(result,'rejected_not_allowed');\n  const pvExportCommand=String(plan.pv_export_command||'allow').toLowerCase();\n  if (!['allow','curtail'].includes(pvExportCommand)) return rejected(result,'rejected_pv_command');\n  const target=finite(plan.battery_power_target_kw), siteExport=finite(plan.site_export_target_kw), soc=finite(input.soc), inverterFloor=finite(input.minSocPct), livePvKw=finite(input.pvPowerKw), liveLoadKw=finite(input.homeLoadKw);\n  if ([target,siteExport,soc,inverterFloor,livePvKw,liveLoadKw].some(value=>value===null)) return rejected(result,'rejected_invalid_numeric');\n  const socHeartbeatMeasuredAtMs=finite(input.socHeartbeatMeasuredAtMs), pvMeasuredAtMs=finite(input.pvMeasuredAtMs), homeLoadMeasuredAtMs=finite(input.homeLoadMeasuredAtMs);\n  if ([socHeartbeatMeasuredAtMs,pvMeasuredAtMs,homeLoadMeasuredAtMs].some(value=>value===null)) return rejected(result,'rejected_telemetry_timestamp');\n  const socHeartbeatAgeMs=nowMs-socHeartbeatMeasuredAtMs, pvAgeMs=nowMs-pvMeasuredAtMs, homeLoadAgeMs=nowMs-homeLoadMeasuredAtMs;\n  if ([socHeartbeatAgeMs,pvAgeMs,homeLoadAgeMs].some(ageMs=>ageMs>MAX_TELEMETRY_AGE_MS || ageMs < -MAX_TELEMETRY_FUTURE_SKEW_MS)) return rejected(result,'rejected_telemetry_stale');\n  const liveFloor=Math.max(5,inverterFloor);\n  if (soc<liveFloor-.5 || soc>100.5 || inverterFloor<5 || inverterFloor>100 || Math.abs(target)>MAX_CHARGE_KW+.01 || siteExport<-.01 || siteExport>MAX_SITE_EXPORT_TARGET_KW || livePvKw<0 || livePvKw>100 || liveLoadKw<0 || liveLoadKw>100) return rejected(result,'rejected_bounds');\n  const action=String(plan.action||'idle').toLowerCase();\n  if (!['discharge_export','grid_charge','curtail_pv','self_consumption','pv_charge','idle'].includes(action)) return rejected(result,'rejected_conflicting_action');\n  const active={...result,actuate:true,safeStop:false,stopForced:false,action,plannedBatteryTargetKw:target,siteExportTargetKw:siteExport,livePvKw,liveLoadKw,pvExportCommand,validUntilMs:validUntil,evaluatedAtMs:nowMs,telemetryAgeSeconds:{socHeartbeat:socHeartbeatAgeMs/1000,pv:pvAgeMs/1000,homeLoad:homeLoadAgeMs/1000}};\n  if (action==='discharge_export') {\n    if (pvExportCommand!=='allow' || soc<=liveFloor+1 || target<=0 || target>MAX_DISCHARGE_KW+.01 || siteExport<=0) return rejected(active,'rejected_discharge_guard');\n    const configuredCap=finite(input.maxDischargeCapKw), cap=Math.min(MAX_DISCHARGE_KW,configuredCap===null?DEFAULT_DISCHARGE_CAP_KW:Math.max(0,configuredCap));\n    const requestedTargetKw=Math.min(Math.max(0,siteExport+liveLoadKw-livePvKw),cap);\n    if (requestedTargetKw<=.05) return {...active,status:'accepted_discharge_pv_meets_target',stopForced:true,targetKw:0,requestedTargetKw:0};\n    return {...active,status:'accepted_discharge',targetKw:requestedTargetKw,requestedTargetKw};\n  }\n  if (action==='grid_charge') {\n    if (soc>=99 || target>=0) return rejected(active,'rejected_charge_guard');\n    const requestedTargetKw=Math.min(MAX_CHARGE_KW,Math.abs(target));\n    return {...active,status:'accepted_grid_charge',targetKw:requestedTargetKw,requestedTargetKw};\n  }\n  if (action==='curtail_pv' && pvExportCommand!=='curtail') return rejected(active,'rejected_conflicting_action');\n  if (['self_consumption','pv_charge','idle'].includes(action) && pvExportCommand!=='allow') return rejected(active,'rejected_conflicting_action');\n  return {...active,stopForced:true,status:'accepted_normal_'+action};\n}\nconst r=validatePlan(msg);\nconst issuedAtMs=finite(r.evaluatedAtMs)??(finite(msg.nowMs)??Date.now());\nconst command={action:r.action,targetKw:r.targetKw,requestedTargetKw:r.requestedTargetKw,planId:r.planId,issuedAtMs};\nif ((r.action==='discharge_export' || r.action==='grid_charge') && !r.safeStop && !r.stopForced) {\n  flow.set('energyOptimizerLastCommand',{action:r.action,targetKw:r.targetKw,planId:r.planId,issuedAtMs});\n} else {\n  flow.set('energyOptimizerLastCommand',{action:'none',targetKw:0,planId:r.planId,issuedAtMs});\n}\nlet detail='';\nif (r.action==='discharge_export') detail=' | site='+Number(r.siteExportTargetKw).toFixed(1)+' pv='+Number(r.livePvKw).toFixed(1)+' load='+Number(r.liveLoadKw).toFixed(1)+' request='+Number(r.requestedTargetKw).toFixed(1)+' apply='+Number(r.targetKw).toFixed(1)+'kW';\nelse if (r.action==='grid_charge') detail=' | request='+Number(r.requestedTargetKw).toFixed(1)+' apply='+Number(r.targetKw).toFixed(1)+'kW';\nconst base={optimizer:r,command};\nconst audit={...base,payload:r.status+' | '+r.planId+detail};\nconst stop=r.stopForced?{...base,payload:0}:null;\nconst curtail=!r.safeStop && r.pvExportCommand==='curtail'?{...base,payload:0}:null;\nconst allow=r.safeStop || r.pvExportCommand==='allow'?{...base,payload:1}:null;\nif (r.action==='discharge_export' && !r.safeStop && !r.stopForced) return [audit,null,{...base,payload:r.targetKw},null,curtail,allow];\nif (r.action==='grid_charge' && !r.safeStop && !r.stopForced) return [audit,null,null,{...base,payload:r.targetKw},curtail,allow];\nreturn [audit,stop,null,null,curtail,allow];",
-    "outputs": 6,
+    "name": "Validate v2 and request complete transaction",
+    "func": "\"use strict\";\n\nconst MAX_DISCHARGE_KW=28;\nconst MAX_CHARGE_KW=30;\nconst DEFAULT_DISCHARGE_CAP_KW=28;\nconst MAX_SITE_EXPORT_TARGET_KW=100;\nconst MAX_TELEMETRY_AGE_MS=330000;\nconst MAX_PRICE_AGE_MS=330000;\nconst MAX_FUTURE_SKEW_MS=60000;\nconst MAX_FEEDBACK_AGE_MS=60000;\nconst EXPORT_RATE_MIN_INTERVAL_MS=60000;\nconst EXPORT_RATE_DEADBAND_KW=1;\nconst EXPORT_RATE_DEADBAND_RATIO=0.1;\nconst NORMAL_EXPORT_LIMIT=1100;\nconst ZERO_EXPORT_LIMIT=0;\nconst NORMAL_GRID_DISCHARGE_LIMIT=1100;\nconst NORMAL_BATTERY_DISCHARGE_LIMIT=1000;\nconst SAFE_RESERVE_FLOOR_PCT=5;\nconst BATTERY_MODES=[\"hold\",\"self_consume\",\"pv_charge\",\"grid_charge\",\"export\"];\n\nfunction finite(value) {\n  if (value === null || value === undefined) return null;\n  if (\n    typeof value === \"string\" &&\n    (!value.trim() || [\"unknown\", \"unavailable\", \"none\", \"null\"].includes(value.trim().toLowerCase()))\n  ) return null;\n  const parsed = Number(value);\n  return Number.isFinite(parsed) ? parsed : null;\n}\n\nfunction on(value) {\n  return String(value || \"\").toLowerCase() === \"on\";\n}\n\nfunction binaryOn(value) {\n  const normalized = String(value || \"\").toLowerCase();\n  if (normalized === \"on\") return true;\n  if (normalized === \"off\") return false;\n  return null;\n}\n\nfunction timestampMs(value) {\n  if (typeof value === \"number\") return Number.isFinite(value) ? value : null;\n  const parsed = Date.parse(value || \"\");\n  return Number.isFinite(parsed) ? parsed : null;\n}\n\nfunction freshAge(nowMs, measuredAtMs, maxAgeMs) {\n  const measured = finite(measuredAtMs);\n  if (measured === null) return null;\n  const age = nowMs - measured;\n  if (age > maxAgeMs || age < -MAX_FUTURE_SKEW_MS) return null;\n  return age;\n}\n\nfunction clamp(value, minimum, maximum) {\n  return Math.min(maximum, Math.max(minimum, value));\n}\n\nfunction forcePowerPercent(rateKw) {\n  const value = finite(rateKw);\n  if (value === null || value <= 0) return 0;\n  return clamp(Math.round(value / 30 * 100), 0, 100);\n}\n\nfunction pvChargePowerLimitForKw(rateKw) {\n  const value = finite(rateKw);\n  if (value === null || value <= 0) return 0;\n  const clamped = clamp(value, 1, 30);\n  return clamp(Math.round((clamped - 1) / 29 * 10) * 100, 0, 1100);\n}\n\nfunction normalizedWholeReservePct(value) {\n  const parsed = finite(value);\n  if (parsed === null || parsed < 5 || parsed > 100.5) return null;\n  return clamp(Math.ceil(parsed), 5, 100);\n}\n\nfunction preservedReservePct(value) {\n  return normalizedWholeReservePct(value) ?? 5;\n}\n\nfunction safeReservePct(input) {\n  const plan = input.planEntity?.attributes || {};\n  const currentReserve = normalizedWholeReservePct(input.reserveSensorPct);\n  const liveSoc = finite(input.soc);\n  const liveSocCap = liveSoc === null || liveSoc < 5 || liveSoc > 100.5 ?\n    null : clamp(Math.floor(liveSoc), 5, 100);\n  const priorProtection = normalizedWholeReservePct(plan.protected_soc_pct);\n  // A stale/invalid plan may preserve protection, but may not raise the floor\n  // beyond fresh live SOC. The already-active independent reserve is the sole\n  // exception: lowering it during reject/expiry handling caused a live 40->5\n  // rollover and must never happen again.\n  const safePriorProtection = liveSocCap === null || priorProtection === null ?\n    null : Math.min(priorProtection, liveSocCap);\n  return Math.max(\n    SAFE_RESERVE_FLOOR_PCT,\n    currentReserve ?? SAFE_RESERVE_FLOOR_PCT,\n    safePriorProtection ?? SAFE_RESERVE_FLOOR_PCT,\n  );\n}\n\nfunction sameTransactionIdentity(left, right) {\n  return Boolean(left && right) &&\n    String(left.planId || \"\") === String(right.planId || \"\") &&\n    finite(left.revision) !== null && finite(left.revision) === finite(right.revision) &&\n    finite(left.issuedAtMs) !== null && finite(left.issuedAtMs) === finite(right.issuedAtMs);\n}\n\nfunction samePlanCommit(left, right) {\n  return Boolean(left && right) &&\n    String(left.planId || \"\") === String(right.planId || \"\") &&\n    finite(left.generatedAtMs) !== null && finite(left.generatedAtMs) === finite(right.generatedAtMs) &&\n    finite(left.validUntilMs) !== null && finite(left.validUntilMs) === finite(right.validUntilMs) &&\n    String(left.softwareVersion || \"\") === String(right.softwareVersion || \"\") &&\n    String(left.configFingerprint || \"\") === String(right.configFingerprint || \"\");\n}\n\nfunction sameSemanticPhysicalCommand(transaction, confirmed, applied, applyingRevision, actual) {\n  if (\n    !transaction || !confirmed || !applied ||\n    (applyingRevision !== null && applyingRevision !== undefined) ||\n    !sameTransactionIdentity(confirmed, applied) ||\n    !String(transaction.commandSemanticHash || \"\").trim() ||\n    transaction.commandSemanticHash !== confirmed.commandSemanticHash ||\n    Math.abs(Number(transaction.targetKw || 0) - Number(confirmed.targetKw || 0)) > 0.05\n  ) return false;\n  return verifyRegisterState(transaction, actual || {}).ok;\n}\n\nfunction exportRateOnlyEligible(transaction, confirmed, applied, applyingRevision) {\n  if (\n    transaction?.safeStop || transaction?.batteryMode !== \"export\" ||\n    transaction?.forceDischargeOn !== true ||\n    (applyingRevision !== null && applyingRevision !== undefined && applyingRevision !== transaction.revision) ||\n    !sameTransactionIdentity(confirmed, applied) ||\n    confirmed.batteryMode !== \"export\" || confirmed.forceDischargeOn !== true\n  ) return false;\n  const unchanged = [\n    \"reservePct\", \"batteryDischargeLimit\", \"pvExportCommand\", \"antiRefluxMode\",\n    \"exportLimit\", \"gridMaxDischarge\", \"exportHelperOn\", \"pvChargeOn\",\n    \"forceChargeOn\", \"forceDischargeOn\", \"chargePowerPercent\",\n    \"pvChargePowerLimit\", \"softwareVersion\", \"configFingerprint\",\n    \"priceIntervalStartMs\",\n  ];\n  return unchanged.every((key) => transaction[key] === confirmed[key]);\n}\n\nfunction expectedRegisterState(transaction) {\n  return {\n    reserveNumberPct: transaction.reservePct,\n    reserveSensorPct: transaction.reservePct,\n    batteryDischargeLimitNumber: transaction.batteryDischargeLimit,\n    batteryDischargeLimitSensor: transaction.batteryDischargeLimit,\n    antiRefluxMode: transaction.antiRefluxMode,\n    exportLimit: transaction.exportLimit,\n    gridMaxDischarge: transaction.gridMaxDischarge,\n    exportHelperOn: transaction.exportHelperOn,\n    pvChargeOn: transaction.pvChargeOn,\n    forceChargeOn: transaction.forceChargeOn,\n    forceDischargeOn: transaction.forceDischargeOn,\n    physicalChargeOn: transaction.forceChargeOn,\n    physicalDischargeOn: transaction.forceDischargeOn,\n    chargePowerPercent: transaction.chargePowerPercent,\n    dischargePowerPercent: transaction.dischargePowerPercent,\n    pvChargePowerLimit: transaction.pvChargePowerLimit,\n  };\n}\n\nfunction verifyRegisterState(transaction, actual) {\n  const expected = expectedRegisterState(transaction);\n  const mismatches = [];\n  const numeric = [\n    [\"antiRefluxMode\", 0.01],\n    [\"exportLimit\", 1],\n    [\"gridMaxDischarge\", 1],\n    [\"chargePowerPercent\", 0.51],\n    [\"dischargePowerPercent\", 0.51],\n    [\"pvChargePowerLimit\", 1],\n  ];\n  if (transaction.reserveControlAvailable === true) {\n    numeric.unshift([\"reserveSensorPct\", 0.51]);\n    numeric.unshift([\"reserveNumberPct\", 0.51]);\n  }\n  if (transaction.batteryDischargeLimitControlAvailable === true) {\n    numeric.unshift([\"batteryDischargeLimitSensor\", 1]);\n    numeric.unshift([\"batteryDischargeLimitNumber\", 1]);\n  }\n  for (const [key, tolerance] of numeric) {\n    const observed = finite(actual[key]);\n    if (observed === null || Math.abs(observed - expected[key]) > tolerance) mismatches.push(key);\n  }\n  for (const key of [\n    \"exportHelperOn\", \"pvChargeOn\", \"forceChargeOn\", \"forceDischargeOn\",\n    \"physicalChargeOn\", \"physicalDischargeOn\",\n  ]) {\n    if (actual[key] !== expected[key]) mismatches.push(key);\n  }\n  return {ok: mismatches.length === 0, mismatches, expected};\n}\n\nfunction conservativeCurtail(input, nowMs) {\n  const fit = finite(input.liveFitPrice);\n  const fitAge = freshAge(nowMs, input.liveFitMeasuredAtMs, MAX_PRICE_AGE_MS);\n  // Anti-reflux is a price action, not the generic failure state. Unknown or\n  // stale prices restore normal export; only a fresh signed-negative FIT may\n  // force the site target to zero.\n  return fit !== null && fitAge !== null && fit < 0;\n}\n\nfunction safeTransaction(input, reason) {\n  const nowMs = input.nowMs ?? Date.now();\n  const plan = input.planEntity?.attributes || {};\n  const reserveControlAvailable = input.reserveControlAvailable === true;\n  const reservePct = safeReservePct(input);\n  const curtail = conservativeCurtail(input, nowMs);\n  return {\n    planId: String(plan.plan_id || input.planEntity?.state || \"unknown\"),\n    batteryMode: \"safe_stop\",\n    reason,\n    safeStop: true,\n    writeStrategy: \"full\",\n    targetKw: 0,\n    plannedBatteryTargetKw: 0,\n    siteExportTargetKw: 0,\n    protectedSocPct: reservePct,\n    priorReservePct: finite(input.reserveSensorPct),\n    reservePct,\n    reserveControlAvailable,\n    priorBatteryDischargeLimit: finite(input.batteryDischargeLimitSensor),\n    batteryDischargeLimit: NORMAL_BATTERY_DISCHARGE_LIMIT,\n    batteryDischargeLimitControlAvailable: input.batteryDischargeLimitControlAvailable === true,\n    pvExportCommand: curtail ? \"curtail\" : \"allow\",\n    antiRefluxMode: curtail ? 1 : 0,\n    exportLimit: curtail ? ZERO_EXPORT_LIMIT : NORMAL_EXPORT_LIMIT,\n    gridMaxDischarge: NORMAL_GRID_DISCHARGE_LIMIT,\n    exportHelperOn: !curtail,\n    pvChargeOn: true,\n    forceChargeOn: false,\n    forceDischargeOn: false,\n    chargeRateKw: MAX_CHARGE_KW,\n    dischargeRateKw: MAX_DISCHARGE_KW,\n    chargePowerPercent: 0,\n    dischargePowerPercent: 0,\n    pvChargePowerLimit: pvChargePowerLimitForKw(MAX_CHARGE_KW),\n    issuedAtMs: nowMs,\n    validUntilMs: null,\n    reassertCount: 0,\n  };\n}\n\nfunction rejected(input, reason) {\n  return {\n    accepted: false,\n    actuate: true,\n    safeStop: true,\n    status: reason,\n    transaction: safeTransaction(input, reason),\n  };\n}\n\nfunction sourceTimestampStatus(plan, nowMs) {\n  const source = plan.source_timestamps;\n  if (!source || typeof source !== \"object\" || Array.isArray(source)) return \"rejected_source_timestamps\";\n  const required = [\n    \"amber_fit\",\n    \"amber_import\",\n    \"battery_soc\",\n    \"battery_soc_heartbeat\",\n    \"pv_power\",\n    \"pv_heartbeat\",\n    \"home_load\",\n  ];\n  for (const key of required) {\n    const parsed = timestampMs(source[key]);\n    if (parsed === null) return `rejected_source_timestamp_${key}`;\n    const maxAge = key === \"battery_soc\" ? 24 * 60 * 60 * 1000 :\n      key.startsWith(\"amber_\") ? MAX_PRICE_AGE_MS : MAX_TELEMETRY_AGE_MS;\n    if (freshAge(nowMs, parsed, maxAge) === null) return `rejected_source_stale_${key}`;\n  }\n  return null;\n}\n\nfunction isNonActuatingSafeHold(plan, nowMs) {\n  const generatedAt = timestampMs(plan.generated_at);\n  const validUntil = timestampMs(plan.valid_until);\n  const zeroTargets = [\n    plan.battery_power_target_kw,\n    plan.battery_charge_target_kw,\n    plan.battery_discharge_target_kw,\n    plan.site_export_target_kw,\n  ].every((value) => typeof value === \"number\" && value === 0);\n  return plan.schema_version === 2 &&\n    generatedAt !== null && validUntil !== null && nowMs < validUntil &&\n    nowMs - generatedAt <= 10 * 60 * 1000 && generatedAt <= nowMs + MAX_FUTURE_SKEW_MS &&\n    Boolean(String(plan.plan_id || \"\").trim()) &&\n    Boolean(String(plan.software_version || \"\").trim()) &&\n    Boolean(String(plan.config_fingerprint || \"\").trim()) &&\n    Boolean(String(plan.command_semantic_hash || \"\").trim()) &&\n    plan.actuation_allowed === false &&\n    String(plan.battery_mode || \"\").toLowerCase() === \"hold\" &&\n    zeroTargets &&\n    plan.live_fit_price === null && plan.live_import_price === null &&\n    plan.price_interval_start === null && plan.price_interval_end === null;\n}\n\nfunction validatePlan(input) {\n  const nowMs = input.nowMs ?? Date.now();\n  const entity = input.planEntity || {};\n  const plan = entity.attributes || {};\n  const controlMode = String(input.mode || \"shadow\").toLowerCase();\n\n  if (on(input.manualOverride)) return rejected(input, \"manual_override\");\n  if (controlMode !== \"active\") return rejected(input, controlMode || \"disabled\");\n  if (!on(input.rolloutApproved)) return rejected(input, \"rollout_not_approved\");\n  if (!on(input.batteryControl)) return rejected(input, \"battery_control_off\");\n\n  const validUntil = timestampMs(plan.valid_until);\n  const generatedAt = timestampMs(plan.generated_at);\n  const priceStart = timestampMs(plan.price_interval_start);\n  const priceEnd = timestampMs(plan.price_interval_end);\n  if (\n    plan.schema_version !== 2 ||\n    validUntil === null || generatedAt === null ||\n    !String(plan.plan_id || \"\").trim() || !String(plan.software_version || \"\").trim() ||\n    !String(plan.config_fingerprint || \"\").trim() ||\n    !String(plan.command_semantic_hash || \"\").trim()\n  ) return rejected(input, \"rejected_schema_v2\");\n\n  // A fast publisher must never fabricate a price pair during the Amber\n  // interval rollover. Its exact non-actuating hold shape is a deliberate\n  // request for the guarded actuator to stop forced modes immediately while\n  // retaining the independently observed reserve floor.\n  if (isNonActuatingSafeHold(plan, nowMs)) {\n    return rejected(input, \"safe_hold_non_actuating\");\n  }\n  if (priceStart === null || priceEnd === null) return rejected(input, \"rejected_schema_v2\");\n\n  if (\n    nowMs >= validUntil || nowMs - generatedAt > 10 * 60 * 1000 ||\n    generatedAt > nowMs + MAX_FUTURE_SKEW_MS || priceStart >= priceEnd\n  ) return rejected(input, \"rejected_stale_plan\");\n  if (plan.actuation_allowed !== true || String(plan.mode || \"\").toLowerCase() !== \"active\") {\n    return rejected(input, \"rejected_not_allowed\");\n  }\n\n  const replayGeneratedAtMs = finite(input.lastAcceptedGeneratedAtMs);\n  const replayPlanId = String(input.lastAcceptedPlanId || \"\");\n  if (\n    replayGeneratedAtMs !== null &&\n    (generatedAt < replayGeneratedAtMs || (generatedAt === replayGeneratedAtMs && replayPlanId && replayPlanId !== String(plan.plan_id)))\n  ) return rejected(input, \"rejected_plan_revision\");\n\n  const sourceError = sourceTimestampStatus(plan, nowMs);\n  if (sourceError) return rejected(input, sourceError);\n\n  const mode = String(plan.battery_mode || \"\").toLowerCase();\n  const pvExportCommand = String(plan.pv_export_command || \"\").toLowerCase();\n  if (!BATTERY_MODES.includes(mode)) return rejected(input, \"rejected_battery_mode\");\n  if (![\"allow\", \"curtail\"].includes(pvExportCommand)) return rejected(input, \"rejected_pv_command\");\n\n  const signedTarget = finite(plan.battery_power_target_kw);\n  const chargeTarget = finite(plan.battery_charge_target_kw);\n  const dischargeTarget = finite(plan.battery_discharge_target_kw);\n  const siteExportTarget = finite(plan.site_export_target_kw);\n  const protectedSoc = finite(plan.protected_soc_pct);\n  const plannedFit = finite(plan.live_fit_price);\n  const plannedImport = finite(plan.live_import_price);\n  const minimumSellPrice = finite(plan.minimum_sell_price);\n  const effectiveSellPrice = finite(plan.effective_sell_price);\n  const soc = finite(input.soc);\n  const inverterFloor = finite(input.minSocPct);\n  const livePvKw = finite(input.pvPowerKw);\n  const liveLoadKw = finite(input.homeLoadKw);\n  if (\n    [signedTarget, chargeTarget, dischargeTarget, siteExportTarget, protectedSoc, plannedFit, plannedImport,\n      minimumSellPrice, effectiveSellPrice,\n      soc, inverterFloor, livePvKw, liveLoadKw].some((value) => value === null)\n  ) return rejected(input, \"rejected_invalid_numeric\");\n\n  if (\n    freshAge(nowMs, input.socHeartbeatMeasuredAtMs, MAX_TELEMETRY_AGE_MS) === null ||\n    freshAge(nowMs, input.pvMeasuredAtMs, MAX_TELEMETRY_AGE_MS) === null ||\n    freshAge(nowMs, input.homeLoadMeasuredAtMs, MAX_TELEMETRY_AGE_MS) === null\n  ) return rejected(input, \"rejected_live_telemetry_stale\");\n\n  // This Modbus setting sensor reports on value change, not on every poll.\n  // Presence plus a numeric independent value is the preflight; a changed\n  // target is proven later by a matching post-command sensor timestamp.\n  if (\n    input.reserveControlAvailable !== true ||\n    finite(input.reserveNumberPct) === null || finite(input.reserveSensorPct) === null ||\n    finite(input.reserveSensorMeasuredAtMs) === null\n  ) return rejected(input, \"rejected_reserve_control_unavailable\");\n\n  // 0x3644 is only a SOC floor; it did not immediately stop live self-use\n  // discharge. 0x364E is therefore a separate mandatory, independently read\n  // discharge inhibit/limit for every controlled transaction.\n  if (\n    input.batteryDischargeLimitControlAvailable !== true ||\n    finite(input.batteryDischargeLimitNumber) === null ||\n    finite(input.batteryDischargeLimitNumber) < 0 ||\n    finite(input.batteryDischargeLimitNumber) > 1100 ||\n    finite(input.batteryDischargeLimitSensor) === null ||\n    finite(input.batteryDischargeLimitSensor) < 0 ||\n    finite(input.batteryDischargeLimitSensor) > 1100 ||\n    finite(input.batteryDischargeLimitSensorMeasuredAtMs) === null\n  ) return rejected(input, \"rejected_battery_discharge_limit_unavailable\");\n\n  // The live SAJ lower-limit sensor is the setting this transaction owns; a\n  // preceding hold may have raised it. It is not an immutable hardware floor.\n  const hardFloor = SAFE_RESERVE_FLOOR_PCT;\n  if (\n    inverterFloor < 5 || inverterFloor > 100 || soc < hardFloor - 0.5 || soc > 100.5 ||\n    protectedSoc < hardFloor || protectedSoc > 100 || chargeTarget < 0 || chargeTarget > MAX_CHARGE_KW + 0.01 ||\n    dischargeTarget < 0 || dischargeTarget > MAX_DISCHARGE_KW + 0.01 ||\n    Math.abs(signedTarget) > MAX_CHARGE_KW + 0.01 ||\n    minimumSellPrice < 0 || minimumSellPrice > 2 ||\n    effectiveSellPrice < minimumSellPrice - 0.000001 || effectiveSellPrice > 2 ||\n    siteExportTarget < 0 || siteExportTarget > MAX_SITE_EXPORT_TARGET_KW ||\n    livePvKw < 0 || livePvKw > 100 || liveLoadKw < 0 || liveLoadKw > 100\n  ) return rejected(input, \"rejected_bounds\");\n\n  const liveFit = finite(input.liveFitPrice);\n  const liveFitAge = freshAge(nowMs, input.liveFitMeasuredAtMs, MAX_PRICE_AGE_MS);\n  const livePriceFresh = liveFit !== null && liveFitAge !== null;\n  const liveImport = finite(input.liveImportPrice);\n  const liveImportAge = freshAge(nowMs, input.liveImportMeasuredAtMs, MAX_PRICE_AGE_MS);\n  const liveImportFresh = liveImport !== null && liveImportAge !== null;\n  const daylight = input.sunState !== \"below_horizon\" || livePvKw > 0.1;\n  if (livePriceFresh && liveFit < 0 && pvExportCommand !== \"curtail\") {\n    return rejected(input, \"rejected_negative_fit_requires_curtail\");\n  }\n  if (!livePriceFresh && daylight) return rejected(input, \"rejected_live_fit_stale\");\n\n  const priceSensitive = mode === \"export\" || mode === \"grid_charge\";\n  if (priceSensitive) {\n    if (!livePriceFresh) return rejected(input, \"rejected_price_sensitive_without_live_fit\");\n    if (!liveImportFresh) return rejected(input, \"rejected_price_sensitive_without_live_import\");\n    if (nowMs < priceStart || nowMs >= priceEnd) {\n      return rejected(input, \"rejected_price_interval\");\n    }\n    const fitAdverse = mode === \"export\" ? liveFit < plannedFit - 0.005 : liveFit > plannedFit + 0.005;\n    if (fitAdverse) return rejected(input, \"rejected_live_fit_mismatch\");\n    if (liveImport > plannedImport + 0.005) return rejected(input, \"rejected_live_import_mismatch\");\n  }\n\n  if (\n    (mode === \"export\" && (signedTarget <= 0 || dischargeTarget <= 0 || chargeTarget > 0.01)) ||\n    (mode === \"grid_charge\" && (signedTarget >= 0 || chargeTarget <= 0 || dischargeTarget > 0.01)) ||\n    (mode === \"pv_charge\" && (signedTarget >= 0 || chargeTarget <= 0 || dischargeTarget > 0.01)) ||\n    (mode === \"self_consume\" && (signedTarget < -0.01 || chargeTarget > 0.01)) ||\n    (mode === \"hold\" &&\n      (Math.abs(signedTarget) > 0.01 || chargeTarget > 0.01 || dischargeTarget > 0.01))\n  ) return rejected(input, \"rejected_target_sign\");\n  if (\n    (mode === \"export\" && Math.abs(signedTarget - dischargeTarget) > 0.05) ||\n    (mode === \"self_consume\" && Math.abs(signedTarget - dischargeTarget) > 0.05) ||\n    ([\"grid_charge\", \"pv_charge\"].includes(mode) && Math.abs(Math.abs(signedTarget) - chargeTarget) > 0.05)\n  ) return rejected(input, \"rejected_target_components\");\n  if (mode === \"export\" && (pvExportCommand !== \"allow\" || siteExportTarget <= 0 || soc <= protectedSoc + 1)) {\n    return rejected(input, \"rejected_export_guard\");\n  }\n  if (mode === \"export\" && liveFit + 0.000001 < effectiveSellPrice) {\n    return rejected(input, \"rejected_below_minimum_sell_price\");\n  }\n  if (mode === \"grid_charge\" && soc >= 99) return rejected(input, \"rejected_grid_charge_guard\");\n\n  const configuredCap = finite(input.maxDischargeCapKw);\n  const dischargeCap = Math.min(\n    MAX_DISCHARGE_KW,\n    configuredCap === null ? DEFAULT_DISCHARGE_CAP_KW : Math.max(0, configuredCap),\n  );\n  let appliedTargetKw = 0;\n  const hotWaterControlMode = String(plan.hot_water_control_mode || \"off\").toLowerCase();\n  const gridOnlyHotWaterRescue = mode === \"self_consume\" && hotWaterControlMode === \"service_rescue\";\n  if (mode === \"export\") {\n    const siteBalanceKw = Math.max(0, siteExportTarget + liveLoadKw - livePvKw);\n    appliedTargetKw = Math.min(siteBalanceKw, dischargeTarget, dischargeCap);\n  } else if (mode === \"grid_charge\" || mode === \"pv_charge\") {\n    appliedTargetKw = Math.min(chargeTarget, MAX_CHARGE_KW);\n  } else if (gridOnlyHotWaterRescue) {\n    appliedTargetKw = Math.min(dischargeTarget, dischargeCap);\n  }\n\n  const curtail = pvExportCommand === \"curtail\" || (livePriceFresh && liveFit < 0);\n  const transaction = {\n    planId: String(plan.plan_id),\n    batteryMode: mode,\n    reason: `accepted_${mode}`,\n    safeStop: false,\n    writeStrategy: \"full\",\n    targetKw: appliedTargetKw,\n    plannedBatteryTargetKw: signedTarget,\n    siteExportTargetKw: siteExportTarget,\n    protectedSocPct: protectedSoc,\n    priorReservePct: finite(input.reserveSensorPct),\n    // The SAJ register is whole-percent. Always round protection upward so the\n    // physical floor can never land below the optimizer trajectory.\n    reservePct: clamp(Math.ceil(protectedSoc), SAFE_RESERVE_FLOOR_PCT, 100),\n    reserveControlAvailable: true,\n    priorBatteryDischargeLimit: finite(input.batteryDischargeLimitSensor),\n    // Never latch the normal battery-discharge allowance to zero.  The\n    // inverter may cover household demand down to the protected reserve in\n    // every non-forced situation; exclusive force switches still control grid\n    // charge and export transactions.\n    batteryDischargeLimit: NORMAL_BATTERY_DISCHARGE_LIMIT,\n    batteryDischargeLimitControlAvailable: true,\n    pvExportCommand: curtail ? \"curtail\" : \"allow\",\n    antiRefluxMode: curtail ? 1 : 0,\n    exportLimit: curtail ? ZERO_EXPORT_LIMIT : NORMAL_EXPORT_LIMIT,\n    gridMaxDischarge: NORMAL_GRID_DISCHARGE_LIMIT,\n    exportHelperOn: !curtail,\n    // PV charging is never administratively inhibited. Forced export may win\n    // momentarily inside the inverter, but the solar charge path remains open.\n    pvChargeOn: true,\n    forceChargeOn: mode === \"grid_charge\",\n    forceDischargeOn: (mode === \"export\" || gridOnlyHotWaterRescue) && appliedTargetKw > 0.05,\n    chargeRateKw: [\"grid_charge\", \"pv_charge\"].includes(mode) ? appliedTargetKw : MAX_CHARGE_KW,\n    dischargeRateKw: (mode === \"export\" || gridOnlyHotWaterRescue) && appliedTargetKw > 0.05 ? appliedTargetKw : MAX_DISCHARGE_KW,\n    liveFitPrice: liveFit,\n    liveFitAgeMs: liveFitAge,\n    liveImportPrice: liveImport,\n    liveImportAgeMs: liveImportAge,\n    livePvKw,\n    liveLoadKw,\n    soc,\n    validUntilMs: validUntil,\n    priceIntervalStartMs: priceStart,\n    generatedAtMs: generatedAt,\n    softwareVersion: String(plan.software_version),\n    configFingerprint: String(plan.config_fingerprint),\n    commandSemanticHash: String(plan.command_semantic_hash),\n    hotWaterControlMode,\n    issuedAtMs: nowMs,\n    acceptedAtMs: nowMs,\n    reassertCount: 0,\n  };\n\n  if (mode === \"export\" && appliedTargetKw <= 0.05) {\n    transaction.forceDischargeOn = false;\n    transaction.reason = \"accepted_export_pv_meets_site_target\";\n  }\n  if (gridOnlyHotWaterRescue && appliedTargetKw > 0.05) {\n    transaction.reason = \"accepted_self_consume_grid_only_hot_water_rescue\";\n  }\n  transaction.chargePowerPercent = transaction.forceChargeOn ? forcePowerPercent(transaction.chargeRateKw) : 0;\n  transaction.dischargePowerPercent = transaction.forceDischargeOn ? forcePowerPercent(transaction.dischargeRateKw) : 0;\n  // The planned PV-charge target describes the surplus expected right now; it\n  // must not become a ceiling on what the roof is allowed to produce.  Keep\n  // the SAJ solar-to-battery path at its verified 30 kW limit in every mode.\n  // Anti-reflux/export-limit registers independently hold grid export at zero\n  // during negative FIT, so only surplus left after loads, flexible loads and\n  // a full-rate battery is physically curtailed.\n  transaction.pvChargePowerLimit = transaction.pvChargeOn ?\n    pvChargePowerLimitForKw(MAX_CHARGE_KW) : 0;\n  return {\n    accepted: true,\n    actuate: true,\n    safeStop: false,\n    status: transaction.reason,\n    generatedAtMs: generatedAt,\n    transaction,\n  };\n}\n\nfunction statusText(phase, transaction, detail = \"\") {\n  // The audit service uses unescaped Mustache so Home Assistant stores the\n  // controlled status text verbatim. Keep every dynamic component JSON-safe\n  // and prevent an injected field delimiter from changing the status layout.\n  const clean = (value) => String(value ?? \"\")\n    .replace(/[\\\\\"\\u0000-\\u001f]/g, \"_\")\n    .replace(/\\|/g, \"/\");\n  const statusPhase = {\n    confirmed: \"feedback_confirmed\",\n    semantic_confirmed: \"semantic_noop_confirmed\",\n  }[phase] || phase;\n  const fields = [\n    clean(statusPhase),\n    clean(transaction?.planId || \"unknown\"),\n    `mode=${clean(transaction?.batteryMode || \"unknown\")}`,\n    `target=${Number(transaction?.targetKw || 0).toFixed(1)}kW`,\n    `export=${clean(transaction?.pvExportCommand || \"unknown\")}`,\n    `reserve=${transaction?.priorReservePct ?? \"na\"}->${transaction?.reservePct ?? \"na\"}%`,\n  ];\n  if (transaction?.acceptedAtMs) fields.push(`accepted_ms=${transaction.acceptedAtMs}`);\n  if (transaction?.firstWriteAtMs) fields.push(`first_write_ms=${transaction.firstWriteAtMs}`);\n  if (transaction?.appliedAtMs) fields.push(`applied_ms=${transaction.appliedAtMs}`);\n  if (transaction?.confirmedAtMs) fields.push(`confirmed_ms=${transaction.confirmedAtMs}`);\n  if (transaction?.reason) fields.push(`reason=${clean(transaction.reason)}`);\n  if (detail) fields.push(clean(detail));\n  return fields.join(\" | \").slice(0, 250);\n}\n\nmsg.lastAcceptedGeneratedAtMs=flow.get(\"energyOptimizerLastAcceptedGeneratedAtMs\");\nmsg.lastAcceptedPlanId=flow.get(\"energyOptimizerLastAcceptedPlanId\");\nconst result=validatePlan(msg);\nconst current=flow.get(\"energyOptimizerCurrentTransaction\")||null;\nconst lastConfirmed=flow.get(\"energyOptimizerLastRegisterConfirmedTransaction\")||null;\nif(msg.topic===\"watchdog\"&&result.accepted&&current?.safeStop!==true&&\n current?.batteryMode===result.transaction.batteryMode&&samePlanCommit(current,result.transaction)){\n const registers=verifyRegisterState(current,msg.watchdogActual||{});\n if(registers.ok)return [null,null,null];\n const revision=Number(flow.get(\"energyOptimizerRevision\")||0)+1;\n flow.set(\"energyOptimizerRevision\",revision);\n const detail=registers.mismatches.join(\",\").slice(0,120);\n const transaction={\n  ...current,revision,issuedAtMs:msg.nowMs??Date.now(),writeStrategy:\"full\",\n  reason:\"watchdog_drift_\"+detail,reassertCount:0,\n  priorReservePct:finite(msg.reserveSensorPct),reserveControlAvailable:msg.reserveControlAvailable===true,\n  priorBatteryDischargeLimit:finite(msg.batteryDischargeLimitSensor),\n  batteryDischargeLimitControlAvailable:msg.batteryDischargeLimitControlAvailable===true\n };\n flow.set(\"energyOptimizerCurrentTransaction\",transaction);\n return [\n  {...msg,transaction,payload:statusText(\"requested\",transaction,\"watchdog_physical_drift\")},\n  {transaction,optimizer:result},\n  {...msg,transaction,payload:transaction.targetKw}\n ];\n}\nconst revision=Number(flow.get(\"energyOptimizerRevision\")||0)+1;\nflow.set(\"energyOptimizerRevision\",revision);\nconst transaction={...result.transaction,revision,issuedAtMs:msg.nowMs??Date.now()};\nconst lastApplied=flow.get(\"energyOptimizerLastAppliedTransaction\")||null;\nconst applyingRevision=flow.get(\"energyOptimizerApplyingRevision\");\n// A new Amber settlement interval and every safety action remain immediate.\n// Inside the same interval, hold the last physically applied export state for\n// at least sixty seconds so the fast/full planner pair and PV/load noise cannot\n// stop and restart export or chase every small correction.\nconst lastRateChange=finite(lastApplied?.exportRateChangedAtMs)??finite(lastApplied?.appliedAtMs);\nconst samePriceInterval=finite(lastApplied?.priceIntervalStartMs)!==null&&\n finite(lastApplied?.priceIntervalStartMs)===finite(transaction.priceIntervalStartMs);\nconst exportRateChanged=lastApplied?.batteryMode===\"export\"&&transaction.batteryMode===\"export\"&&\n Math.abs(Number(lastApplied.targetKw||0)-Number(transaction.targetKw||0))>0.05;\nconst exportRateDelta=Math.abs(Number(lastApplied?.targetKw||0)-Number(transaction.targetKw||0));\nconst exportRateDeadband=Math.max(EXPORT_RATE_DEADBAND_KW,\n Math.abs(Number(lastApplied?.targetKw||0))*EXPORT_RATE_DEADBAND_RATIO);\nconst exportRateInsideDeadband=exportRateChanged&&samePriceInterval&&\n exportRateDelta<exportRateDeadband;\nif(exportRateChanged&&samePriceInterval&&lastRateChange!==null&&\n (transaction.issuedAtMs-lastRateChange<EXPORT_RATE_MIN_INTERVAL_MS||exportRateInsideDeadband)){\n transaction.deferredTargetKw=transaction.targetKw;\n transaction.targetKw=Number(lastApplied.targetKw||0);\n transaction.dischargeRateKw=Number(lastApplied.dischargeRateKw||transaction.targetKw);\n transaction.dischargePowerPercent=Number(lastApplied.dischargePowerPercent||0);\n // The physical battery rate remains the previously applied command, so its\n // feedback objective must remain the matching previously applied site target\n // too. Recomputing from a newer load/PV snapshot would describe a command we\n // deliberately did not send and can trigger a false reassertion.\n transaction.siteExportTargetKw=Number(lastApplied.siteExportTargetKw||0);\n transaction.reason=exportRateInsideDeadband?\n  \"accepted_export_rate_held_60s_deadband\":\"accepted_export_rate_held_60s\";\n}\nconst exportStopChanged=lastApplied?.batteryMode===\"export\"&&\n [\"hold\",\"self_consume\"].includes(transaction.batteryMode)&&\n Number(lastApplied.targetKw||0)>0.05;\nif(exportStopChanged&&samePriceInterval&&lastRateChange!==null&&\n transaction.issuedAtMs-lastRateChange<EXPORT_RATE_MIN_INTERVAL_MS&&\n transaction.safeStop!==true&&transaction.pvExportCommand!==\"curtail\"&&\n Number(transaction.liveFitPrice)>=0){\n transaction.deferredTargetKw=0;\n for(const key of [\n  \"batteryMode\",\"targetKw\",\"plannedBatteryTargetKw\",\"siteExportTargetKw\",\n  \"protectedSocPct\",\"reservePct\",\"batteryDischargeLimit\",\"pvExportCommand\",\n  \"antiRefluxMode\",\"exportLimit\",\"gridMaxDischarge\",\"exportHelperOn\",\n  \"pvChargeOn\",\"forceChargeOn\",\"forceDischargeOn\",\"chargeRateKw\",\n  \"dischargeRateKw\",\"chargePowerPercent\",\"dischargePowerPercent\",\n  \"pvChargePowerLimit\"\n ])transaction[key]=lastApplied[key];\n transaction.reason=\"accepted_export_stop_held_60s\";\n}\nconst exportStartChanged=lastApplied&&lastApplied.batteryMode!==\"export\"&&\n transaction.batteryMode===\"export\"&&Number(transaction.targetKw||0)>0.05;\nif(exportStartChanged&&samePriceInterval&&lastRateChange!==null&&\n transaction.issuedAtMs-lastRateChange<EXPORT_RATE_MIN_INTERVAL_MS&&\n [\"hold\",\"self_consume\"].includes(lastApplied.batteryMode)&&lastApplied.safeStop!==true){\n transaction.deferredTargetKw=transaction.targetKw;\n for(const key of [\n  \"batteryMode\",\"targetKw\",\"plannedBatteryTargetKw\",\"siteExportTargetKw\",\n  \"protectedSocPct\",\"reservePct\",\"batteryDischargeLimit\",\"pvExportCommand\",\n  \"antiRefluxMode\",\"exportLimit\",\"gridMaxDischarge\",\"exportHelperOn\",\n  \"pvChargeOn\",\"forceChargeOn\",\"forceDischargeOn\",\"chargeRateKw\",\n  \"dischargeRateKw\",\"chargePowerPercent\",\"dischargePowerPercent\",\n  \"pvChargePowerLimit\"\n ])transaction[key]=lastApplied[key];\n transaction.reason=\"accepted_export_start_held_60s\";\n}\nconst heldPhysicalExport=transaction.batteryMode===\"export\"&&\n String(transaction.reason||\"\").includes(\"held_60s\")&&\n lastApplied?.batteryMode===\"export\"&&\n Math.abs(Number(lastApplied.targetKw||0)-Number(transaction.targetKw||0))<=0.05;\nconst semanticNoop=sameSemanticPhysicalCommand(\n transaction,lastConfirmed,lastApplied,applyingRevision,msg.watchdogActual||{}\n);\n// A held command is deliberately the already-applied physical export state.\n// Rewriting the same discharge percentage is harmless and, critically, avoids\n// the full transaction's stop/re-enable pulse while still advancing plan\n// identity, deadline and feedback.\ntransaction.writeStrategy=semanticNoop?\"semantic_noop\":heldPhysicalExport?\"no_write\":\n exportRateOnlyEligible(transaction,lastConfirmed,lastApplied,applyingRevision)?\n \"export_rate_only\":\"full\";\nflow.set(\"energyOptimizerCurrentTransaction\",transaction);\nif(result.accepted){\n  flow.set(\"energyOptimizerLastAcceptedGeneratedAtMs\",result.generatedAtMs);\n  flow.set(\"energyOptimizerLastAcceptedPlanId\",transaction.planId);\n}\nconst requested={...msg,transaction,payload:statusText(\"requested\",transaction,result.status)};\nconst deadline={transaction,optimizer:result};\nreturn [requested,deadline,{...msg,transaction,payload:transaction.targetKw}];",
+    "outputs": 3,
     "noerr": 0,
     "initialize": "",
     "finalize": "",
     "libs": [],
-    "x": 710,
-    "y": 140,
+    "x": 760,
+    "y": 150,
     "wires": [
       [
-        "eop_audit_002",
+        "eop_audit_002"
+      ],
+      [
         "eop_arm_deadline_002"
       ],
       [
-        "eop_stop_forced_002"
-      ],
-      [
-        "eop_set_discharge_002"
-      ],
-      [
-        "eop_set_charge_002"
-      ],
-      [
-        "eop_curtail_raw_002"
-      ],
-      [
-        "eop_allow_export_raw_002"
+        "eop_apply_queue_002"
       ]
     ]
   },
@@ -189,14 +245,14 @@
     "type": "function",
     "z": "eop_guard_tab_002",
     "name": "Arm exact plan-expiry deadline",
-    "func": "const r=msg.optimizer||{};\nconst deadlineAtMs=Number(r.validUntilMs), topic='energy_optimizer_plan_deadline';\nconst accepted=r.actuate===true && r.safeStop!==true && Number.isFinite(deadlineAtMs);\nif (!accepted) {\n  flow.set('energyOptimizerPlanDeadline',null);\n  return {reset:true,topic,deadlinePlanId:String(r.planId||'unknown')};\n}\nconst planId=String(r.planId||'unknown'), nowMs=Date.now();\nflow.set('energyOptimizerPlanDeadline',{planId,validUntilMs:deadlineAtMs});\nreturn {...msg,payload:'arm_deadline',topic,delay:Math.max(1,deadlineAtMs-nowMs),deadlinePlanId:planId,deadlineAtMs};",
+    "func": "\"use strict\";\n\nfunction finite(value) {\n  if (value === null || value === undefined) return null;\n  if (\n    typeof value === \"string\" &&\n    (!value.trim() || [\"unknown\", \"unavailable\", \"none\", \"null\"].includes(value.trim().toLowerCase()))\n  ) return null;\n  const parsed = Number(value);\n  return Number.isFinite(parsed) ? parsed : null;\n}\n\nconst transaction=msg.transaction||{};\nconst current=flow.get(\"energyOptimizerCurrentTransaction\")||{};\nif(transaction.revision!==current.revision||transaction.safeStop||finite(transaction.validUntilMs)===null){\n  flow.set(\"energyOptimizerPlanDeadline\",null);\n  return {reset:true};\n}\nconst now=Date.now();\nflow.set(\"energyOptimizerPlanDeadline\",{planId:transaction.planId,revision:transaction.revision,validUntilMs:transaction.validUntilMs});\nreturn {deadlinePlanId:transaction.planId,deadlineRevision:transaction.revision,deadlineAtMs:transaction.validUntilMs,delay:Math.max(1,transaction.validUntilMs-now)};",
     "outputs": 1,
     "noerr": 0,
     "initialize": "",
     "finalize": "",
     "libs": [],
-    "x": 1080,
-    "y": 80,
+    "x": 1050,
+    "y": 90,
     "wires": [
       [
         "eop_plan_deadline_timer_002"
@@ -209,9 +265,9 @@
     "z": "eop_guard_tab_002",
     "name": "Replaceable valid-until one-shot",
     "op1": "",
-    "op2": "expired",
+    "op2": "",
     "op1type": "nul",
-    "op2type": "str",
+    "op2type": "pay",
     "duration": "1",
     "extend": true,
     "overrideDelay": true,
@@ -220,8 +276,8 @@
     "bytopic": "all",
     "topic": "topic",
     "outputs": 1,
-    "x": 1360,
-    "y": 80,
+    "x": 1330,
+    "y": 90,
     "wires": [
       [
         "eop_plan_deadline_expired_002"
@@ -233,23 +289,20 @@
     "type": "function",
     "z": "eop_guard_tab_002",
     "name": "Safe-stop at exact plan expiry",
-    "func": "const armed=flow.get('energyOptimizerPlanDeadline');\nconst planId=String(msg.deadlinePlanId||'unknown'), deadlineAtMs=Number(msg.deadlineAtMs);\nconst matches=armed && armed.planId===planId && Number(armed.validUntilMs)===deadlineAtMs;\nif (!matches) return [null,null,null,null];\nconst nowMs=Date.now();\nif (nowMs<deadlineAtMs) return [null,null,null,{...msg,payload:'rearm_deadline',delay:Math.max(1,deadlineAtMs-nowMs)}];\nflow.set('energyOptimizerPlanDeadline',null);\nflow.set('energyOptimizerLastCommand',{action:'none',targetKw:0,planId});\nconst command={action:'none',targetKw:0,requestedTargetKw:0,planId};\nconst audit={payload:'rejected_expired_deadline | '+planId+' | valid_until='+new Date(deadlineAtMs).toISOString(),command};\nreturn [audit,{payload:0,command},{payload:1,command},null];",
-    "outputs": 4,
+    "func": "\"use strict\";\n\nfunction finite(value) {\n  if (value === null || value === undefined) return null;\n  if (\n    typeof value === \"string\" &&\n    (!value.trim() || [\"unknown\", \"unavailable\", \"none\", \"null\"].includes(value.trim().toLowerCase()))\n  ) return null;\n  const parsed = Number(value);\n  return Number.isFinite(parsed) ? parsed : null;\n}\n\nfunction clamp(value, minimum, maximum) {\n  return Math.min(maximum, Math.max(minimum, value));\n}\n\nfunction normalizedWholeReservePct(value) {\n  const parsed = finite(value);\n  if (parsed === null || parsed < 5 || parsed > 100.5) return null;\n  return clamp(Math.ceil(parsed), 5, 100);\n}\n\nfunction preservedReservePct(value) {\n  return normalizedWholeReservePct(value) ?? 5;\n}\n\nfunction statusText(phase, transaction, detail = \"\") {\n  // The audit service uses unescaped Mustache so Home Assistant stores the\n  // controlled status text verbatim. Keep every dynamic component JSON-safe\n  // and prevent an injected field delimiter from changing the status layout.\n  const clean = (value) => String(value ?? \"\")\n    .replace(/[\\\\\"\\u0000-\\u001f]/g, \"_\")\n    .replace(/\\|/g, \"/\");\n  const statusPhase = {\n    confirmed: \"feedback_confirmed\",\n    semantic_confirmed: \"semantic_noop_confirmed\",\n  }[phase] || phase;\n  const fields = [\n    clean(statusPhase),\n    clean(transaction?.planId || \"unknown\"),\n    `mode=${clean(transaction?.batteryMode || \"unknown\")}`,\n    `target=${Number(transaction?.targetKw || 0).toFixed(1)}kW`,\n    `export=${clean(transaction?.pvExportCommand || \"unknown\")}`,\n    `reserve=${transaction?.priorReservePct ?? \"na\"}->${transaction?.reservePct ?? \"na\"}%`,\n  ];\n  if (transaction?.acceptedAtMs) fields.push(`accepted_ms=${transaction.acceptedAtMs}`);\n  if (transaction?.firstWriteAtMs) fields.push(`first_write_ms=${transaction.firstWriteAtMs}`);\n  if (transaction?.appliedAtMs) fields.push(`applied_ms=${transaction.appliedAtMs}`);\n  if (transaction?.confirmedAtMs) fields.push(`confirmed_ms=${transaction.confirmedAtMs}`);\n  if (transaction?.reason) fields.push(`reason=${clean(transaction.reason)}`);\n  if (detail) fields.push(clean(detail));\n  return fields.join(\" | \").slice(0, 250);\n}\n\nconst active=flow.get(\"energyOptimizerPlanDeadline\")||{};\nconst current=flow.get(\"energyOptimizerCurrentTransaction\")||{};\nif(active.planId!==msg.deadlinePlanId||active.revision!==msg.deadlineRevision)return [null,null,null];\nconst now=Date.now();\nif(finite(msg.deadlineAtMs)!==null&&now<msg.deadlineAtMs)return [null,null,{...msg,delay:Math.max(1,msg.deadlineAtMs-now)}];\nflow.set(\"energyOptimizerPlanDeadline\",null);\nconst revision=Number(flow.get(\"energyOptimizerRevision\")||0)+1;\nflow.set(\"energyOptimizerRevision\",revision);\nconst curtail=current.pvExportCommand===\"curtail\";\nconst transaction={...current,revision,planId:String(current.planId||\"unknown\"),batteryMode:\"safe_stop\",reason:\"expired\",safeStop:true,writeStrategy:\"full\",targetKw:0,siteExportTargetKw:0,priorReservePct:current.reservePct,reservePct:preservedReservePct(current.reservePct),priorBatteryDischargeLimit:current.batteryDischargeLimit,batteryDischargeLimit:1000,pvExportCommand:curtail?\"curtail\":\"allow\",antiRefluxMode:curtail?1:0,exportLimit:curtail?0:1100,exportHelperOn:!curtail,pvChargeOn:true,forceChargeOn:false,forceDischargeOn:false,chargeRateKw:30,dischargeRateKw:28,chargePowerPercent:0,dischargePowerPercent:0,pvChargePowerLimit:1000,issuedAtMs:now,validUntilMs:null,reassertCount:0,emergencyAttempted:true};\nflow.set(\"energyOptimizerCurrentTransaction\",transaction);\nreturn [{transaction,payload:statusText(\"failed\",transaction,\"expired\")},{transaction},null];",
+    "outputs": 3,
     "noerr": 0,
     "initialize": "",
     "finalize": "",
     "libs": [],
     "x": 1630,
-    "y": 80,
+    "y": 90,
     "wires": [
       [
         "eop_audit_002"
       ],
       [
-        "eop_stop_forced_002"
-      ],
-      [
-        "eop_allow_export_raw_002"
+        "eop_apply_queue_002"
       ],
       [
         "eop_plan_deadline_timer_002"
@@ -260,229 +313,970 @@
     "id": "eop_audit_002",
     "type": "api-call-service",
     "z": "eop_guard_tab_002",
-    "name": "Publish actuator status",
+    "name": "Publish requested/applied/confirmed/failed",
     "server": "srv_ha_001",
     "version": 7,
+    "debugenabled": false,
     "action": "input_text.set_value",
+    "floorId": [],
+    "areaId": [],
+    "deviceId": [],
     "entityId": [
       "input_text.energy_optimizer_actuator_status"
     ],
-    "data": "{\"value\":\"{{payload}}\"}",
+    "labelId": [],
+    "data": "{\"value\":\"{{{payload}}}\"}",
     "dataType": "json",
+    "mergeContext": "",
+    "mustacheAltTags": false,
+    "outputProperties": [],
+    "queue": "none",
     "blockInputOverrides": false,
-    "x": 1780,
-    "y": 40,
+    "domain": "input_text",
+    "service": "set_value",
+    "x": 2140,
+    "y": 50,
     "wires": [
       []
     ]
   },
   {
-    "id": "eop_stop_forced_002",
+    "id": "eop_apply_queue_002",
+    "type": "function",
+    "z": "eop_guard_tab_002",
+    "name": "Lock physical write phase; latest pending wins",
+    "func": "\"use strict\";\n\nfunction finite(value) {\n  if (value === null || value === undefined) return null;\n  if (\n    typeof value === \"string\" &&\n    (!value.trim() || [\"unknown\", \"unavailable\", \"none\", \"null\"].includes(value.trim().toLowerCase()))\n  ) return null;\n  const parsed = Number(value);\n  return Number.isFinite(parsed) ? parsed : null;\n}\n\nfunction sameTransactionIdentity(left, right) {\n  return Boolean(left && right) &&\n    String(left.planId || \"\") === String(right.planId || \"\") &&\n    finite(left.revision) !== null && finite(left.revision) === finite(right.revision) &&\n    finite(left.issuedAtMs) !== null && finite(left.issuedAtMs) === finite(right.issuedAtMs);\n}\n\nfunction statusText(phase, transaction, detail = \"\") {\n  // The audit service uses unescaped Mustache so Home Assistant stores the\n  // controlled status text verbatim. Keep every dynamic component JSON-safe\n  // and prevent an injected field delimiter from changing the status layout.\n  const clean = (value) => String(value ?? \"\")\n    .replace(/[\\\\\"\\u0000-\\u001f]/g, \"_\")\n    .replace(/\\|/g, \"/\");\n  const statusPhase = {\n    confirmed: \"feedback_confirmed\",\n    semantic_confirmed: \"semantic_noop_confirmed\",\n  }[phase] || phase;\n  const fields = [\n    clean(statusPhase),\n    clean(transaction?.planId || \"unknown\"),\n    `mode=${clean(transaction?.batteryMode || \"unknown\")}`,\n    `target=${Number(transaction?.targetKw || 0).toFixed(1)}kW`,\n    `export=${clean(transaction?.pvExportCommand || \"unknown\")}`,\n    `reserve=${transaction?.priorReservePct ?? \"na\"}->${transaction?.reservePct ?? \"na\"}%`,\n  ];\n  if (transaction?.acceptedAtMs) fields.push(`accepted_ms=${transaction.acceptedAtMs}`);\n  if (transaction?.firstWriteAtMs) fields.push(`first_write_ms=${transaction.firstWriteAtMs}`);\n  if (transaction?.appliedAtMs) fields.push(`applied_ms=${transaction.appliedAtMs}`);\n  if (transaction?.confirmedAtMs) fields.push(`confirmed_ms=${transaction.confirmedAtMs}`);\n  if (transaction?.reason) fields.push(`reason=${clean(transaction.reason)}`);\n  if (detail) fields.push(clean(detail));\n  return fields.join(\" | \").slice(0, 250);\n}\n\nconst tx=msg.transaction||{};\nconst current=flow.get(\"energyOptimizerCurrentTransaction\")||{};\nif(!sameTransactionIdentity(tx,current))return [null,null];\nlet applying=flow.get(\"energyOptimizerApplyingRevision\");\nconst applyingStarted=Number(flow.get(\"energyOptimizerApplyingStartedAtMs\")||0);\nif(applying!==null&&applying!==undefined&&Date.now()-applyingStarted>30000){\n flow.set(\"energyOptimizerApplyingRevision\",null);\n flow.set(\"energyOptimizerApplyingStartedAtMs\",null);\n flow.set(\"energyOptimizerApplyingTransaction\",null);\n flow.set(\"energyOptimizerPendingTransaction\",null);\n flow.set(\"energyOptimizerWriteBarrier\",null);\n applying=null;\n}\nif(applying!==null&&applying!==undefined){\n const pending=flow.get(\"energyOptimizerPendingTransaction\");\n if(!pending||Number(tx.revision)>=Number(pending.transaction?.revision||-1))flow.set(\"energyOptimizerPendingTransaction\",msg);\n return [null,{transaction:tx,payload:statusText(\"requested\",tx,\"queued_behind_atomic_transaction\")}];\n}\nflow.set(\"energyOptimizerApplyingRevision\",tx.revision);\nflow.set(\"energyOptimizerApplyingStartedAtMs\",Date.now());\nconst transaction={...tx,firstWriteAtMs:Date.now()};\nflow.set(\"energyOptimizerApplyingTransaction\",transaction);\nflow.set(\"energyOptimizerCurrentTransaction\",transaction);\nreturn [{...msg,transaction},null];",
+    "outputs": 2,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 810,
+    "y": 250,
+    "wires": [
+      [
+        "eop_write_strategy_route_002"
+      ],
+      [
+        "eop_audit_002"
+      ]
+    ]
+  },
+  {
+    "id": "eop_write_strategy_route_002",
+    "type": "function",
+    "z": "eop_guard_tab_002",
+    "name": "Recheck semantic/fast/full write path",
+    "func": "\"use strict\";\n\nfunction finite(value) {\n  if (value === null || value === undefined) return null;\n  if (\n    typeof value === \"string\" &&\n    (!value.trim() || [\"unknown\", \"unavailable\", \"none\", \"null\"].includes(value.trim().toLowerCase()))\n  ) return null;\n  const parsed = Number(value);\n  return Number.isFinite(parsed) ? parsed : null;\n}\n\nfunction sameTransactionIdentity(left, right) {\n  return Boolean(left && right) &&\n    String(left.planId || \"\") === String(right.planId || \"\") &&\n    finite(left.revision) !== null && finite(left.revision) === finite(right.revision) &&\n    finite(left.issuedAtMs) !== null && finite(left.issuedAtMs) === finite(right.issuedAtMs);\n}\n\nfunction exportRateOnlyEligible(transaction, confirmed, applied, applyingRevision) {\n  if (\n    transaction?.safeStop || transaction?.batteryMode !== \"export\" ||\n    transaction?.forceDischargeOn !== true ||\n    (applyingRevision !== null && applyingRevision !== undefined && applyingRevision !== transaction.revision) ||\n    !sameTransactionIdentity(confirmed, applied) ||\n    confirmed.batteryMode !== \"export\" || confirmed.forceDischargeOn !== true\n  ) return false;\n  const unchanged = [\n    \"reservePct\", \"batteryDischargeLimit\", \"pvExportCommand\", \"antiRefluxMode\",\n    \"exportLimit\", \"gridMaxDischarge\", \"exportHelperOn\", \"pvChargeOn\",\n    \"forceChargeOn\", \"forceDischargeOn\", \"chargePowerPercent\",\n    \"pvChargePowerLimit\", \"softwareVersion\", \"configFingerprint\",\n    \"priceIntervalStartMs\",\n  ];\n  return unchanged.every((key) => transaction[key] === confirmed[key]);\n}\n\nfunction heldExportNoWriteEligible(transaction, applied, applyingRevision) {\n  if (\n    transaction?.safeStop || transaction?.batteryMode !== \"export\" ||\n    transaction?.forceDischargeOn !== true ||\n    !String(transaction?.reason || \"\").includes(\"held_60s\") ||\n    (applyingRevision !== null && applyingRevision !== undefined && applyingRevision !== transaction.revision) ||\n    applied?.batteryMode !== \"export\" || applied?.forceDischargeOn !== true\n  ) return false;\n  const unchanged = [\n    \"targetKw\", \"reservePct\", \"batteryDischargeLimit\", \"pvExportCommand\",\n    \"antiRefluxMode\", \"exportLimit\", \"gridMaxDischarge\", \"exportHelperOn\",\n    \"pvChargeOn\", \"forceChargeOn\", \"forceDischargeOn\", \"chargePowerPercent\",\n    \"dischargePowerPercent\", \"pvChargePowerLimit\", \"softwareVersion\",\n    \"configFingerprint\", \"priceIntervalStartMs\",\n  ];\n  return unchanged.every((key) => transaction[key] === applied[key]);\n}\n\nconst tx=msg.transaction||{};\nconst confirmed=flow.get(\"energyOptimizerLastRegisterConfirmedTransaction\")||null;\nconst applied=flow.get(\"energyOptimizerLastAppliedTransaction\")||null;\nconst applying=flow.get(\"energyOptimizerApplyingRevision\");\nconst noWrite=tx.writeStrategy===\"no_write\"&&heldExportNoWriteEligible(tx,applied,applying);\nconst fast=tx.writeStrategy===\"export_rate_only\"&&exportRateOnlyEligible(tx,confirmed,applied,applying);\nconst semantic=tx.writeStrategy===\"semantic_noop\"&&applying===tx.revision;\nreturn semantic?[null,null,null,msg]:noWrite?[null,null,msg,null]:fast?[msg,null,null,null]:[null,{...msg,transaction:{...tx,writeStrategy:\"full\"}},null,null];",
+    "outputs": 4,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 1060,
+    "y": 250,
+    "wires": [
+      [
+        "eop_fast_set_discharge_percent_002"
+      ],
+      [
+        "eop_stop_charge_physical_002"
+      ],
+      [
+        "eop_applied_002"
+      ],
+      [
+        "eop_semantic_confirmed_002"
+      ]
+    ]
+  },
+  {
+    "id": "eop_semantic_confirmed_002",
+    "type": "function",
+    "z": "eop_guard_tab_002",
+    "name": "Confirm unchanged physical command without writes",
+    "func": "\"use strict\";\n\nfunction finite(value) {\n  if (value === null || value === undefined) return null;\n  if (\n    typeof value === \"string\" &&\n    (!value.trim() || [\"unknown\", \"unavailable\", \"none\", \"null\"].includes(value.trim().toLowerCase()))\n  ) return null;\n  const parsed = Number(value);\n  return Number.isFinite(parsed) ? parsed : null;\n}\n\nfunction sameTransactionIdentity(left, right) {\n  return Boolean(left && right) &&\n    String(left.planId || \"\") === String(right.planId || \"\") &&\n    finite(left.revision) !== null && finite(left.revision) === finite(right.revision) &&\n    finite(left.issuedAtMs) !== null && finite(left.issuedAtMs) === finite(right.issuedAtMs);\n}\n\nfunction statusText(phase, transaction, detail = \"\") {\n  // The audit service uses unescaped Mustache so Home Assistant stores the\n  // controlled status text verbatim. Keep every dynamic component JSON-safe\n  // and prevent an injected field delimiter from changing the status layout.\n  const clean = (value) => String(value ?? \"\")\n    .replace(/[\\\\\"\\u0000-\\u001f]/g, \"_\")\n    .replace(/\\|/g, \"/\");\n  const statusPhase = {\n    confirmed: \"feedback_confirmed\",\n    semantic_confirmed: \"semantic_noop_confirmed\",\n  }[phase] || phase;\n  const fields = [\n    clean(statusPhase),\n    clean(transaction?.planId || \"unknown\"),\n    `mode=${clean(transaction?.batteryMode || \"unknown\")}`,\n    `target=${Number(transaction?.targetKw || 0).toFixed(1)}kW`,\n    `export=${clean(transaction?.pvExportCommand || \"unknown\")}`,\n    `reserve=${transaction?.priorReservePct ?? \"na\"}->${transaction?.reservePct ?? \"na\"}%`,\n  ];\n  if (transaction?.acceptedAtMs) fields.push(`accepted_ms=${transaction.acceptedAtMs}`);\n  if (transaction?.firstWriteAtMs) fields.push(`first_write_ms=${transaction.firstWriteAtMs}`);\n  if (transaction?.appliedAtMs) fields.push(`applied_ms=${transaction.appliedAtMs}`);\n  if (transaction?.confirmedAtMs) fields.push(`confirmed_ms=${transaction.confirmedAtMs}`);\n  if (transaction?.reason) fields.push(`reason=${clean(transaction.reason)}`);\n  if (detail) fields.push(clean(detail));\n  return fields.join(\" | \").slice(0, 250);\n}\n\nconst tx=msg.transaction||{};\nconst current=flow.get(\"energyOptimizerCurrentTransaction\")||{};\nif(!sameTransactionIdentity(tx,current))return [null,null];\nif(flow.get(\"energyOptimizerApplyingRevision\")===tx.revision){\n flow.set(\"energyOptimizerApplyingRevision\",null);\n flow.set(\"energyOptimizerApplyingStartedAtMs\",null);\n flow.set(\"energyOptimizerApplyingTransaction\",null);\n}\nconst pending=flow.get(\"energyOptimizerPendingTransaction\")||null;\nflow.set(\"energyOptimizerPendingTransaction\",null);\nconst previous=flow.get(\"energyOptimizerLastAppliedTransaction\")||{};\nconst confirmedAtMs=Date.now();\nconst transaction={...tx,appliedAtMs:previous.appliedAtMs||confirmedAtMs,confirmedAtMs};\nflow.set(\"energyOptimizerCurrentTransaction\",transaction);\nflow.set(\"energyOptimizerLastAppliedTransaction\",transaction);\nflow.set(\"energyOptimizerLastRegisterConfirmedTransaction\",transaction);\nflow.set(\"energyOptimizerLastConfirmedTransaction\",transaction);\nreturn [{transaction,payload:statusText(\"semantic_confirmed\",transaction,\"no_physical_write\")},pending];",
+    "outputs": 2,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 1370,
+    "y": 120,
+    "wires": [
+      [
+        "eop_audit_002"
+      ],
+      [
+        "eop_apply_queue_002"
+      ]
+    ]
+  },
+  {
+    "id": "eop_fast_set_discharge_percent_002",
     "type": "api-call-service",
     "z": "eop_guard_tab_002",
-    "name": "Stop both forced battery modes",
+    "name": "FAST: update export percentage only",
     "server": "srv_ha_001",
     "version": 7,
+    "debugenabled": false,
+    "action": "number.set_value",
+    "floorId": [],
+    "areaId": [],
+    "deviceId": [],
+    "entityId": [
+      "number.saj_discharge1_power_percent_input"
+    ],
+    "labelId": [],
+    "data": "{\"value\":{{transaction.dischargePowerPercent}}}",
+    "dataType": "json",
+    "mergeContext": "",
+    "mustacheAltTags": false,
+    "outputProperties": [],
+    "queue": "none",
+    "blockInputOverrides": false,
+    "domain": "number",
+    "service": "set_value",
+    "x": 1350,
+    "y": 190,
+    "wires": [
+      [
+        "eop_applied_002"
+      ]
+    ]
+  },
+  {
+    "id": "eop_stop_charge_physical_002",
+    "type": "api-call-service",
+    "z": "eop_guard_tab_002",
+    "name": "1 Stop physical force charge",
+    "server": "srv_ha_001",
+    "version": 7,
+    "debugenabled": false,
+    "action": "switch.turn_off",
+    "floorId": [],
+    "areaId": [],
+    "deviceId": [],
+    "entityId": [
+      "switch.saj_charging_control"
+    ],
+    "labelId": [],
+    "data": "{}",
+    "dataType": "json",
+    "mergeContext": "",
+    "mustacheAltTags": false,
+    "outputProperties": [],
+    "queue": "none",
+    "blockInputOverrides": false,
+    "domain": "switch",
+    "service": "turn_off",
+    "x": 1350,
+    "y": 250,
+    "wires": [
+      [
+        "eop_stop_discharge_physical_002"
+      ]
+    ]
+  },
+  {
+    "id": "eop_stop_discharge_physical_002",
+    "type": "api-call-service",
+    "z": "eop_guard_tab_002",
+    "name": "2 Stop physical force discharge",
+    "server": "srv_ha_001",
+    "version": 7,
+    "debugenabled": false,
+    "action": "switch.turn_off",
+    "floorId": [],
+    "areaId": [],
+    "deviceId": [],
+    "entityId": [
+      "switch.saj_discharging_control"
+    ],
+    "labelId": [],
+    "data": "{}",
+    "dataType": "json",
+    "mergeContext": "",
+    "mustacheAltTags": false,
+    "outputProperties": [],
+    "queue": "none",
+    "blockInputOverrides": false,
+    "domain": "switch",
+    "service": "turn_off",
+    "x": 1600,
+    "y": 250,
+    "wires": [
+      [
+        "eop_stop_force_helpers_002"
+      ]
+    ]
+  },
+  {
+    "id": "eop_stop_force_helpers_002",
+    "type": "api-call-service",
+    "z": "eop_guard_tab_002",
+    "name": "3 Sync force helpers off",
+    "server": "srv_ha_001",
+    "version": 7,
+    "debugenabled": false,
     "action": "input_boolean.turn_off",
+    "floorId": [],
+    "areaId": [],
+    "deviceId": [],
     "entityId": [
       "input_boolean.battery_charge",
       "input_boolean.battery_discharge"
     ],
+    "labelId": [],
     "data": "{}",
     "dataType": "json",
-    "x": 1780,
-    "y": 100,
-    "wires": [
-      [
-        "eop_reset_charge_rate_002"
-      ]
-    ]
-  },
-  {
-    "id": "eop_reset_charge_rate_002",
-    "type": "api-call-service",
-    "z": "eop_guard_tab_002",
-    "name": "Restore normal 30 kW PV charge limit",
-    "server": "srv_ha_001",
-    "version": 7,
-    "action": "input_number.set_value",
-    "entityId": [
-      "input_number.battery_charge_rate"
-    ],
-    "data": "{\"value\":30}",
-    "dataType": "json",
+    "mergeContext": "",
+    "mustacheAltTags": false,
+    "outputProperties": [],
+    "queue": "none",
     "blockInputOverrides": false,
-    "x": 2050,
-    "y": 100,
+    "domain": "input_boolean",
+    "service": "turn_off",
+    "x": 1850,
+    "y": 250,
     "wires": [
       [
-        "eop_allow_pv_002"
+        "eop_reserve_route_002"
       ]
     ]
   },
   {
-    "id": "eop_allow_pv_002",
+    "id": "eop_reserve_route_002",
+    "type": "function",
+    "z": "eop_guard_tab_002",
+    "name": "4 Reserve write available?",
+    "func": "\"use strict\";\nreturn msg.transaction?.reserveControlAvailable?[msg,null]:[null,msg];",
+    "outputs": 2,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 2100,
+    "y": 250,
+    "wires": [
+      [
+        "eop_set_reserve_002"
+      ],
+      [
+        "eop_set_battery_discharge_limit_002"
+      ]
+    ]
+  },
+  {
+    "id": "eop_set_reserve_002",
     "type": "api-call-service",
     "z": "eop_guard_tab_002",
-    "name": "Allow normal PV charging",
+    "name": "5 Set protected reserve floor",
     "server": "srv_ha_001",
     "version": 7,
+    "debugenabled": false,
+    "action": "number.set_value",
+    "floorId": [],
+    "areaId": [],
+    "deviceId": [],
+    "entityId": [
+      "number.saj_battery_on_grid_discharge_depth_input"
+    ],
+    "labelId": [],
+    "data": "{\"value\":{{transaction.reservePct}}}",
+    "dataType": "json",
+    "mergeContext": "",
+    "mustacheAltTags": false,
+    "outputProperties": [],
+    "queue": "none",
+    "blockInputOverrides": false,
+    "domain": "number",
+    "service": "set_value",
+    "x": 2350,
+    "y": 210,
+    "wires": [
+      [
+        "eop_set_battery_discharge_limit_002"
+      ]
+    ]
+  },
+  {
+    "id": "eop_set_battery_discharge_limit_002",
+    "type": "api-call-service",
+    "z": "eop_guard_tab_002",
+    "name": "6 Set battery discharge allowance",
+    "server": "srv_ha_001",
+    "version": 7,
+    "debugenabled": false,
+    "action": "number.set_value",
+    "floorId": [],
+    "areaId": [],
+    "deviceId": [],
+    "entityId": [
+      "number.saj_battery_discharge_power_limit_input"
+    ],
+    "labelId": [],
+    "data": "{\"value\":{{transaction.batteryDischargeLimit}}}",
+    "dataType": "json",
+    "mergeContext": "",
+    "mustacheAltTags": false,
+    "outputProperties": [],
+    "queue": "none",
+    "blockInputOverrides": false,
+    "domain": "number",
+    "service": "set_value",
+    "x": 2600,
+    "y": 250,
+    "wires": [
+      [
+        "eop_set_grid_max_002"
+      ]
+    ]
+  },
+  {
+    "id": "eop_set_grid_max_002",
+    "type": "api-call-service",
+    "z": "eop_guard_tab_002",
+    "name": "7 Reassert grid max discharge",
+    "server": "srv_ha_001",
+    "version": 7,
+    "debugenabled": false,
+    "action": "number.set_value",
+    "floorId": [],
+    "areaId": [],
+    "deviceId": [],
+    "entityId": [
+      "number.saj_grid_max_discharge_power_input"
+    ],
+    "labelId": [],
+    "data": "{\"value\":{{transaction.gridMaxDischarge}}}",
+    "dataType": "json",
+    "mergeContext": "",
+    "mustacheAltTags": false,
+    "outputProperties": [],
+    "queue": "none",
+    "blockInputOverrides": false,
+    "domain": "number",
+    "service": "set_value",
+    "x": 2850,
+    "y": 250,
+    "wires": [
+      [
+        "eop_export_route_002"
+      ]
+    ]
+  },
+  {
+    "id": "eop_export_route_002",
+    "type": "function",
+    "z": "eop_guard_tab_002",
+    "name": "8 Apply export policy in safe order",
+    "func": "\"use strict\";\nreturn msg.transaction?.pvExportCommand===\"curtail\"?[msg,null]:[null,msg];",
+    "outputs": 2,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 3100,
+    "y": 250,
+    "wires": [
+      [
+        "eop_set_anti_curtail_002"
+      ],
+      [
+        "eop_set_export_normal_002"
+      ]
+    ]
+  },
+  {
+    "id": "eop_set_anti_curtail_002",
+    "type": "api-call-service",
+    "z": "eop_guard_tab_002",
+    "name": "9 Curtail: anti-reflux first",
+    "server": "srv_ha_001",
+    "version": 7,
+    "debugenabled": false,
+    "action": "number.set_value",
+    "floorId": [],
+    "areaId": [],
+    "deviceId": [],
+    "entityId": [
+      "number.saj_anti_reflux_mode_input"
+    ],
+    "labelId": [],
+    "data": "{\"value\":1}",
+    "dataType": "json",
+    "mergeContext": "",
+    "mustacheAltTags": false,
+    "outputProperties": [],
+    "queue": "none",
+    "blockInputOverrides": false,
+    "domain": "number",
+    "service": "set_value",
+    "x": 3350,
+    "y": 210,
+    "wires": [
+      [
+        "eop_set_export_zero_002"
+      ]
+    ]
+  },
+  {
+    "id": "eop_set_export_zero_002",
+    "type": "api-call-service",
+    "z": "eop_guard_tab_002",
+    "name": "10 Curtail: set exact zero export",
+    "server": "srv_ha_001",
+    "version": 7,
+    "debugenabled": false,
+    "action": "number.set_value",
+    "floorId": [],
+    "areaId": [],
+    "deviceId": [],
+    "entityId": [
+      "number.saj_export_limit_input"
+    ],
+    "labelId": [],
+    "data": "{\"value\":0}",
+    "dataType": "json",
+    "mergeContext": "",
+    "mustacheAltTags": false,
+    "outputProperties": [],
+    "queue": "none",
+    "blockInputOverrides": false,
+    "domain": "number",
+    "service": "set_value",
+    "x": 3600,
+    "y": 210,
+    "wires": [
+      [
+        "eop_export_helper_off_002"
+      ]
+    ]
+  },
+  {
+    "id": "eop_export_helper_off_002",
+    "type": "api-call-service",
+    "z": "eop_guard_tab_002",
+    "name": "11 Curtail: sync export helper off",
+    "server": "srv_ha_001",
+    "version": 7,
+    "debugenabled": false,
+    "action": "input_boolean.turn_off",
+    "floorId": [],
+    "areaId": [],
+    "deviceId": [],
+    "entityId": [
+      "input_boolean.export_power"
+    ],
+    "labelId": [],
+    "data": "{}",
+    "dataType": "json",
+    "mergeContext": "",
+    "mustacheAltTags": false,
+    "outputProperties": [],
+    "queue": "none",
+    "blockInputOverrides": false,
+    "domain": "input_boolean",
+    "service": "turn_off",
+    "x": 3850,
+    "y": 210,
+    "wires": [
+      [
+        "eop_set_charge_percent_002"
+      ]
+    ]
+  },
+  {
+    "id": "eop_set_export_normal_002",
+    "type": "api-call-service",
+    "z": "eop_guard_tab_002",
+    "name": "9 Allow: restore export limit first",
+    "server": "srv_ha_001",
+    "version": 7,
+    "debugenabled": false,
+    "action": "number.set_value",
+    "floorId": [],
+    "areaId": [],
+    "deviceId": [],
+    "entityId": [
+      "number.saj_export_limit_input"
+    ],
+    "labelId": [],
+    "data": "{\"value\":1100}",
+    "dataType": "json",
+    "mergeContext": "",
+    "mustacheAltTags": false,
+    "outputProperties": [],
+    "queue": "none",
+    "blockInputOverrides": false,
+    "domain": "number",
+    "service": "set_value",
+    "x": 3350,
+    "y": 290,
+    "wires": [
+      [
+        "eop_set_anti_normal_002"
+      ]
+    ]
+  },
+  {
+    "id": "eop_set_anti_normal_002",
+    "type": "api-call-service",
+    "z": "eop_guard_tab_002",
+    "name": "10 Allow: disable anti-reflux",
+    "server": "srv_ha_001",
+    "version": 7,
+    "debugenabled": false,
+    "action": "number.set_value",
+    "floorId": [],
+    "areaId": [],
+    "deviceId": [],
+    "entityId": [
+      "number.saj_anti_reflux_mode_input"
+    ],
+    "labelId": [],
+    "data": "{\"value\":0}",
+    "dataType": "json",
+    "mergeContext": "",
+    "mustacheAltTags": false,
+    "outputProperties": [],
+    "queue": "none",
+    "blockInputOverrides": false,
+    "domain": "number",
+    "service": "set_value",
+    "x": 3600,
+    "y": 290,
+    "wires": [
+      [
+        "eop_export_helper_on_002"
+      ]
+    ]
+  },
+  {
+    "id": "eop_export_helper_on_002",
+    "type": "api-call-service",
+    "z": "eop_guard_tab_002",
+    "name": "11 Allow: sync export helper on",
+    "server": "srv_ha_001",
+    "version": 7,
+    "debugenabled": false,
     "action": "input_boolean.turn_on",
+    "floorId": [],
+    "areaId": [],
+    "deviceId": [],
+    "entityId": [
+      "input_boolean.export_power"
+    ],
+    "labelId": [],
+    "data": "{}",
+    "dataType": "json",
+    "mergeContext": "",
+    "mustacheAltTags": false,
+    "outputProperties": [],
+    "queue": "none",
+    "blockInputOverrides": false,
+    "domain": "input_boolean",
+    "service": "turn_on",
+    "x": 3850,
+    "y": 290,
+    "wires": [
+      [
+        "eop_set_charge_percent_002"
+      ]
+    ]
+  },
+  {
+    "id": "eop_set_charge_percent_002",
+    "type": "api-call-service",
+    "z": "eop_guard_tab_002",
+    "name": "12 Set force-charge percentage",
+    "server": "srv_ha_001",
+    "version": 7,
+    "debugenabled": false,
+    "action": "number.set_value",
+    "floorId": [],
+    "areaId": [],
+    "deviceId": [],
+    "entityId": [
+      "number.saj_charge1_power_percent_input"
+    ],
+    "labelId": [],
+    "data": "{\"value\":{{transaction.chargePowerPercent}}}",
+    "dataType": "json",
+    "mergeContext": "",
+    "mustacheAltTags": false,
+    "outputProperties": [],
+    "queue": "none",
+    "blockInputOverrides": false,
+    "domain": "number",
+    "service": "set_value",
+    "x": 4100,
+    "y": 250,
+    "wires": [
+      [
+        "eop_set_discharge_percent_002"
+      ]
+    ]
+  },
+  {
+    "id": "eop_set_discharge_percent_002",
+    "type": "api-call-service",
+    "z": "eop_guard_tab_002",
+    "name": "13 Set force-discharge percentage",
+    "server": "srv_ha_001",
+    "version": 7,
+    "debugenabled": false,
+    "action": "number.set_value",
+    "floorId": [],
+    "areaId": [],
+    "deviceId": [],
+    "entityId": [
+      "number.saj_discharge1_power_percent_input"
+    ],
+    "labelId": [],
+    "data": "{\"value\":{{transaction.dischargePowerPercent}}}",
+    "dataType": "json",
+    "mergeContext": "",
+    "mustacheAltTags": false,
+    "outputProperties": [],
+    "queue": "none",
+    "blockInputOverrides": false,
+    "domain": "number",
+    "service": "set_value",
+    "x": 4350,
+    "y": 250,
+    "wires": [
+      [
+        "eop_set_pv_limit_002"
+      ]
+    ]
+  },
+  {
+    "id": "eop_set_pv_limit_002",
+    "type": "api-call-service",
+    "z": "eop_guard_tab_002",
+    "name": "14 Keep PV charging at full verified rate",
+    "server": "srv_ha_001",
+    "version": 7,
+    "debugenabled": false,
+    "action": "number.set_value",
+    "floorId": [],
+    "areaId": [],
+    "deviceId": [],
+    "entityId": [
+      "number.saj_battery_charge_power_limit_input"
+    ],
+    "labelId": [],
+    "data": "{\"value\":{{transaction.pvChargePowerLimit}}}",
+    "dataType": "json",
+    "mergeContext": "",
+    "mustacheAltTags": false,
+    "outputProperties": [],
+    "queue": "none",
+    "blockInputOverrides": false,
+    "domain": "number",
+    "service": "set_value",
+    "x": 4600,
+    "y": 250,
+    "wires": [
+      [
+        "eop_pv_route_002"
+      ]
+    ]
+  },
+  {
+    "id": "eop_pv_route_002",
+    "type": "function",
+    "z": "eop_guard_tab_002",
+    "name": "15 Sync explicit PV charging policy",
+    "func": "\"use strict\";\nreturn msg.transaction?.pvChargeOn?[msg,null]:[null,msg];",
+    "outputs": 2,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 4850,
+    "y": 250,
+    "wires": [
+      [
+        "eop_pv_charge_on_002"
+      ],
+      [
+        "eop_pv_charge_off_002"
+      ]
+    ]
+  },
+  {
+    "id": "eop_pv_charge_on_002",
+    "type": "api-call-service",
+    "z": "eop_guard_tab_002",
+    "name": "16 Allow PV battery charging",
+    "server": "srv_ha_001",
+    "version": 7,
+    "debugenabled": false,
+    "action": "input_boolean.turn_on",
+    "floorId": [],
+    "areaId": [],
+    "deviceId": [],
     "entityId": [
       "input_boolean.battery_pv_charge"
     ],
+    "labelId": [],
     "data": "{}",
     "dataType": "json",
-    "x": 2310,
-    "y": 100,
-    "wires": [
-      []
-    ]
-  },
-  {
-    "id": "eop_set_discharge_002",
-    "type": "api-call-service",
-    "z": "eop_guard_tab_002",
-    "name": "Set guarded discharge rate",
-    "server": "srv_ha_001",
-    "version": 7,
-    "action": "input_number.set_value",
-    "entityId": [
-      "input_number.battery_discharge_rate"
-    ],
-    "data": "{\"value\":{{payload}}}",
-    "dataType": "json",
-    "x": 1770,
-    "y": 160,
+    "mergeContext": "",
+    "mustacheAltTags": false,
+    "outputProperties": [],
+    "queue": "none",
+    "blockInputOverrides": false,
+    "domain": "input_boolean",
+    "service": "turn_on",
+    "x": 5100,
+    "y": 210,
     "wires": [
       [
-        "eop_discharge_chargeoff_002"
+        "eop_pre_force_check_002"
       ]
     ]
   },
   {
-    "id": "eop_discharge_chargeoff_002",
+    "id": "eop_pv_charge_off_002",
     "type": "api-call-service",
     "z": "eop_guard_tab_002",
-    "name": "Stop force charge",
+    "name": "16 Inhibit PV battery charging",
     "server": "srv_ha_001",
     "version": 7,
+    "debugenabled": false,
     "action": "input_boolean.turn_off",
-    "entityId": [
-      "input_boolean.battery_charge"
-    ],
-    "data": "{}",
-    "dataType": "json",
-    "x": 2030,
-    "y": 160,
-    "wires": [
-      [
-        "eop_discharge_pvoff_002"
-      ]
-    ]
-  },
-  {
-    "id": "eop_discharge_pvoff_002",
-    "type": "api-call-service",
-    "z": "eop_guard_tab_002",
-    "name": "Stop PV charging during FIT export",
-    "server": "srv_ha_001",
-    "version": 7,
-    "action": "input_boolean.turn_off",
+    "floorId": [],
+    "areaId": [],
+    "deviceId": [],
     "entityId": [
       "input_boolean.battery_pv_charge"
     ],
+    "labelId": [],
     "data": "{}",
     "dataType": "json",
-    "x": 2260,
-    "y": 160,
+    "mergeContext": "",
+    "mustacheAltTags": false,
+    "outputProperties": [],
+    "queue": "none",
+    "blockInputOverrides": false,
+    "domain": "input_boolean",
+    "service": "turn_off",
+    "x": 5100,
+    "y": 290,
     "wires": [
       [
-        "eop_discharge_on_002"
+        "eop_pre_force_check_002"
       ]
     ]
   },
   {
-    "id": "eop_discharge_on_002",
+    "id": "eop_pre_force_check_002",
+    "type": "function",
+    "z": "eop_guard_tab_002",
+    "name": "17 Recheck active revision before force enable",
+    "func": "\"use strict\";\n\nfunction finite(value) {\n  if (value === null || value === undefined) return null;\n  if (\n    typeof value === \"string\" &&\n    (!value.trim() || [\"unknown\", \"unavailable\", \"none\", \"null\"].includes(value.trim().toLowerCase()))\n  ) return null;\n  const parsed = Number(value);\n  return Number.isFinite(parsed) ? parsed : null;\n}\n\nfunction sameTransactionIdentity(left, right) {\n  return Boolean(left && right) &&\n    String(left.planId || \"\") === String(right.planId || \"\") &&\n    finite(left.revision) !== null && finite(left.revision) === finite(right.revision) &&\n    finite(left.issuedAtMs) !== null && finite(left.issuedAtMs) === finite(right.issuedAtMs);\n}\n\nfunction statusText(phase, transaction, detail = \"\") {\n  // The audit service uses unescaped Mustache so Home Assistant stores the\n  // controlled status text verbatim. Keep every dynamic component JSON-safe\n  // and prevent an injected field delimiter from changing the status layout.\n  const clean = (value) => String(value ?? \"\")\n    .replace(/[\\\\\"\\u0000-\\u001f]/g, \"_\")\n    .replace(/\\|/g, \"/\");\n  const statusPhase = {\n    confirmed: \"feedback_confirmed\",\n    semantic_confirmed: \"semantic_noop_confirmed\",\n  }[phase] || phase;\n  const fields = [\n    clean(statusPhase),\n    clean(transaction?.planId || \"unknown\"),\n    `mode=${clean(transaction?.batteryMode || \"unknown\")}`,\n    `target=${Number(transaction?.targetKw || 0).toFixed(1)}kW`,\n    `export=${clean(transaction?.pvExportCommand || \"unknown\")}`,\n    `reserve=${transaction?.priorReservePct ?? \"na\"}->${transaction?.reservePct ?? \"na\"}%`,\n  ];\n  if (transaction?.acceptedAtMs) fields.push(`accepted_ms=${transaction.acceptedAtMs}`);\n  if (transaction?.firstWriteAtMs) fields.push(`first_write_ms=${transaction.firstWriteAtMs}`);\n  if (transaction?.appliedAtMs) fields.push(`applied_ms=${transaction.appliedAtMs}`);\n  if (transaction?.confirmedAtMs) fields.push(`confirmed_ms=${transaction.confirmedAtMs}`);\n  if (transaction?.reason) fields.push(`reason=${clean(transaction.reason)}`);\n  if (detail) fields.push(clean(detail));\n  return fields.join(\" | \").slice(0, 250);\n}\n\nconst tx=msg.transaction||{};\nconst current=flow.get(\"energyOptimizerCurrentTransaction\")||{};\nconst applying=flow.get(\"energyOptimizerApplyingRevision\");\nif(sameTransactionIdentity(current,tx)&&applying===tx.revision)return [msg,null,null];\nconst pending=flow.get(\"energyOptimizerPendingTransaction\")||null;\nflow.set(\"energyOptimizerPendingTransaction\",null);\nif(applying===tx.revision){\n flow.set(\"energyOptimizerApplyingRevision\",null);\n flow.set(\"energyOptimizerApplyingStartedAtMs\",null);\n flow.set(\"energyOptimizerApplyingTransaction\",null);\n flow.set(\"energyOptimizerWriteBarrier\",null);\n}\nreturn [null,null,pending];",
+    "outputs": 3,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 5350,
+    "y": 250,
+    "wires": [
+      [
+        "eop_forced_route_002"
+      ],
+      [
+        "eop_audit_002"
+      ],
+      [
+        "eop_apply_queue_002"
+      ]
+    ]
+  },
+  {
+    "id": "eop_forced_route_002",
+    "type": "function",
+    "z": "eop_guard_tab_002",
+    "name": "18 Enable at most one forced mode",
+    "func": "\"use strict\";\nconst tx=msg.transaction||{};return tx.forceChargeOn?[msg,null,null]:tx.forceDischargeOn?[null,msg,null]:[null,null,msg];",
+    "outputs": 3,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 5600,
+    "y": 250,
+    "wires": [
+      [
+        "eop_force_charge_physical_002"
+      ],
+      [
+        "eop_force_discharge_physical_002"
+      ],
+      [
+        "eop_applied_002"
+      ]
+    ]
+  },
+  {
+    "id": "eop_force_charge_physical_002",
     "type": "api-call-service",
     "z": "eop_guard_tab_002",
-    "name": "Enable force discharge",
+    "name": "19 Enable physical grid charge",
     "server": "srv_ha_001",
     "version": 7,
+    "debugenabled": false,
+    "action": "switch.turn_on",
+    "floorId": [],
+    "areaId": [],
+    "deviceId": [],
+    "entityId": [
+      "switch.saj_charging_control"
+    ],
+    "labelId": [],
+    "data": "{}",
+    "dataType": "json",
+    "mergeContext": "",
+    "mustacheAltTags": false,
+    "outputProperties": [],
+    "queue": "none",
+    "blockInputOverrides": false,
+    "domain": "switch",
+    "service": "turn_on",
+    "x": 5850,
+    "y": 210,
+    "wires": [
+      [
+        "eop_force_charge_helper_002"
+      ]
+    ]
+  },
+  {
+    "id": "eop_force_charge_helper_002",
+    "type": "api-call-service",
+    "z": "eop_guard_tab_002",
+    "name": "20 Sync grid-charge helper",
+    "server": "srv_ha_001",
+    "version": 7,
+    "debugenabled": false,
     "action": "input_boolean.turn_on",
-    "entityId": [
-      "input_boolean.battery_discharge"
-    ],
-    "data": "{}",
-    "dataType": "json",
-    "x": 2510,
-    "y": 160,
-    "wires": [
-      [
-        "eop_feedback_delay_002"
-      ]
-    ]
-  },
-  {
-    "id": "eop_set_charge_002",
-    "type": "api-call-service",
-    "z": "eop_guard_tab_002",
-    "name": "Set guarded charge rate",
-    "server": "srv_ha_001",
-    "version": 7,
-    "action": "input_number.set_value",
-    "entityId": [
-      "input_number.battery_charge_rate"
-    ],
-    "data": "{\"value\":{{payload}}}",
-    "dataType": "json",
-    "x": 1760,
-    "y": 220,
-    "wires": [
-      [
-        "eop_charge_dischargeoff_002"
-      ]
-    ]
-  },
-  {
-    "id": "eop_charge_dischargeoff_002",
-    "type": "api-call-service",
-    "z": "eop_guard_tab_002",
-    "name": "Stop force discharge",
-    "server": "srv_ha_001",
-    "version": 7,
-    "action": "input_boolean.turn_off",
-    "entityId": [
-      "input_boolean.battery_discharge"
-    ],
-    "data": "{}",
-    "dataType": "json",
-    "x": 2030,
-    "y": 220,
-    "wires": [
-      [
-        "eop_charge_on_002"
-      ]
-    ]
-  },
-  {
-    "id": "eop_charge_on_002",
-    "type": "api-call-service",
-    "z": "eop_guard_tab_002",
-    "name": "Enable force charge",
-    "server": "srv_ha_001",
-    "version": 7,
-    "action": "input_boolean.turn_on",
+    "floorId": [],
+    "areaId": [],
+    "deviceId": [],
     "entityId": [
       "input_boolean.battery_charge"
     ],
+    "labelId": [],
     "data": "{}",
     "dataType": "json",
-    "x": 2270,
-    "y": 220,
+    "mergeContext": "",
+    "mustacheAltTags": false,
+    "outputProperties": [],
+    "queue": "none",
+    "blockInputOverrides": false,
+    "domain": "input_boolean",
+    "service": "turn_on",
+    "x": 6100,
+    "y": 210,
     "wires": [
       [
+        "eop_applied_002"
+      ]
+    ]
+  },
+  {
+    "id": "eop_force_discharge_physical_002",
+    "type": "api-call-service",
+    "z": "eop_guard_tab_002",
+    "name": "19 Enable physical discharge",
+    "server": "srv_ha_001",
+    "version": 7,
+    "debugenabled": false,
+    "action": "switch.turn_on",
+    "floorId": [],
+    "areaId": [],
+    "deviceId": [],
+    "entityId": [
+      "switch.saj_discharging_control"
+    ],
+    "labelId": [],
+    "data": "{}",
+    "dataType": "json",
+    "mergeContext": "",
+    "mustacheAltTags": false,
+    "outputProperties": [],
+    "queue": "none",
+    "blockInputOverrides": false,
+    "domain": "switch",
+    "service": "turn_on",
+    "x": 5850,
+    "y": 290,
+    "wires": [
+      [
+        "eop_force_discharge_helper_002"
+      ]
+    ]
+  },
+  {
+    "id": "eop_force_discharge_helper_002",
+    "type": "api-call-service",
+    "z": "eop_guard_tab_002",
+    "name": "20 Sync discharge helper",
+    "server": "srv_ha_001",
+    "version": 7,
+    "debugenabled": false,
+    "action": "input_boolean.turn_on",
+    "floorId": [],
+    "areaId": [],
+    "deviceId": [],
+    "entityId": [
+      "input_boolean.battery_discharge"
+    ],
+    "labelId": [],
+    "data": "{}",
+    "dataType": "json",
+    "mergeContext": "",
+    "mustacheAltTags": false,
+    "outputProperties": [],
+    "queue": "none",
+    "blockInputOverrides": false,
+    "domain": "input_boolean",
+    "service": "turn_on",
+    "x": 6100,
+    "y": 290,
+    "wires": [
+      [
+        "eop_applied_002"
+      ]
+    ]
+  },
+  {
+    "id": "eop_applied_002",
+    "type": "function",
+    "z": "eop_guard_tab_002",
+    "name": "Release write lock after final serial service",
+    "func": "\"use strict\";\n\nfunction finite(value) {\n  if (value === null || value === undefined) return null;\n  if (\n    typeof value === \"string\" &&\n    (!value.trim() || [\"unknown\", \"unavailable\", \"none\", \"null\"].includes(value.trim().toLowerCase()))\n  ) return null;\n  const parsed = Number(value);\n  return Number.isFinite(parsed) ? parsed : null;\n}\n\nfunction sameTransactionIdentity(left, right) {\n  return Boolean(left && right) &&\n    String(left.planId || \"\") === String(right.planId || \"\") &&\n    finite(left.revision) !== null && finite(left.revision) === finite(right.revision) &&\n    finite(left.issuedAtMs) !== null && finite(left.issuedAtMs) === finite(right.issuedAtMs);\n}\n\nfunction statusText(phase, transaction, detail = \"\") {\n  // The audit service uses unescaped Mustache so Home Assistant stores the\n  // controlled status text verbatim. Keep every dynamic component JSON-safe\n  // and prevent an injected field delimiter from changing the status layout.\n  const clean = (value) => String(value ?? \"\")\n    .replace(/[\\\\\"\\u0000-\\u001f]/g, \"_\")\n    .replace(/\\|/g, \"/\");\n  const statusPhase = {\n    confirmed: \"feedback_confirmed\",\n    semantic_confirmed: \"semantic_noop_confirmed\",\n  }[phase] || phase;\n  const fields = [\n    clean(statusPhase),\n    clean(transaction?.planId || \"unknown\"),\n    `mode=${clean(transaction?.batteryMode || \"unknown\")}`,\n    `target=${Number(transaction?.targetKw || 0).toFixed(1)}kW`,\n    `export=${clean(transaction?.pvExportCommand || \"unknown\")}`,\n    `reserve=${transaction?.priorReservePct ?? \"na\"}->${transaction?.reservePct ?? \"na\"}%`,\n  ];\n  if (transaction?.acceptedAtMs) fields.push(`accepted_ms=${transaction.acceptedAtMs}`);\n  if (transaction?.firstWriteAtMs) fields.push(`first_write_ms=${transaction.firstWriteAtMs}`);\n  if (transaction?.appliedAtMs) fields.push(`applied_ms=${transaction.appliedAtMs}`);\n  if (transaction?.confirmedAtMs) fields.push(`confirmed_ms=${transaction.confirmedAtMs}`);\n  if (transaction?.reason) fields.push(`reason=${clean(transaction.reason)}`);\n  if (detail) fields.push(clean(detail));\n  return fields.join(\" | \").slice(0, 250);\n}\n\nconst tx=msg.transaction||{};\nconst current=flow.get(\"energyOptimizerCurrentTransaction\")||{};\nif(flow.get(\"energyOptimizerApplyingRevision\")===tx.revision){flow.set(\"energyOptimizerApplyingRevision\",null);flow.set(\"energyOptimizerApplyingStartedAtMs\",null);flow.set(\"energyOptimizerApplyingTransaction\",null);flow.set(\"energyOptimizerWriteBarrier\",null);}\nconst pending=flow.get(\"energyOptimizerPendingTransaction\")||null;\nflow.set(\"energyOptimizerPendingTransaction\",null);\nif(!sameTransactionIdentity(tx,current))return [null,null,pending];\nconst previous=flow.get(\"energyOptimizerLastAppliedTransaction\")||null;\nconst appliedAtMs=Date.now();\nconst previousExportKw=previous?.batteryMode===\"export\"?Number(previous.targetKw||0):0;\nconst appliedExportKw=tx.batteryMode===\"export\"?Number(tx.targetKw||0):0;\nconst sameExportRate=previous&&Math.abs(previousExportKw-appliedExportKw)<=0.05;\nconst transaction={\n ...tx,\n appliedAtMs,\n exportRateChangedAtMs:sameExportRate?\n  (finite(previous.exportRateChangedAtMs)??finite(previous.appliedAtMs)??appliedAtMs):\n  appliedAtMs\n};\nflow.set(\"energyOptimizerCurrentTransaction\",transaction);\nif(transaction.reserveControlAvailable!==true)return [{transaction,payload:statusText(\"failed\",transaction,\"reserve_control_unavailable\")},null,pending];\nif(transaction.batteryDischargeLimitControlAvailable!==true)return [{transaction,payload:statusText(\"failed\",transaction,\"battery_discharge_limit_unavailable\")},null,pending];\nflow.set(\"energyOptimizerLastAppliedTransaction\",transaction);\nreturn [{transaction,payload:statusText(\"applied\",transaction)},{transaction},pending];",
+    "outputs": 3,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 6350,
+    "y": 250,
+    "wires": [
+      [
+        "eop_audit_002"
+      ],
+      [
         "eop_feedback_delay_002"
+      ],
+      [
+        "eop_apply_queue_002"
       ]
     ]
   },
@@ -490,7 +1284,7 @@
     "id": "eop_feedback_delay_002",
     "type": "delay",
     "z": "eop_guard_tab_002",
-    "name": "Wait for SAJ feedback",
+    "name": "Asynchronous SAJ poll/readback",
     "pauseType": "delay",
     "timeout": "15",
     "timeoutUnits": "seconds",
@@ -503,8 +1297,8 @@
     "drop": false,
     "allowrate": false,
     "outputs": 1,
-    "x": 2760,
-    "y": 190,
+    "x": 4360,
+    "y": 290,
     "wires": [
       [
         "eop_feedback_confirm_002"
@@ -515,105 +1309,221 @@
     "id": "eop_feedback_confirm_002",
     "type": "function",
     "z": "eop_guard_tab_002",
-    "name": "Confirm fresh signed SAJ power",
-    "func": "const MAX_FEEDBACK_AGE_MS=60000;\nconst ha=global.get('homeassistant');\nconst states=ha?.homeAssistant?.states || ha?.states || {};\nfunction entity(entityId) { return states[entityId]||{}; }\nfunction raw(entityId) { return entity(entityId).state; }\nfunction finite(value) { if (value===null || value===undefined || (typeof value==='string' && (!value.trim() || ['unknown','unavailable','none','null'].includes(value.trim().toLowerCase())))) return null; const parsed=Number(value); return Number.isFinite(parsed)?parsed:null; }\nfunction on(value) { return String(value||'').toLowerCase()==='on'; }\nfunction powerKw(entityId) { const value=finite(raw(entityId)); if (value===null) return null; const unit=String(entity(entityId).attributes?.unit_of_measurement||'').trim().toLowerCase(); if (unit==='w') return value/1000; if (unit==='kw') return value; if (unit==='mw') return value*1000; return null; }\nfunction measurementAtMs(entityId) { const value=entity(entityId); for (const candidate of [value.last_reported,value.last_updated]) { const parsed=typeof candidate==='number'?candidate:Date.parse(candidate||''); if (Number.isFinite(parsed)) return parsed; } return null; }\nconst command=msg.command||{}, last=flow.get('energyOptimizerLastCommand')||{};\nconst commandIssuedAtMs=finite(command.issuedAtMs), lastIssuedAtMs=finite(last.issuedAtMs);\nif (String(last.planId||'')!==String(command.planId||'') || last.action!==command.action || Math.abs(Number(last.targetKw||0)-Number(command.targetKw||0))>.01 || (commandIssuedAtMs!==null && lastIssuedAtMs!==commandIssuedAtMs)) return [{payload:'feedback_superseded | '+String(command.planId||'unknown'),command},null,null];\nconst discharge=command.action==='discharge_export', charge=command.action==='grid_charge', targetKw=finite(command.targetKw), nowMs=finite(msg.nowMs)??Date.now();\nlet ok=false, status='feedback_invalid_command', batteryKw=null, batteryMeasuredAtMs=null, ageMs=null, sampleAfterIssueMs=null, requiredKw=null, modeOk=false;\nif ((discharge || charge) && targetKw!==null && targetKw>0 && commandIssuedAtMs!==null) {\n  const kind=discharge?'discharge':'charge';\n  modeOk=discharge?(on(raw('input_boolean.battery_discharge'))&&!on(raw('input_boolean.battery_charge'))):(on(raw('input_boolean.battery_charge'))&&!on(raw('input_boolean.battery_discharge')));\n  batteryKw=powerKw('sensor.saj_battery_power');\n  batteryMeasuredAtMs=measurementAtMs('sensor.saj_battery_power');\n  requiredKw=Math.max(.2,Math.min(1,.2*targetKw));\n  if (batteryKw===null || batteryMeasuredAtMs===null) status='feedback_unavailable_'+kind;\n  else {\n    ageMs=nowMs-batteryMeasuredAtMs;\n    sampleAfterIssueMs=batteryMeasuredAtMs-commandIssuedAtMs;\n    if (ageMs<0 || ageMs>MAX_FEEDBACK_AGE_MS) status='feedback_stale_'+kind;\n    else if (sampleAfterIssueMs<0) status='feedback_precommand_'+kind;\n    else if (!modeOk) status='feedback_mode_mismatch_'+kind;\n    else if ((discharge && batteryKw<=0) || (charge && batteryKw>=0)) status='feedback_wrong_sign_'+kind;\n    else if (Math.abs(batteryKw)<requiredKw) status='feedback_too_small_'+kind;\n    else { ok=true; status='feedback_confirmed_'+kind; }\n  }\n}\nconst observed=batteryKw===null?'unavailable':batteryKw.toFixed(2)+'kW';\nconst threshold=requiredKw===null?'unavailable':requiredKw.toFixed(2)+'kW';\nconst age=ageMs===null?'unavailable':Math.round(ageMs)+'ms';\nconst sampleAfterIssue=sampleAfterIssueMs===null?'unavailable':Math.round(sampleAfterIssueMs)+'ms';\nconst audit={payload:status+' | '+String(command.planId||'unknown')+' | target='+(targetKw===null?'unavailable':targetKw.toFixed(1)+'kW')+' battery='+observed+' min='+threshold+' age='+age+' after_issue='+sampleAfterIssue+' mode='+(modeOk?'exclusive':'mismatch'),command};\nif (ok) return [audit,null,null];\nflow.set('energyOptimizerLastCommand',{action:'none',targetKw:0,planId:command.planId});\nreturn [audit,{payload:0,command},{payload:1,command}];",
-    "outputs": 3,
+    "name": "Revision-scoped registers and direction",
+    "func": "\"use strict\";\n\nconst MAX_DISCHARGE_KW=28;\nconst MAX_CHARGE_KW=30;\nconst DEFAULT_DISCHARGE_CAP_KW=28;\nconst MAX_SITE_EXPORT_TARGET_KW=100;\nconst MAX_TELEMETRY_AGE_MS=330000;\nconst MAX_PRICE_AGE_MS=330000;\nconst MAX_FUTURE_SKEW_MS=60000;\nconst MAX_FEEDBACK_AGE_MS=60000;\nconst EXPORT_RATE_MIN_INTERVAL_MS=60000;\nconst EXPORT_RATE_DEADBAND_KW=1;\nconst EXPORT_RATE_DEADBAND_RATIO=0.1;\nconst NORMAL_EXPORT_LIMIT=1100;\nconst ZERO_EXPORT_LIMIT=0;\nconst NORMAL_GRID_DISCHARGE_LIMIT=1100;\nconst NORMAL_BATTERY_DISCHARGE_LIMIT=1000;\nconst SAFE_RESERVE_FLOOR_PCT=5;\nconst BATTERY_MODES=[\"hold\",\"self_consume\",\"pv_charge\",\"grid_charge\",\"export\"];\n\nfunction finite(value) {\n  if (value === null || value === undefined) return null;\n  if (\n    typeof value === \"string\" &&\n    (!value.trim() || [\"unknown\", \"unavailable\", \"none\", \"null\"].includes(value.trim().toLowerCase()))\n  ) return null;\n  const parsed = Number(value);\n  return Number.isFinite(parsed) ? parsed : null;\n}\n\nfunction binaryOn(value) {\n  const normalized = String(value || \"\").toLowerCase();\n  if (normalized === \"on\") return true;\n  if (normalized === \"off\") return false;\n  return null;\n}\n\nfunction timestampMs(value) {\n  if (typeof value === \"number\") return Number.isFinite(value) ? value : null;\n  const parsed = Date.parse(value || \"\");\n  return Number.isFinite(parsed) ? parsed : null;\n}\n\nfunction freshAge(nowMs, measuredAtMs, maxAgeMs) {\n  const measured = finite(measuredAtMs);\n  if (measured === null) return null;\n  const age = nowMs - measured;\n  if (age > maxAgeMs || age < -MAX_FUTURE_SKEW_MS) return null;\n  return age;\n}\n\nfunction clamp(value, minimum, maximum) {\n  return Math.min(maximum, Math.max(minimum, value));\n}\n\nfunction normalizedWholeReservePct(value) {\n  const parsed = finite(value);\n  if (parsed === null || parsed < 5 || parsed > 100.5) return null;\n  return clamp(Math.ceil(parsed), 5, 100);\n}\n\nfunction preservedReservePct(value) {\n  return normalizedWholeReservePct(value) ?? 5;\n}\n\nfunction batteryDischargeLimitSensorToRegister(value, unit) {\n  const percent = finite(value);\n  const normalizedUnit = String(unit ?? \"\").trim().toLowerCase();\n  // The writable 0x364E number uses 0..1100 while its independent sensor is\n  // exposed by the integration as 0..110 %. Never guess when the unit is\n  // absent: an ambiguous unit would make a dangerous 100 look like 10%.\n  if (percent === null || normalizedUnit !== \"%\" || percent < 0 || percent > 110) return null;\n  const registerValue = percent * 10;\n  return registerValue >= 0 && registerValue <= 1100 ? registerValue : null;\n}\n\nfunction sameTransactionIdentity(left, right) {\n  return Boolean(left && right) &&\n    String(left.planId || \"\") === String(right.planId || \"\") &&\n    finite(left.revision) !== null && finite(left.revision) === finite(right.revision) &&\n    finite(left.issuedAtMs) !== null && finite(left.issuedAtMs) === finite(right.issuedAtMs);\n}\n\nfunction feedbackTolerance(targetKw) {\n  const target = finite(targetKw);\n  return target === null ? null : Math.max(1, Math.abs(target) * 0.1);\n}\n\nfunction expectedRegisterState(transaction) {\n  return {\n    reserveNumberPct: transaction.reservePct,\n    reserveSensorPct: transaction.reservePct,\n    batteryDischargeLimitNumber: transaction.batteryDischargeLimit,\n    batteryDischargeLimitSensor: transaction.batteryDischargeLimit,\n    antiRefluxMode: transaction.antiRefluxMode,\n    exportLimit: transaction.exportLimit,\n    gridMaxDischarge: transaction.gridMaxDischarge,\n    exportHelperOn: transaction.exportHelperOn,\n    pvChargeOn: transaction.pvChargeOn,\n    forceChargeOn: transaction.forceChargeOn,\n    forceDischargeOn: transaction.forceDischargeOn,\n    physicalChargeOn: transaction.forceChargeOn,\n    physicalDischargeOn: transaction.forceDischargeOn,\n    chargePowerPercent: transaction.chargePowerPercent,\n    dischargePowerPercent: transaction.dischargePowerPercent,\n    pvChargePowerLimit: transaction.pvChargePowerLimit,\n  };\n}\n\nfunction verifyRegisterState(transaction, actual) {\n  const expected = expectedRegisterState(transaction);\n  const mismatches = [];\n  const numeric = [\n    [\"antiRefluxMode\", 0.01],\n    [\"exportLimit\", 1],\n    [\"gridMaxDischarge\", 1],\n    [\"chargePowerPercent\", 0.51],\n    [\"dischargePowerPercent\", 0.51],\n    [\"pvChargePowerLimit\", 1],\n  ];\n  if (transaction.reserveControlAvailable === true) {\n    numeric.unshift([\"reserveSensorPct\", 0.51]);\n    numeric.unshift([\"reserveNumberPct\", 0.51]);\n  }\n  if (transaction.batteryDischargeLimitControlAvailable === true) {\n    numeric.unshift([\"batteryDischargeLimitSensor\", 1]);\n    numeric.unshift([\"batteryDischargeLimitNumber\", 1]);\n  }\n  for (const [key, tolerance] of numeric) {\n    const observed = finite(actual[key]);\n    if (observed === null || Math.abs(observed - expected[key]) > tolerance) mismatches.push(key);\n  }\n  for (const key of [\n    \"exportHelperOn\", \"pvChargeOn\", \"forceChargeOn\", \"forceDischargeOn\",\n    \"physicalChargeOn\", \"physicalDischargeOn\",\n  ]) {\n    if (actual[key] !== expected[key]) mismatches.push(key);\n  }\n  return {ok: mismatches.length === 0, mismatches, expected};\n}\n\nfunction reserveTargetChanged(transaction) {\n  const prior = finite(transaction?.priorReservePct);\n  const target = finite(transaction?.reservePct);\n  return prior === null || target === null || Math.abs(prior - target) > 0.51;\n}\n\nfunction batteryDischargeLimitTargetChanged(transaction) {\n  const prior = finite(transaction?.priorBatteryDischargeLimit);\n  const target = finite(transaction?.batteryDischargeLimit);\n  return prior === null || target === null || Math.abs(prior - target) > 1;\n}\n\nfunction evaluateDirectionFeedback(transaction, actual) {\n  const batteryKw = finite(actual.batteryKw);\n  const measuredAtMs = finite(actual.batteryMeasuredAtMs);\n  const nowMs = finite(actual.nowMs) ?? Date.now();\n  const issuedAtMs = finite(transaction.issuedAtMs);\n  if (batteryKw === null || measuredAtMs === null || issuedAtMs === null) {\n    return {ok: false, status: \"feedback_direction_unavailable\", batteryKw};\n  }\n  const ageMs = nowMs - measuredAtMs;\n  if (ageMs < 0 || ageMs > MAX_FEEDBACK_AGE_MS) {\n    return {ok: false, status: \"feedback_direction_stale\", batteryKw, ageMs};\n  }\n  if (measuredAtMs < issuedAtMs && transaction.writeStrategy !== \"no_write\") {\n    return {ok: false, status: \"feedback_direction_precommand\", batteryKw, ageMs};\n  }\n  if (transaction.forceDischargeOn && batteryKw < 0.2) {\n    return {ok: false, status: \"feedback_direction_wrong_export\", batteryKw, ageMs};\n  }\n  if (transaction.forceChargeOn && batteryKw > -0.2) {\n    return {ok: false, status: \"feedback_direction_wrong_grid_charge\", batteryKw, ageMs};\n  }\n  return {ok: true, status: \"confirmed_direction\", batteryKw, ageMs};\n}\n\nfunction evaluateTargetFeedback(transaction, actual) {\n  const batteryKw = finite(actual.batteryKw);\n  const measuredAtMs = finite(actual.batteryMeasuredAtMs);\n  const nowMs = finite(actual.nowMs) ?? Date.now();\n  const issuedAtMs = finite(transaction.issuedAtMs);\n  const targetKw = finite(transaction.targetKw);\n  if (batteryKw === null || measuredAtMs === null || issuedAtMs === null || targetKw === null) {\n    return {ok: false, status: \"feedback_target_unavailable\", batteryKw};\n  }\n  const ageMs = nowMs - measuredAtMs;\n  if (ageMs < 0 || ageMs > MAX_FEEDBACK_AGE_MS ||\n      (measuredAtMs < issuedAtMs && transaction.writeStrategy !== \"no_write\")) {\n    return {ok: false, status: \"feedback_target_stale\", batteryKw, ageMs};\n  }\n  const soc = finite(actual.soc);\n  if (transaction.batteryMode === \"export\" && soc !== null && soc <= transaction.protectedSocPct + 1) {\n    return {ok: true, status: \"confirmed_target_clipped_floor\", batteryKw, clipped: true};\n  }\n  if ([\"grid_charge\", \"pv_charge\"].includes(transaction.batteryMode) && soc !== null && soc >= 99) {\n    return {ok: true, status: \"confirmed_target_clipped_upper_soc\", batteryKw, clipped: true};\n  }\n  if (transaction.batteryMode === \"export\" && String(transaction.reason || \"\").includes(\"held_60s\")) {\n    // During the deliberate stability window, register verification plus the\n    // earlier signed battery-direction check are authoritative. Site export\n    // can move as household load/PV changes even though the physical battery\n    // rate has correctly remained fixed; do not turn that noise into a full\n    // transaction reassertion.\n    return {ok: true, status: \"confirmed_export_rate_held\", batteryKw};\n  }\n\n  let expectedKw;\n  let observedKw;\n  if (transaction.batteryMode === \"export\") {\n    // Export is a site-level objective.  PV and house load can move after the\n    // battery setpoint was translated, so battery power alone is not proof\n    // that the requested grid export was missed.  Confirm the actual site\n    // export using the fast SAJ grid meter (negative is export), while the\n    // earlier feedback stage continues to prove the battery is discharging.\n    const gridKw = finite(actual.gridKw);\n    const gridMeasuredAtMs = finite(actual.gridMeasuredAtMs);\n    const siteExportTargetKw = finite(transaction.siteExportTargetKw);\n    if (gridKw === null || gridMeasuredAtMs === null || siteExportTargetKw === null) {\n      return {ok: false, status: \"feedback_target_grid_unavailable\", batteryKw};\n    }\n    const gridAgeMs = nowMs - gridMeasuredAtMs;\n    if (gridAgeMs < 0 || gridAgeMs > MAX_FEEDBACK_AGE_MS ||\n        (gridMeasuredAtMs < issuedAtMs && transaction.writeStrategy !== \"no_write\")) {\n      return {ok: false, status: \"feedback_target_grid_stale\", batteryKw, gridAgeMs};\n    }\n    expectedKw = siteExportTargetKw;\n    observedKw = Math.max(0, -gridKw);\n  } else if (transaction.batteryMode === \"grid_charge\") {\n    expectedKw = targetKw;\n    observedKw = Math.max(0, -batteryKw);\n  } else if (transaction.batteryMode === \"pv_charge\") {\n    const pvKw = finite(actual.pvKw);\n    const loadKw = finite(actual.loadKw);\n    if (pvKw === null || loadKw === null) return {ok: false, status: \"feedback_target_solar_unavailable\", batteryKw};\n    // PV charging deliberately remains open at the inverter's full verified\n    // rate. Confirm the solar actually available now, rather than treating the\n    // optimiser's forecast target as a ceiling and rejecting beneficial extra\n    // charge when irradiance is stronger than forecast.\n    expectedKw = Math.min(MAX_CHARGE_KW, Math.max(0, pvKw - loadKw));\n    observedKw = Math.max(0, -batteryKw);\n    if (expectedKw < 0.2) return {ok: true, status: \"confirmed_target_clipped_solar\", batteryKw, clipped: true};\n  } else if (transaction.batteryMode === \"self_consume\" && transaction.forceDischargeOn) {\n    expectedKw = targetKw;\n    observedKw = Math.max(0, batteryKw);\n  } else if (transaction.batteryMode === \"hold\") {\n    return {ok: true, status: \"confirmed_no_forced_target\", batteryKw};\n  } else {\n    return {ok: true, status: \"confirmed_no_forced_target\", batteryKw};\n  }\n  const toleranceKw = feedbackTolerance(expectedKw);\n  const errorKw = Math.abs(observedKw - expectedKw);\n  if (transaction.batteryMode === \"export\" && errorKw > toleranceKw) {\n    // The owned discharge register and signed battery direction have already\n    // been independently confirmed. Site export can diverge as load/PV move\n    // after translation; replaying the identical full transaction cannot\n    // correct that and creates a stop/start pulse. Report the deviation and\n    // leave the next permitted 60-second planner update to change the rate.\n    return {\n      ok: true,\n      status: \"confirmed_export_rate_site_deviation\",\n      batteryKw,\n      expectedKw,\n      observedKw,\n      errorKw,\n      toleranceKw,\n    };\n  }\n  return {\n    ok: errorKw <= toleranceKw,\n    status: errorKw <= toleranceKw ? \"confirmed_target\" : \"feedback_target_mismatch\",\n    batteryKw,\n    expectedKw,\n    observedKw,\n    errorKw,\n    toleranceKw,\n  };\n}\n\nfunction statusText(phase, transaction, detail = \"\") {\n  // The audit service uses unescaped Mustache so Home Assistant stores the\n  // controlled status text verbatim. Keep every dynamic component JSON-safe\n  // and prevent an injected field delimiter from changing the status layout.\n  const clean = (value) => String(value ?? \"\")\n    .replace(/[\\\\\"\\u0000-\\u001f]/g, \"_\")\n    .replace(/\\|/g, \"/\");\n  const statusPhase = {\n    confirmed: \"feedback_confirmed\",\n    semantic_confirmed: \"semantic_noop_confirmed\",\n  }[phase] || phase;\n  const fields = [\n    clean(statusPhase),\n    clean(transaction?.planId || \"unknown\"),\n    `mode=${clean(transaction?.batteryMode || \"unknown\")}`,\n    `target=${Number(transaction?.targetKw || 0).toFixed(1)}kW`,\n    `export=${clean(transaction?.pvExportCommand || \"unknown\")}`,\n    `reserve=${transaction?.priorReservePct ?? \"na\"}->${transaction?.reservePct ?? \"na\"}%`,\n  ];\n  if (transaction?.acceptedAtMs) fields.push(`accepted_ms=${transaction.acceptedAtMs}`);\n  if (transaction?.firstWriteAtMs) fields.push(`first_write_ms=${transaction.firstWriteAtMs}`);\n  if (transaction?.appliedAtMs) fields.push(`applied_ms=${transaction.appliedAtMs}`);\n  if (transaction?.confirmedAtMs) fields.push(`confirmed_ms=${transaction.confirmedAtMs}`);\n  if (transaction?.reason) fields.push(`reason=${clean(transaction.reason)}`);\n  if (detail) fields.push(clean(detail));\n  return fields.join(\" | \").slice(0, 250);\n}\n\nconst tx=msg.transaction||{};\nconst current=flow.get(\"energyOptimizerCurrentTransaction\")||{};\n// Delayed observations are intentionally asynchronous. A superseded observer\n// is silent: it must never replace the status of, reassert, or safe-stop a\n// newer physical command.\nif(!sameTransactionIdentity(tx,current))return [null,null,null,null];\nconst ha=global.get(\"homeassistant\");\nconst states=ha?.homeAssistant?.states||ha?.states||{};\nfunction entity(id){return states[id]||{};}\nfunction raw(id){return entity(id).state;}\nfunction measuredAt(id){const value=entity(id);for(const candidate of [value.last_reported,value.last_updated]){const parsed=timestampMs(candidate);if(parsed!==null)return parsed;}return null;}\nfunction powerKw(id){const value=finite(raw(id));if(value===null)return null;const unit=String(entity(id).attributes?.unit_of_measurement||\"\").trim().toLowerCase();if(unit===\"w\")return value/1000;if(unit===\"kw\")return value;if(unit===\"mw\")return value*1000;return null;}\nconst actual={\n reserveNumberPct:raw(\"number.saj_battery_on_grid_discharge_depth_input\"),reserveSensorPct:raw(\"sensor.saj_battery_on_grid_discharge_depth\"),reserveSensorMeasuredAtMs:measuredAt(\"sensor.saj_battery_on_grid_discharge_depth\"),\n batteryDischargeLimitNumber:raw(\"number.saj_battery_discharge_power_limit_input\"),batteryDischargeLimitSensor:batteryDischargeLimitSensorToRegister(raw(\"sensor.saj_battery_discharge_power_limit\"),entity(\"sensor.saj_battery_discharge_power_limit\").attributes?.unit_of_measurement),batteryDischargeLimitSensorMeasuredAtMs:measuredAt(\"sensor.saj_battery_discharge_power_limit\"),\n antiRefluxMode:raw(\"number.saj_anti_reflux_mode_input\"),exportLimit:raw(\"number.saj_export_limit_input\"),gridMaxDischarge:raw(\"number.saj_grid_max_discharge_power_input\"),\n exportHelperOn:binaryOn(raw(\"input_boolean.export_power\")),pvChargeOn:binaryOn(raw(\"input_boolean.battery_pv_charge\")),forceChargeOn:binaryOn(raw(\"input_boolean.battery_charge\")),forceDischargeOn:binaryOn(raw(\"input_boolean.battery_discharge\")),\n physicalChargeOn:binaryOn(raw(\"switch.saj_charging_control\")),physicalDischargeOn:binaryOn(raw(\"switch.saj_discharging_control\")),\n chargePowerPercent:raw(\"number.saj_charge1_power_percent_input\"),dischargePowerPercent:raw(\"number.saj_discharge1_power_percent_input\"),pvChargePowerLimit:raw(\"number.saj_battery_charge_power_limit_input\"),\n batteryKw:powerKw(\"sensor.saj_battery_power\"),batteryMeasuredAtMs:measuredAt(\"sensor.saj_battery_power\"),soc:finite(raw(\"sensor.saj_battery_1_soc\")),\n gridKw:powerKw(\"sensor.saj_meter_a_real_power_total\"),gridMeasuredAtMs:measuredAt(\"sensor.saj_meter_a_real_power_total\"),\n pvKw:powerKw(\"sensor.saj_pv_power\")??powerKw(\"sensor.pv_power_mqtt_abs\"),loadKw:powerKw(\"sensor.saj_home_load\"),nowMs:Date.now()\n};\nconst registers=verifyRegisterState(tx,actual);\n// The independent Modbus reserve sensor can trail its optimistic number\n// entity by one slow-coordinator poll. Final confirmation below still\n// requires the physical sensor to agree.\nconst earlyMismatches=registers.mismatches.filter((key)=>![\"reserveSensorPct\",\"batteryDischargeLimitSensor\"].includes(key));\nconst earlyRegistersOk=earlyMismatches.length===0;\nconst direction=evaluateDirectionFeedback(tx,actual);\nif(earlyRegistersOk&&direction.ok){\n const detail=\"battery=\"+(direction.batteryKw===null?\"na\":direction.batteryKw.toFixed(2)+\"kW\");\n const audit={transaction:tx,payload:statusText(\"confirmed_direction\",tx,detail)};\n return [audit,null,{transaction:tx},null];\n}\nconst detail=!earlyRegistersOk?\"registers=\"+earlyMismatches.join(\",\"):direction.status;\nif(Number(tx.reassertCount||0)<1){\n const transaction={...tx,writeStrategy:\"full\",reassertCount:Number(tx.reassertCount||0)+1,issuedAtMs:Date.now(),reason:\"reassert_\"+detail};\n flow.set(\"energyOptimizerCurrentTransaction\",transaction);\n return [{transaction,payload:statusText(\"requested\",transaction,detail)},{transaction},null,null];\n}\nconst revision=Number(flow.get(\"energyOptimizerRevision\")||0)+1;flow.set(\"energyOptimizerRevision\",revision);\nconst transaction={...tx,revision,batteryMode:\"safe_stop\",reason:\"feedback_failed_\"+detail,safeStop:true,writeStrategy:\"full\",targetKw:0,priorReservePct:tx.reservePct,reservePct:preservedReservePct(tx.reservePct),priorBatteryDischargeLimit:tx.batteryDischargeLimit,batteryDischargeLimit:1000,pvExportCommand:tx.pvExportCommand===\"curtail\"?\"curtail\":\"allow\",antiRefluxMode:tx.pvExportCommand===\"curtail\"?1:0,exportLimit:tx.pvExportCommand===\"curtail\"?0:1100,exportHelperOn:tx.pvExportCommand!==\"curtail\",pvChargeOn:true,forceChargeOn:false,forceDischargeOn:false,chargeRateKw:30,dischargeRateKw:28,chargePowerPercent:0,dischargePowerPercent:0,pvChargePowerLimit:1000,issuedAtMs:Date.now(),validUntilMs:null,reassertCount:1,emergencyAttempted:true};\nflow.set(\"energyOptimizerCurrentTransaction\",transaction);\nreturn [{transaction,payload:statusText(\"failed\",tx,detail)},null,null,{transaction}];",
+    "outputs": 4,
     "noerr": 0,
     "initialize": "",
     "finalize": "",
     "libs": [],
-    "x": 3020,
-    "y": 190,
+    "x": 4630,
+    "y": 290,
     "wires": [
       [
         "eop_audit_002"
       ],
       [
-        "eop_stop_forced_002"
+        "eop_apply_queue_002"
       ],
       [
-        "eop_allow_export_raw_002"
+        "eop_target_delay_002"
+      ],
+      [
+        "eop_apply_queue_002"
       ]
     ]
   },
   {
-    "id": "eop_curtail_raw_002",
-    "type": "api-call-service",
+    "id": "eop_target_delay_002",
+    "type": "delay",
     "z": "eop_guard_tab_002",
-    "name": "Reassert raw export limit 0",
-    "server": "srv_ha_001",
-    "version": 7,
-    "action": "number.set_value",
-    "entityId": [
-      "number.saj_export_limit_input"
-    ],
-    "data": "{\"value\":0}",
-    "dataType": "json",
-    "x": 1740,
-    "y": 280,
+    "name": "Asynchronous settled target tracking",
+    "pauseType": "delay",
+    "timeout": "20",
+    "timeoutUnits": "seconds",
+    "rate": "1",
+    "nbRateUnits": "1",
+    "rateUnits": "second",
+    "randomFirst": "1",
+    "randomLast": "5",
+    "randomUnits": "seconds",
+    "drop": false,
+    "allowrate": false,
+    "outputs": 1,
+    "x": 4900,
+    "y": 290,
     "wires": [
       [
-        "eop_curtail_002"
+        "eop_target_confirm_002"
       ]
     ]
   },
   {
-    "id": "eop_curtail_002",
-    "type": "api-call-service",
+    "id": "eop_target_confirm_002",
+    "type": "function",
     "z": "eop_guard_tab_002",
-    "name": "Synchronize export helper off",
-    "server": "srv_ha_001",
-    "version": 7,
-    "action": "input_boolean.turn_off",
-    "entityId": [
-      "input_boolean.export_power"
-    ],
-    "data": "{}",
-    "dataType": "json",
-    "x": 2020,
-    "y": 280,
-    "wires": [
-      []
-    ]
-  },
-  {
-    "id": "eop_allow_export_raw_002",
-    "type": "api-call-service",
-    "z": "eop_guard_tab_002",
-    "name": "Reassert raw export limit 1100",
-    "server": "srv_ha_001",
-    "version": 7,
-    "action": "number.set_value",
-    "entityId": [
-      "number.saj_export_limit_input"
-    ],
-    "data": "{\"value\":1100}",
-    "dataType": "json",
-    "x": 1740,
-    "y": 340,
+    "name": "Final current-revision physical confirmation",
+    "func": "\"use strict\";\n\nconst MAX_DISCHARGE_KW=28;\nconst MAX_CHARGE_KW=30;\nconst DEFAULT_DISCHARGE_CAP_KW=28;\nconst MAX_SITE_EXPORT_TARGET_KW=100;\nconst MAX_TELEMETRY_AGE_MS=330000;\nconst MAX_PRICE_AGE_MS=330000;\nconst MAX_FUTURE_SKEW_MS=60000;\nconst MAX_FEEDBACK_AGE_MS=60000;\nconst EXPORT_RATE_MIN_INTERVAL_MS=60000;\nconst EXPORT_RATE_DEADBAND_KW=1;\nconst EXPORT_RATE_DEADBAND_RATIO=0.1;\nconst NORMAL_EXPORT_LIMIT=1100;\nconst ZERO_EXPORT_LIMIT=0;\nconst NORMAL_GRID_DISCHARGE_LIMIT=1100;\nconst NORMAL_BATTERY_DISCHARGE_LIMIT=1000;\nconst SAFE_RESERVE_FLOOR_PCT=5;\nconst BATTERY_MODES=[\"hold\",\"self_consume\",\"pv_charge\",\"grid_charge\",\"export\"];\n\nfunction finite(value) {\n  if (value === null || value === undefined) return null;\n  if (\n    typeof value === \"string\" &&\n    (!value.trim() || [\"unknown\", \"unavailable\", \"none\", \"null\"].includes(value.trim().toLowerCase()))\n  ) return null;\n  const parsed = Number(value);\n  return Number.isFinite(parsed) ? parsed : null;\n}\n\nfunction binaryOn(value) {\n  const normalized = String(value || \"\").toLowerCase();\n  if (normalized === \"on\") return true;\n  if (normalized === \"off\") return false;\n  return null;\n}\n\nfunction timestampMs(value) {\n  if (typeof value === \"number\") return Number.isFinite(value) ? value : null;\n  const parsed = Date.parse(value || \"\");\n  return Number.isFinite(parsed) ? parsed : null;\n}\n\nfunction freshAge(nowMs, measuredAtMs, maxAgeMs) {\n  const measured = finite(measuredAtMs);\n  if (measured === null) return null;\n  const age = nowMs - measured;\n  if (age > maxAgeMs || age < -MAX_FUTURE_SKEW_MS) return null;\n  return age;\n}\n\nfunction clamp(value, minimum, maximum) {\n  return Math.min(maximum, Math.max(minimum, value));\n}\n\nfunction normalizedWholeReservePct(value) {\n  const parsed = finite(value);\n  if (parsed === null || parsed < 5 || parsed > 100.5) return null;\n  return clamp(Math.ceil(parsed), 5, 100);\n}\n\nfunction preservedReservePct(value) {\n  return normalizedWholeReservePct(value) ?? 5;\n}\n\nfunction batteryDischargeLimitSensorToRegister(value, unit) {\n  const percent = finite(value);\n  const normalizedUnit = String(unit ?? \"\").trim().toLowerCase();\n  // The writable 0x364E number uses 0..1100 while its independent sensor is\n  // exposed by the integration as 0..110 %. Never guess when the unit is\n  // absent: an ambiguous unit would make a dangerous 100 look like 10%.\n  if (percent === null || normalizedUnit !== \"%\" || percent < 0 || percent > 110) return null;\n  const registerValue = percent * 10;\n  return registerValue >= 0 && registerValue <= 1100 ? registerValue : null;\n}\n\nfunction sameTransactionIdentity(left, right) {\n  return Boolean(left && right) &&\n    String(left.planId || \"\") === String(right.planId || \"\") &&\n    finite(left.revision) !== null && finite(left.revision) === finite(right.revision) &&\n    finite(left.issuedAtMs) !== null && finite(left.issuedAtMs) === finite(right.issuedAtMs);\n}\n\nfunction feedbackTolerance(targetKw) {\n  const target = finite(targetKw);\n  return target === null ? null : Math.max(1, Math.abs(target) * 0.1);\n}\n\nfunction expectedRegisterState(transaction) {\n  return {\n    reserveNumberPct: transaction.reservePct,\n    reserveSensorPct: transaction.reservePct,\n    batteryDischargeLimitNumber: transaction.batteryDischargeLimit,\n    batteryDischargeLimitSensor: transaction.batteryDischargeLimit,\n    antiRefluxMode: transaction.antiRefluxMode,\n    exportLimit: transaction.exportLimit,\n    gridMaxDischarge: transaction.gridMaxDischarge,\n    exportHelperOn: transaction.exportHelperOn,\n    pvChargeOn: transaction.pvChargeOn,\n    forceChargeOn: transaction.forceChargeOn,\n    forceDischargeOn: transaction.forceDischargeOn,\n    physicalChargeOn: transaction.forceChargeOn,\n    physicalDischargeOn: transaction.forceDischargeOn,\n    chargePowerPercent: transaction.chargePowerPercent,\n    dischargePowerPercent: transaction.dischargePowerPercent,\n    pvChargePowerLimit: transaction.pvChargePowerLimit,\n  };\n}\n\nfunction verifyRegisterState(transaction, actual) {\n  const expected = expectedRegisterState(transaction);\n  const mismatches = [];\n  const numeric = [\n    [\"antiRefluxMode\", 0.01],\n    [\"exportLimit\", 1],\n    [\"gridMaxDischarge\", 1],\n    [\"chargePowerPercent\", 0.51],\n    [\"dischargePowerPercent\", 0.51],\n    [\"pvChargePowerLimit\", 1],\n  ];\n  if (transaction.reserveControlAvailable === true) {\n    numeric.unshift([\"reserveSensorPct\", 0.51]);\n    numeric.unshift([\"reserveNumberPct\", 0.51]);\n  }\n  if (transaction.batteryDischargeLimitControlAvailable === true) {\n    numeric.unshift([\"batteryDischargeLimitSensor\", 1]);\n    numeric.unshift([\"batteryDischargeLimitNumber\", 1]);\n  }\n  for (const [key, tolerance] of numeric) {\n    const observed = finite(actual[key]);\n    if (observed === null || Math.abs(observed - expected[key]) > tolerance) mismatches.push(key);\n  }\n  for (const key of [\n    \"exportHelperOn\", \"pvChargeOn\", \"forceChargeOn\", \"forceDischargeOn\",\n    \"physicalChargeOn\", \"physicalDischargeOn\",\n  ]) {\n    if (actual[key] !== expected[key]) mismatches.push(key);\n  }\n  return {ok: mismatches.length === 0, mismatches, expected};\n}\n\nfunction reserveTargetChanged(transaction) {\n  const prior = finite(transaction?.priorReservePct);\n  const target = finite(transaction?.reservePct);\n  return prior === null || target === null || Math.abs(prior - target) > 0.51;\n}\n\nfunction batteryDischargeLimitTargetChanged(transaction) {\n  const prior = finite(transaction?.priorBatteryDischargeLimit);\n  const target = finite(transaction?.batteryDischargeLimit);\n  return prior === null || target === null || Math.abs(prior - target) > 1;\n}\n\nfunction evaluateDirectionFeedback(transaction, actual) {\n  const batteryKw = finite(actual.batteryKw);\n  const measuredAtMs = finite(actual.batteryMeasuredAtMs);\n  const nowMs = finite(actual.nowMs) ?? Date.now();\n  const issuedAtMs = finite(transaction.issuedAtMs);\n  if (batteryKw === null || measuredAtMs === null || issuedAtMs === null) {\n    return {ok: false, status: \"feedback_direction_unavailable\", batteryKw};\n  }\n  const ageMs = nowMs - measuredAtMs;\n  if (ageMs < 0 || ageMs > MAX_FEEDBACK_AGE_MS) {\n    return {ok: false, status: \"feedback_direction_stale\", batteryKw, ageMs};\n  }\n  if (measuredAtMs < issuedAtMs && transaction.writeStrategy !== \"no_write\") {\n    return {ok: false, status: \"feedback_direction_precommand\", batteryKw, ageMs};\n  }\n  if (transaction.forceDischargeOn && batteryKw < 0.2) {\n    return {ok: false, status: \"feedback_direction_wrong_export\", batteryKw, ageMs};\n  }\n  if (transaction.forceChargeOn && batteryKw > -0.2) {\n    return {ok: false, status: \"feedback_direction_wrong_grid_charge\", batteryKw, ageMs};\n  }\n  return {ok: true, status: \"confirmed_direction\", batteryKw, ageMs};\n}\n\nfunction evaluateTargetFeedback(transaction, actual) {\n  const batteryKw = finite(actual.batteryKw);\n  const measuredAtMs = finite(actual.batteryMeasuredAtMs);\n  const nowMs = finite(actual.nowMs) ?? Date.now();\n  const issuedAtMs = finite(transaction.issuedAtMs);\n  const targetKw = finite(transaction.targetKw);\n  if (batteryKw === null || measuredAtMs === null || issuedAtMs === null || targetKw === null) {\n    return {ok: false, status: \"feedback_target_unavailable\", batteryKw};\n  }\n  const ageMs = nowMs - measuredAtMs;\n  if (ageMs < 0 || ageMs > MAX_FEEDBACK_AGE_MS ||\n      (measuredAtMs < issuedAtMs && transaction.writeStrategy !== \"no_write\")) {\n    return {ok: false, status: \"feedback_target_stale\", batteryKw, ageMs};\n  }\n  const soc = finite(actual.soc);\n  if (transaction.batteryMode === \"export\" && soc !== null && soc <= transaction.protectedSocPct + 1) {\n    return {ok: true, status: \"confirmed_target_clipped_floor\", batteryKw, clipped: true};\n  }\n  if ([\"grid_charge\", \"pv_charge\"].includes(transaction.batteryMode) && soc !== null && soc >= 99) {\n    return {ok: true, status: \"confirmed_target_clipped_upper_soc\", batteryKw, clipped: true};\n  }\n  if (transaction.batteryMode === \"export\" && String(transaction.reason || \"\").includes(\"held_60s\")) {\n    // During the deliberate stability window, register verification plus the\n    // earlier signed battery-direction check are authoritative. Site export\n    // can move as household load/PV changes even though the physical battery\n    // rate has correctly remained fixed; do not turn that noise into a full\n    // transaction reassertion.\n    return {ok: true, status: \"confirmed_export_rate_held\", batteryKw};\n  }\n\n  let expectedKw;\n  let observedKw;\n  if (transaction.batteryMode === \"export\") {\n    // Export is a site-level objective.  PV and house load can move after the\n    // battery setpoint was translated, so battery power alone is not proof\n    // that the requested grid export was missed.  Confirm the actual site\n    // export using the fast SAJ grid meter (negative is export), while the\n    // earlier feedback stage continues to prove the battery is discharging.\n    const gridKw = finite(actual.gridKw);\n    const gridMeasuredAtMs = finite(actual.gridMeasuredAtMs);\n    const siteExportTargetKw = finite(transaction.siteExportTargetKw);\n    if (gridKw === null || gridMeasuredAtMs === null || siteExportTargetKw === null) {\n      return {ok: false, status: \"feedback_target_grid_unavailable\", batteryKw};\n    }\n    const gridAgeMs = nowMs - gridMeasuredAtMs;\n    if (gridAgeMs < 0 || gridAgeMs > MAX_FEEDBACK_AGE_MS ||\n        (gridMeasuredAtMs < issuedAtMs && transaction.writeStrategy !== \"no_write\")) {\n      return {ok: false, status: \"feedback_target_grid_stale\", batteryKw, gridAgeMs};\n    }\n    expectedKw = siteExportTargetKw;\n    observedKw = Math.max(0, -gridKw);\n  } else if (transaction.batteryMode === \"grid_charge\") {\n    expectedKw = targetKw;\n    observedKw = Math.max(0, -batteryKw);\n  } else if (transaction.batteryMode === \"pv_charge\") {\n    const pvKw = finite(actual.pvKw);\n    const loadKw = finite(actual.loadKw);\n    if (pvKw === null || loadKw === null) return {ok: false, status: \"feedback_target_solar_unavailable\", batteryKw};\n    // PV charging deliberately remains open at the inverter's full verified\n    // rate. Confirm the solar actually available now, rather than treating the\n    // optimiser's forecast target as a ceiling and rejecting beneficial extra\n    // charge when irradiance is stronger than forecast.\n    expectedKw = Math.min(MAX_CHARGE_KW, Math.max(0, pvKw - loadKw));\n    observedKw = Math.max(0, -batteryKw);\n    if (expectedKw < 0.2) return {ok: true, status: \"confirmed_target_clipped_solar\", batteryKw, clipped: true};\n  } else if (transaction.batteryMode === \"self_consume\" && transaction.forceDischargeOn) {\n    expectedKw = targetKw;\n    observedKw = Math.max(0, batteryKw);\n  } else if (transaction.batteryMode === \"hold\") {\n    return {ok: true, status: \"confirmed_no_forced_target\", batteryKw};\n  } else {\n    return {ok: true, status: \"confirmed_no_forced_target\", batteryKw};\n  }\n  const toleranceKw = feedbackTolerance(expectedKw);\n  const errorKw = Math.abs(observedKw - expectedKw);\n  if (transaction.batteryMode === \"export\" && errorKw > toleranceKw) {\n    // The owned discharge register and signed battery direction have already\n    // been independently confirmed. Site export can diverge as load/PV move\n    // after translation; replaying the identical full transaction cannot\n    // correct that and creates a stop/start pulse. Report the deviation and\n    // leave the next permitted 60-second planner update to change the rate.\n    return {\n      ok: true,\n      status: \"confirmed_export_rate_site_deviation\",\n      batteryKw,\n      expectedKw,\n      observedKw,\n      errorKw,\n      toleranceKw,\n    };\n  }\n  return {\n    ok: errorKw <= toleranceKw,\n    status: errorKw <= toleranceKw ? \"confirmed_target\" : \"feedback_target_mismatch\",\n    batteryKw,\n    expectedKw,\n    observedKw,\n    errorKw,\n    toleranceKw,\n  };\n}\n\nfunction statusText(phase, transaction, detail = \"\") {\n  // The audit service uses unescaped Mustache so Home Assistant stores the\n  // controlled status text verbatim. Keep every dynamic component JSON-safe\n  // and prevent an injected field delimiter from changing the status layout.\n  const clean = (value) => String(value ?? \"\")\n    .replace(/[\\\\\"\\u0000-\\u001f]/g, \"_\")\n    .replace(/\\|/g, \"/\");\n  const statusPhase = {\n    confirmed: \"feedback_confirmed\",\n    semantic_confirmed: \"semantic_noop_confirmed\",\n  }[phase] || phase;\n  const fields = [\n    clean(statusPhase),\n    clean(transaction?.planId || \"unknown\"),\n    `mode=${clean(transaction?.batteryMode || \"unknown\")}`,\n    `target=${Number(transaction?.targetKw || 0).toFixed(1)}kW`,\n    `export=${clean(transaction?.pvExportCommand || \"unknown\")}`,\n    `reserve=${transaction?.priorReservePct ?? \"na\"}->${transaction?.reservePct ?? \"na\"}%`,\n  ];\n  if (transaction?.acceptedAtMs) fields.push(`accepted_ms=${transaction.acceptedAtMs}`);\n  if (transaction?.firstWriteAtMs) fields.push(`first_write_ms=${transaction.firstWriteAtMs}`);\n  if (transaction?.appliedAtMs) fields.push(`applied_ms=${transaction.appliedAtMs}`);\n  if (transaction?.confirmedAtMs) fields.push(`confirmed_ms=${transaction.confirmedAtMs}`);\n  if (transaction?.reason) fields.push(`reason=${clean(transaction.reason)}`);\n  if (detail) fields.push(clean(detail));\n  return fields.join(\" | \").slice(0, 250);\n}\n\nconst tx=msg.transaction||{};\nconst current=flow.get(\"energyOptimizerCurrentTransaction\")||{};\n// Delayed observations are intentionally asynchronous. A superseded observer\n// is silent: it must never replace the status of, reassert, or safe-stop a\n// newer physical command.\nif(!sameTransactionIdentity(tx,current))return [null,null,null,null];\nconst ha=global.get(\"homeassistant\");\nconst states=ha?.homeAssistant?.states||ha?.states||{};\nfunction entity(id){return states[id]||{};}\nfunction raw(id){return entity(id).state;}\nfunction measuredAt(id){const value=entity(id);for(const candidate of [value.last_reported,value.last_updated]){const parsed=timestampMs(candidate);if(parsed!==null)return parsed;}return null;}\nfunction powerKw(id){const value=finite(raw(id));if(value===null)return null;const unit=String(entity(id).attributes?.unit_of_measurement||\"\").trim().toLowerCase();if(unit===\"w\")return value/1000;if(unit===\"kw\")return value;if(unit===\"mw\")return value*1000;return null;}\nconst actual={\n reserveNumberPct:raw(\"number.saj_battery_on_grid_discharge_depth_input\"),reserveSensorPct:raw(\"sensor.saj_battery_on_grid_discharge_depth\"),reserveSensorMeasuredAtMs:measuredAt(\"sensor.saj_battery_on_grid_discharge_depth\"),\n batteryDischargeLimitNumber:raw(\"number.saj_battery_discharge_power_limit_input\"),batteryDischargeLimitSensor:batteryDischargeLimitSensorToRegister(raw(\"sensor.saj_battery_discharge_power_limit\"),entity(\"sensor.saj_battery_discharge_power_limit\").attributes?.unit_of_measurement),batteryDischargeLimitSensorMeasuredAtMs:measuredAt(\"sensor.saj_battery_discharge_power_limit\"),\n antiRefluxMode:raw(\"number.saj_anti_reflux_mode_input\"),exportLimit:raw(\"number.saj_export_limit_input\"),gridMaxDischarge:raw(\"number.saj_grid_max_discharge_power_input\"),\n exportHelperOn:binaryOn(raw(\"input_boolean.export_power\")),pvChargeOn:binaryOn(raw(\"input_boolean.battery_pv_charge\")),forceChargeOn:binaryOn(raw(\"input_boolean.battery_charge\")),forceDischargeOn:binaryOn(raw(\"input_boolean.battery_discharge\")),\n physicalChargeOn:binaryOn(raw(\"switch.saj_charging_control\")),physicalDischargeOn:binaryOn(raw(\"switch.saj_discharging_control\")),\n chargePowerPercent:raw(\"number.saj_charge1_power_percent_input\"),dischargePowerPercent:raw(\"number.saj_discharge1_power_percent_input\"),pvChargePowerLimit:raw(\"number.saj_battery_charge_power_limit_input\"),\n batteryKw:powerKw(\"sensor.saj_battery_power\"),batteryMeasuredAtMs:measuredAt(\"sensor.saj_battery_power\"),soc:finite(raw(\"sensor.saj_battery_1_soc\")),\n gridKw:powerKw(\"sensor.saj_meter_a_real_power_total\"),gridMeasuredAtMs:measuredAt(\"sensor.saj_meter_a_real_power_total\"),\n pvKw:powerKw(\"sensor.saj_pv_power\")??powerKw(\"sensor.pv_power_mqtt_abs\"),loadKw:powerKw(\"sensor.saj_home_load\"),nowMs:Date.now()\n};\nconst registers=verifyRegisterState(tx,actual);\nconst reserveReadAt=finite(actual.reserveSensorMeasuredAtMs);\nconst reserveChanged=reserveTargetChanged(tx);\nif(tx.reserveControlAvailable===true&&reserveChanged&&(reserveReadAt===null||reserveReadAt<finite(tx.issuedAtMs)||actual.nowMs-reserveReadAt>MAX_FEEDBACK_AGE_MS)){\n registers.ok=false;\n if(!registers.mismatches.includes(\"reserveSensorFresh\"))registers.mismatches.push(\"reserveSensorFresh\");\n}\nconst dischargeLimitReadAt=finite(actual.batteryDischargeLimitSensorMeasuredAtMs);\nconst dischargeLimitChanged=batteryDischargeLimitTargetChanged(tx);\nif(tx.batteryDischargeLimitControlAvailable===true&&dischargeLimitChanged&&(dischargeLimitReadAt===null||dischargeLimitReadAt<finite(tx.issuedAtMs)||actual.nowMs-dischargeLimitReadAt>MAX_FEEDBACK_AGE_MS)){\n registers.ok=false;\n if(!registers.mismatches.includes(\"batteryDischargeLimitSensorFresh\"))registers.mismatches.push(\"batteryDischargeLimitSensorFresh\");\n}\nconst result=registers.ok?evaluateTargetFeedback(tx,actual):{ok:false,status:\"feedback_register_mismatch\"};\nconst detail=!registers.ok?\"registers=\"+registers.mismatches.join(\",\"):result.expectedKw===undefined?result.status:\"expected=\"+result.expectedKw.toFixed(2)+\" observed=\"+result.observedKw.toFixed(2)+\" tol=\"+result.toleranceKw.toFixed(2);\nif(registers.ok&&result.ok){\n const transaction={...tx,confirmedAtMs:Date.now()};\n flow.set(\"energyOptimizerCurrentTransaction\",transaction);\n flow.set(\"energyOptimizerLastRegisterConfirmedTransaction\",transaction);\n flow.set(\"energyOptimizerLastConfirmedTransaction\",transaction);\n flow.set(\"energyOptimizerLastAppliedTransaction\",transaction);\n return [{transaction,payload:statusText(\"confirmed\",transaction,detail)},null,null,null];\n}\nif(Number(tx.reassertCount||0)<1){\n const transaction={...tx,writeStrategy:\"full\",reassertCount:1,issuedAtMs:Date.now(),reason:\"reassert_target\"};\n flow.set(\"energyOptimizerCurrentTransaction\",transaction);\n return [{transaction,payload:statusText(\"requested\",transaction,detail)},{transaction},null,null];\n}\nconst revision=Number(flow.get(\"energyOptimizerRevision\")||0)+1;flow.set(\"energyOptimizerRevision\",revision);\nconst transaction={...tx,revision,batteryMode:\"safe_stop\",reason:\"target_failed\",safeStop:true,writeStrategy:\"full\",targetKw:0,priorReservePct:tx.reservePct,reservePct:preservedReservePct(tx.reservePct),priorBatteryDischargeLimit:tx.batteryDischargeLimit,batteryDischargeLimit:1000,pvExportCommand:tx.pvExportCommand===\"curtail\"?\"curtail\":\"allow\",antiRefluxMode:tx.pvExportCommand===\"curtail\"?1:0,exportLimit:tx.pvExportCommand===\"curtail\"?0:1100,exportHelperOn:tx.pvExportCommand!==\"curtail\",pvChargeOn:true,forceChargeOn:false,forceDischargeOn:false,chargeRateKw:30,dischargeRateKw:28,chargePowerPercent:0,dischargePowerPercent:0,pvChargePowerLimit:1000,issuedAtMs:Date.now(),validUntilMs:null,reassertCount:1,emergencyAttempted:true};\nflow.set(\"energyOptimizerCurrentTransaction\",transaction);\nreturn [{transaction:tx,payload:statusText(\"failed\",tx,detail)},null,null,{transaction}];",
+    "outputs": 4,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 5180,
+    "y": 290,
     "wires": [
       [
-        "eop_allow_export_002"
+        "eop_audit_002"
+      ],
+      [
+        "eop_apply_queue_002"
+      ],
+      [],
+      [
+        "eop_apply_queue_002"
       ]
     ]
   },
   {
-    "id": "eop_allow_export_002",
-    "type": "api-call-service",
+    "id": "eop_serial_catch_002",
+    "type": "catch",
     "z": "eop_guard_tab_002",
-    "name": "Synchronize export helper on",
-    "server": "srv_ha_001",
-    "version": 7,
-    "action": "input_boolean.turn_on",
-    "entityId": [
-      "input_boolean.export_power"
+    "name": "Catch serial/write-controller failure",
+    "scope": [
+      "eop_stop_charge_physical_002",
+      "eop_stop_discharge_physical_002",
+      "eop_stop_force_helpers_002",
+      "eop_set_battery_discharge_limit_002",
+      "eop_set_reserve_002",
+      "eop_set_grid_max_002",
+      "eop_set_anti_curtail_002",
+      "eop_set_export_zero_002",
+      "eop_export_helper_off_002",
+      "eop_set_export_normal_002",
+      "eop_set_anti_normal_002",
+      "eop_export_helper_on_002",
+      "eop_set_charge_percent_002",
+      "eop_set_discharge_percent_002",
+      "eop_pv_charge_on_002",
+      "eop_pv_charge_off_002",
+      "eop_set_pv_limit_002",
+      "eop_fast_set_discharge_percent_002",
+      "eop_force_charge_physical_002",
+      "eop_force_charge_helper_002",
+      "eop_force_discharge_physical_002",
+      "eop_force_discharge_helper_002",
+      "eop_read_live_state_002",
+      "eop_validate_002",
+      "eop_arm_deadline_002",
+      "eop_plan_deadline_expired_002",
+      "eop_apply_queue_002",
+      "eop_write_strategy_route_002",
+      "eop_semantic_confirmed_002",
+      "eop_reserve_route_002",
+      "eop_export_route_002",
+      "eop_pv_route_002",
+      "eop_pre_force_check_002",
+      "eop_forced_route_002",
+      "eop_applied_002",
+      "eop_feedback_confirm_002",
+      "eop_target_confirm_002"
     ],
-    "data": "{}",
-    "dataType": "json",
-    "x": 2020,
-    "y": 340,
+    "uncaught": false,
+    "x": 760,
+    "y": 490,
     "wires": [
-      []
+      [
+        "eop_service_failure_002"
+      ]
+    ]
+  },
+  {
+    "id": "eop_serial_status_002",
+    "type": "status",
+    "z": "eop_guard_tab_002",
+    "name": "Observe serial service status",
+    "scope": [
+      "eop_stop_charge_physical_002",
+      "eop_stop_discharge_physical_002",
+      "eop_stop_force_helpers_002",
+      "eop_set_battery_discharge_limit_002",
+      "eop_set_reserve_002",
+      "eop_set_grid_max_002",
+      "eop_set_anti_curtail_002",
+      "eop_set_export_zero_002",
+      "eop_export_helper_off_002",
+      "eop_set_export_normal_002",
+      "eop_set_anti_normal_002",
+      "eop_export_helper_on_002",
+      "eop_set_charge_percent_002",
+      "eop_set_discharge_percent_002",
+      "eop_pv_charge_on_002",
+      "eop_pv_charge_off_002",
+      "eop_set_pv_limit_002",
+      "eop_fast_set_discharge_percent_002",
+      "eop_force_charge_physical_002",
+      "eop_force_charge_helper_002",
+      "eop_force_discharge_physical_002",
+      "eop_force_discharge_helper_002"
+    ],
+    "x": 750,
+    "y": 540,
+    "wires": [
+      [
+        "eop_mark_serial_status_002"
+      ]
+    ]
+  },
+  {
+    "id": "eop_mark_serial_status_002",
+    "type": "change",
+    "z": "eop_guard_tab_002",
+    "name": "Mark serial node-status event",
+    "rules": [
+      {
+        "t": "set",
+        "p": "topic",
+        "pt": "msg",
+        "to": "node_status",
+        "tot": "str"
+      }
+    ],
+    "action": "",
+    "property": "",
+    "from": "",
+    "to": "",
+    "reg": false,
+    "x": 1010,
+    "y": 540,
+    "wires": [
+      [
+        "eop_service_failure_002"
+      ]
+    ]
+  },
+  {
+    "id": "eop_service_failure_002",
+    "type": "function",
+    "z": "eop_guard_tab_002",
+    "name": "Fail current revision and attempt one safe-stop",
+    "func": "\"use strict\";\n\nfunction finite(value) {\n  if (value === null || value === undefined) return null;\n  if (\n    typeof value === \"string\" &&\n    (!value.trim() || [\"unknown\", \"unavailable\", \"none\", \"null\"].includes(value.trim().toLowerCase()))\n  ) return null;\n  const parsed = Number(value);\n  return Number.isFinite(parsed) ? parsed : null;\n}\n\nfunction clamp(value, minimum, maximum) {\n  return Math.min(maximum, Math.max(minimum, value));\n}\n\nfunction normalizedWholeReservePct(value) {\n  const parsed = finite(value);\n  if (parsed === null || parsed < 5 || parsed > 100.5) return null;\n  return clamp(Math.ceil(parsed), 5, 100);\n}\n\nfunction preservedReservePct(value) {\n  return normalizedWholeReservePct(value) ?? 5;\n}\n\nfunction sameTransactionIdentity(left, right) {\n  return Boolean(left && right) &&\n    String(left.planId || \"\") === String(right.planId || \"\") &&\n    finite(left.revision) !== null && finite(left.revision) === finite(right.revision) &&\n    finite(left.issuedAtMs) !== null && finite(left.issuedAtMs) === finite(right.issuedAtMs);\n}\n\nfunction statusText(phase, transaction, detail = \"\") {\n  // The audit service uses unescaped Mustache so Home Assistant stores the\n  // controlled status text verbatim. Keep every dynamic component JSON-safe\n  // and prevent an injected field delimiter from changing the status layout.\n  const clean = (value) => String(value ?? \"\")\n    .replace(/[\\\\\"\\u0000-\\u001f]/g, \"_\")\n    .replace(/\\|/g, \"/\");\n  const statusPhase = {\n    confirmed: \"feedback_confirmed\",\n    semantic_confirmed: \"semantic_noop_confirmed\",\n  }[phase] || phase;\n  const fields = [\n    clean(statusPhase),\n    clean(transaction?.planId || \"unknown\"),\n    `mode=${clean(transaction?.batteryMode || \"unknown\")}`,\n    `target=${Number(transaction?.targetKw || 0).toFixed(1)}kW`,\n    `export=${clean(transaction?.pvExportCommand || \"unknown\")}`,\n    `reserve=${transaction?.priorReservePct ?? \"na\"}->${transaction?.reservePct ?? \"na\"}%`,\n  ];\n  if (transaction?.acceptedAtMs) fields.push(`accepted_ms=${transaction.acceptedAtMs}`);\n  if (transaction?.firstWriteAtMs) fields.push(`first_write_ms=${transaction.firstWriteAtMs}`);\n  if (transaction?.appliedAtMs) fields.push(`applied_ms=${transaction.appliedAtMs}`);\n  if (transaction?.confirmedAtMs) fields.push(`confirmed_ms=${transaction.confirmedAtMs}`);\n  if (transaction?.reason) fields.push(`reason=${clean(transaction.reason)}`);\n  if (detail) fields.push(clean(detail));\n  return fields.join(\" | \").slice(0, 250);\n}\n\nconst status=msg.status||{};\nif(msg.topic===\"node_status\"&&status.fill!==\"red\")return [null,null,null];\nconst current=flow.get(\"energyOptimizerCurrentTransaction\")||msg.transaction||{};\nconst applying=flow.get(\"energyOptimizerApplyingRevision\");\nconst transactionInFlight=flow.get(\"energyOptimizerApplyingTransaction\")||null;\nconst failed=msg.transaction||transactionInFlight||current;\nconst source=msg.error?.message||status.text||\"actuator_service_error\";\nconst audit={transaction:failed,payload:statusText(\"failed\",failed,String(source).slice(0,80))};\nif(msg.topic===\"node_status\"&&(applying===null||applying===undefined))return [null,null,null];\nif(finite(failed.revision)!==null&&applying!==null&&applying!==undefined&&failed.revision!==applying)return [null,null,null];\nif(!sameTransactionIdentity(failed,current)){\n const pending=flow.get(\"energyOptimizerPendingTransaction\")||null;\n if(applying===failed.revision){flow.set(\"energyOptimizerApplyingRevision\",null);flow.set(\"energyOptimizerApplyingStartedAtMs\",null);flow.set(\"energyOptimizerApplyingTransaction\",null);flow.set(\"energyOptimizerWriteBarrier\",null);}\n flow.set(\"energyOptimizerPendingTransaction\",null);\n return [null,null,pending];\n}\nif(failed.emergencyAttempted){\n if(applying===failed.revision){flow.set(\"energyOptimizerApplyingRevision\",null);flow.set(\"energyOptimizerApplyingStartedAtMs\",null);flow.set(\"energyOptimizerApplyingTransaction\",null);flow.set(\"energyOptimizerWriteBarrier\",null);}\n return [audit,null,null];\n}\nconst revision=Number(flow.get(\"energyOptimizerRevision\")||0)+1;flow.set(\"energyOptimizerRevision\",revision);\nconst curtail=failed.pvExportCommand===\"curtail\";\nconst transaction={...failed,revision,batteryMode:\"safe_stop\",reason:\"actuator_error\",safeStop:true,writeStrategy:\"full\",targetKw:0,priorReservePct:failed.reservePct,reservePct:preservedReservePct(failed.reservePct),priorBatteryDischargeLimit:failed.batteryDischargeLimit,batteryDischargeLimit:1000,pvExportCommand:curtail?\"curtail\":\"allow\",antiRefluxMode:curtail?1:0,exportLimit:curtail?0:1100,exportHelperOn:!curtail,pvChargeOn:true,forceChargeOn:false,forceDischargeOn:false,chargeRateKw:30,dischargeRateKw:28,chargePowerPercent:0,dischargePowerPercent:0,pvChargePowerLimit:1000,issuedAtMs:Date.now(),validUntilMs:null,reassertCount:1,emergencyAttempted:true};\nflow.set(\"energyOptimizerCurrentTransaction\",transaction);\nflow.set(\"energyOptimizerApplyingRevision\",null);\nflow.set(\"energyOptimizerApplyingStartedAtMs\",null);\nflow.set(\"energyOptimizerApplyingTransaction\",null);\nflow.set(\"energyOptimizerWriteBarrier\",null);\nflow.set(\"energyOptimizerPendingTransaction\",null);\nreturn [audit,{transaction},null];",
+    "outputs": 3,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 1610,
+    "y": 490,
+    "wires": [
+      [
+        "eop_audit_002"
+      ],
+      [
+        "eop_apply_queue_002"
+      ],
+      [
+        "eop_apply_queue_002"
+      ]
     ]
   }
 ]

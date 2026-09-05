@@ -1,13 +1,22 @@
 - id: energy_optimizer_ev_requirement_date
   alias: Energy Optimizer - EV Requirement Date
   description: >-
-    Keeps the EV departure date aligned with the next 7am departure day
-    whenever the trip requirement changes.
+    Keeps the default departure at the next occurrence of 7am. It refreshes on
+    startup, at the daily 7am rollover, and immediately when distance or the
+    Tesla Fleet charge limit changes so the next optimizer plan sees current inputs.
   triggers:
     - trigger: state
-      entity_id: input_select.energy_optimizer_ev_trip
-    - trigger: state
-      entity_id: input_number.energy_optimizer_ev_custom_km
+      entity_id:
+        - input_select.energy_optimizer_ev_trip
+        - input_number.energy_optimizer_ev_custom_km
+        - number.tesla_ble_039d9c_charging_limit
+      id: requirement
+    - trigger: time
+      at: "07:00:05"
+      id: daily_rollover
+    - trigger: homeassistant
+      event: start
+      id: startup
   conditions: []
   actions:
     - action: input_datetime.set_datetime

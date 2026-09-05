@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+import hashlib
 import os
 from pathlib import Path
 import tempfile
@@ -353,10 +354,17 @@ class ApiTests(unittest.TestCase):
             "house-night.png",
             "house-night-tesla.png",
             "server-rack.png",
+            "hot-water.png",
         ):
             asset = self.client.get(f"/dashboard/assets/{asset_name}")
             self.assertEqual(asset.status_code, 200)
             self.assertEqual(asset.headers["content-type"], "image/png")
+        canonical_hot_water = Path(__file__).parents[3] / "assets" / "energy" / "hot-water.png"
+        packaged_hot_water = Path(__file__).parents[1] / "pilot_core" / "dashboard" / "hot-water.png"
+        self.assertEqual(
+            hashlib.sha256(packaged_hot_water.read_bytes()).hexdigest(),
+            hashlib.sha256(canonical_hot_water.read_bytes()).hexdigest(),
+        )
         self.assertEqual(
             self.client.get("/dashboard/assets/not-allowed.js").status_code,
             404,
@@ -371,7 +379,7 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.headers["cache-control"], "no-store")
         payload = response.json()
-        self.assertEqual(payload["deployment"]["version"], "0.35.1")
+        self.assertEqual(payload["deployment"]["version"], "0.35.3")
         self.assertEqual(payload["summary"]["room_count"], 2)
         self.assertEqual(payload["summary"]["device_count"], 0)
         self.assertEqual(payload["summary"]["armed_room_count"], 0)

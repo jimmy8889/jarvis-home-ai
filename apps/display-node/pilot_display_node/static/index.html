@@ -22,12 +22,22 @@
           <div class="energy-heading">
             <div><span class="eyebrow">James House</span><h1>Energy flow</h1></div>
             <div class="header-clock"><time id="clock">--:--</time><span id="date">Starting…</span></div>
-            <span id="energy-state" class="data-state">Waiting</span>
+            <div class="energy-controls">
+              <button id="sim-rig-control" class="sim-rig-control" type="button" aria-pressed="false" disabled><span>Sim Rig</span><strong id="sim-rig-state">Waiting</strong></button>
+              <button id="reboot-button" class="reboot-button" type="button"><span aria-hidden="true">↻</span><strong>Reboot</strong></button>
+              <span id="energy-state" class="data-state">Waiting</span>
+            </div>
           </div>
           <div class="daily-strip" aria-label="Today's energy">
             <div><span>Generated</span><strong id="daily-generated">—</strong></div>
             <div><span>Home used</span><strong id="daily-home">—</strong></div>
             <div><span>Exported</span><strong id="daily-export">—</strong></div>
+            <div class="codex-usage" aria-label="Codex usage and reset">
+              <span>Codex usage</span>
+              <strong id="codex-usage-value">—</strong>
+              <small id="codex-reset-at">Reset unavailable</small>
+              <i class="codex-meter" aria-hidden="true"><b id="codex-meter-fill"></b></i>
+            </div>
           </div>
           <div id="energy-flow" class="energy-flow house-flow" role="img" aria-label="Waiting for live energy flow">
             <div class="energy-house-scenes" aria-hidden="true">
@@ -41,32 +51,37 @@
                 <linearGradient id="battery-gradient"><stop stop-color="#00e6be"></stop><stop offset="1" stop-color="#3ba7ff"></stop></linearGradient>
                 <linearGradient id="home-gradient"><stop stop-color="#00e6be"></stop><stop offset="1" stop-color="#a991ff"></stop></linearGradient>
                 <linearGradient id="vehicle-gradient"><stop stop-color="#ff5468"></stop><stop offset="1" stop-color="#ff9b62"></stop></linearGradient>
+                <linearGradient id="hot-water-gradient"><stop stop-color="#ffb347"></stop><stop offset="1" stop-color="#ff6f61"></stop></linearGradient>
               </defs>
               <path class="flow-base" d="M500 60 C500 105 500 125 500 156"></path>
               <path class="flow-base" d="M875 120 C780 120 720 160 647 205"></path>
               <path class="flow-base battery-flow-base" d="M780 353 C700 344 655 316 610 282"></path>
               <path class="flow-base vehicle-flow-base" d="M190 340 C280 330 344 300 405 270"></path>
+              <path class="flow-base" d="M168 276 C260 275 330 266 405 252"></path>
               <path class="flow-base" d="M832 276 C745 275 690 266 618 252"></path>
               <path class="flow-base home-flow-base" d="M610 282 C590 320 548 347 500 370"></path>
               <path id="flow-solar" class="flow-active solar-flow" d="M500 60 C500 105 500 125 500 156"></path>
               <path id="flow-grid" class="flow-active grid-flow" d="M875 120 C780 120 720 160 647 205"></path>
               <path id="flow-battery" class="flow-active battery-flow" d="M780 353 C700 344 655 316 610 282"></path>
               <path id="flow-vehicle" class="flow-active vehicle-flow" d="M610 282 C520 310 350 338 190 340"></path>
+              <path id="flow-hot-water" class="flow-active hot-water-flow" d="M405 252 C330 266 260 275 168 276"></path>
               <path id="flow-server" class="flow-active server-flow" d="M618 252 C690 266 745 275 832 276"></path>
               <path id="flow-home" class="flow-active home-flow" d="M610 282 C590 320 548 347 500 370"></path>
               <g id="particles-solar" class="flow-particles solar-particles"><circle r="4"><animateMotion dur="1.5s" repeatCount="indefinite" path="M500 60 C500 105 500 125 500 156"></animateMotion></circle></g>
               <g id="particles-grid" class="flow-particles grid-particles"><g class="particles-forward"><circle r="4"><animateMotion dur="1.6s" repeatCount="indefinite" path="M875 120 C780 120 720 160 647 205"></animateMotion></circle></g><g class="particles-reverse"><circle r="4"><animateMotion dur="1.6s" repeatCount="indefinite" path="M647 205 C720 160 780 120 875 120"></animateMotion></circle></g></g>
               <g id="particles-battery" class="flow-particles battery-particles"><g class="particles-forward"><circle r="5"><animateMotion dur="1.35s" repeatCount="indefinite" path="M780 353 C700 344 655 316 610 282"></animateMotion></circle></g><g class="particles-reverse"><circle r="5"><animateMotion dur="1.35s" repeatCount="indefinite" path="M610 282 C655 316 700 344 780 353"></animateMotion></circle></g></g>
               <g id="particles-vehicle" class="flow-particles vehicle-particles"><circle r="4"><animateMotion dur="1.3s" repeatCount="indefinite" path="M610 282 C520 310 350 338 190 340"></animateMotion></circle></g>
+              <g id="particles-hot-water" class="flow-particles hot-water-particles"><circle r="4"><animateMotion dur="1.35s" repeatCount="indefinite" path="M405 252 C330 266 260 275 168 276"></animateMotion></circle></g>
               <g id="particles-server" class="flow-particles server-particles"><circle r="4"><animateMotion dur="1.4s" repeatCount="indefinite" path="M618 252 C690 266 745 275 832 276"></animateMotion></circle></g>
               <g id="particles-home" class="flow-particles home-particles"><circle r="5"><animateMotion dur="1.35s" repeatCount="indefinite" path="M610 282 C590 320 548 347 500 370"></animateMotion></circle><circle r="3.5"><animateMotion begin="-.675s" dur="1.35s" repeatCount="indefinite" path="M610 282 C590 320 548 347 500 370"></animateMotion></circle></g>
             </svg>
-            <article id="node-solar" class="flow-node solar-node"><span class="node-icon">☀</span><div><small>PV</small><strong id="energy-solar">—</strong></div></article>
+            <article id="node-solar" class="flow-node solar-node"><span class="node-icon">☀</span><div><small>PV</small><strong id="energy-solar">—</strong><em id="energy-pv-arrays">P1 — · P2 — · P3 —</em></div></article>
             <article id="node-grid" class="flow-node grid-node"><span class="node-icon">⇄</span><div><small>Grid</small><strong id="energy-grid">—</strong><em id="energy-grid-direction">Waiting</em></div></article>
             <article id="node-home" class="flow-node home-node"><span class="node-icon">⌂</span><div><small>Home load</small><strong id="energy-home">—</strong></div></article>
             <article id="node-battery" class="flow-node battery-node"><span class="node-icon">▰</span><div><small>Battery</small><strong id="energy-battery">—</strong><em id="energy-battery-direction">Waiting</em></div><div class="battery-soc"><span id="energy-soc">—</span><div class="soc-track"><i id="soc-fill"></i></div></div></article>
             <article id="node-vehicle" class="flow-node vehicle-node"><span class="node-icon">◆</span><div><small>Jarvis</small><strong id="energy-vehicle">—</strong><em id="vehicle-state">Away</em></div></article>
-            <article id="node-server" class="flow-node server-node"><span class="server-rack-visual" aria-hidden="true"><img src="/assets/server-rack.png" alt=""><i></i><i></i><i></i></span><div><small>Server rack</small><strong id="energy-server">—</strong></div></article>
+            <article id="node-hot-water" class="flow-node hot-water-node"><span class="hot-water-visual" aria-hidden="true"><img src="/assets/hot-water.png" alt=""></span><div><small>Hot water</small><strong id="energy-hot-water">—</strong><em id="hot-water-state">Idle</em></div></article>
+            <article id="node-server" class="flow-node server-node"><span class="server-rack-visual" aria-hidden="true"><img src="/assets/server-rack.png" alt=""><i></i><i></i><i></i></span><div><small>Server + desk</small><strong id="energy-server">—</strong></div></article>
           </div>
         </section>
 
@@ -75,13 +90,15 @@
           <article class="chart-card"><svg id="energy-chart" viewBox="0 0 960 380" role="img" aria-label="Solar and battery power with home and Tesla loads plotted below zero from midnight to midnight"></svg><div id="chart-legend" class="chart-legend"></div></article>
         </section>
 
-        <section class="page" data-page="daily" aria-label="Daily energy and vehicle">
-          <div class="page-title"><div><span class="eyebrow">Today</span><h1>Energy &amp; Jarvis</h1></div></div>
+        <section class="page" data-page="daily" aria-label="Energy plan and daily results">
+          <div class="page-title"><div><span class="eyebrow">Today &amp; next actions</span><h1>Plan &amp; day</h1></div><span id="plan-health" class="data-state">Waiting</span></div>
           <div class="daily-grid">
             <article class="hero-stat generated"><span>Solar generated</span><strong id="daily-generated-large">—</strong><small>Across all three arrays</small></article>
             <article class="hero-stat used"><span>Home used</span><strong id="daily-home-large">—</strong><small>Whole-house consumption</small></article>
             <article class="hero-stat exported"><span>Grid exported</span><strong id="daily-export-large">—</strong><small>Sent to the network</small></article>
-            <article class="vehicle-card"><span class="eyebrow">Tesla · Jarvis</span><div class="vehicle-summary"><strong id="vehicle-soc">—</strong><span id="vehicle-connected">Checking connection</span></div><div class="segmented"><button type="button" data-charge-mode="Grid">Grid</button><button type="button" data-charge-mode="Solar">Solar</button></div></article>
+            <article class="vehicle-card"><span class="eyebrow">Tesla · Jarvis</span><div class="vehicle-summary"><strong id="vehicle-soc">—</strong><span id="vehicle-connected">Checking connection</span></div><small id="vehicle-plan" class="card-plan">Waiting for charging plan</small></article>
+            <article class="hot-water-card"><span class="eyebrow">Hot water</span><strong id="hot-water-runtime">—</strong><small id="hot-water-plan">Waiting for service plan</small></article>
+            <article class="plan-card"><span class="eyebrow">Current plan</span><strong id="plan-action">Waiting for plan</strong><small id="plan-export">No export window loaded</small><em id="plan-revenue">—</em></article>
             <article class="tariff-card"><span class="eyebrow">Amber now</span><div><span>Buy</span><strong id="tariff-buy">—</strong></div><div><span>Feed-in</span><strong id="tariff-fit">—</strong></div><svg id="tariff-chart" viewBox="0 0 420 90" aria-label="Forecast feed-in price"></svg></article>
           </div>
         </section>
@@ -119,6 +136,33 @@
             </article>
           </div>
           <div id="music-results" class="music-results" aria-label="Music search results"></div>
+        </section>
+
+        <section class="page" data-page="office-audio" aria-label="Office Audio">
+          <div class="page-title">
+            <div><span class="eyebrow">Office N150 · 24-bit / 96 kHz</span><h1>Office audio</h1></div>
+            <span id="office-audio-state" class="data-state">Checking</span>
+          </div>
+          <div class="office-audio-layout">
+            <article class="office-audio-summary">
+              <span class="eyebrow">Current output</span>
+              <strong id="office-audio-current">Waiting for N150</strong>
+              <small id="office-audio-format">Secure control via Pilot</small>
+            </article>
+            <div class="office-audio-options" role="group" aria-label="Office audio output">
+              <button id="office-audio-fiio" type="button" data-office-output="fiio-k3"><span>FiiO K3</span><strong>Headphones</strong><small>24-bit · 96 kHz</small></button>
+              <button id="office-audio-speakers" type="button" data-office-output="kef-coda-w"><span>KEF Coda W</span><strong>Speakers</strong><small>24-bit · 96 kHz</small></button>
+            </div>
+            <article class="office-audio-volume">
+              <div><span class="eyebrow">Live volume</span><strong id="office-audio-volume-value">—</strong><small id="office-audio-volume-detail">Output volume</small></div>
+              <input id="office-audio-volume" type="range" min="0" max="100" step="1" value="0" aria-label="Office audio volume">
+            </article>
+            <article class="office-audio-reboot">
+              <div><span class="eyebrow">Recovery</span><strong>Office N150</strong><small>Briefly interrupts audio and its voice assistant</small></div>
+              <button id="office-audio-reboot" type="button">Reboot N150</button>
+            </article>
+            <p id="office-audio-message" class="office-audio-message">Choose where the office network audio plays.</p>
+          </div>
         </section>
 
         <section class="page console-only" data-page="media" aria-label="Media room console">
@@ -211,9 +255,10 @@
         <button type="button" class="console-only" data-target="media"><span>◆</span>Media</button>
         <button type="button" class="active" data-target="home"><span>ϟ</span>Flow</button>
         <button type="button" data-target="history"><span>⌁</span>History</button>
-        <button type="button" data-target="daily"><span>◉</span>Daily</button>
+        <button type="button" data-target="daily"><span>◉</span>Plan</button>
         <button type="button" data-target="climate"><span>☀</span>Climate</button>
         <button type="button" data-target="music"><span>♪</span>Music</button>
+        <button type="button" data-target="office-audio"><span>◖</span>Audio</button>
         <button type="button" data-target="homelab"><span>▦</span>Home Lab</button>
         <button type="button" data-target="system"><span>●</span>System</button>
       </nav>

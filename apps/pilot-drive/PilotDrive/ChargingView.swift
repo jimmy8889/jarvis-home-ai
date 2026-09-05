@@ -33,7 +33,12 @@ struct ChargingView: View {
                     MetricTile(title: "Power", value: car.number("charge_rate_kw").map { "\($0.formatted(.number.precision(.fractionLength(1)))) kW" } ?? "—", symbol: "bolt.fill")
                     MetricTile(title: "Energy added", value: car.number("energy_added_kwh").map { "\($0.formatted(.number.precision(.fractionLength(1)))) kWh" } ?? "—", symbol: "plus.circle")
                     MetricTile(title: "Limit", value: car.number("charge_limit_percent").map { "\(Int($0))%" } ?? "—", symbol: "slider.horizontal.3")
-                    MetricTile(title: "Time remaining", value: car.number("time_to_full_hours").map { Duration.seconds($0 * 3_600).formatted(.units(allowed: [.hours, .minutes])) } ?? "—", symbol: "clock")
+                    MetricTile(
+                        title: "Until full",
+                        value: Formatters.timeRemaining(hours: car.number("time_to_full_hours")),
+                        symbol: "clock.badge.checkmark",
+                        detail: car.number("charge_limit_percent").map { "Target \(Int($0))%" }
+                    )
                     MetricTile(title: "Port", value: car.flag("charge_port") == true ? "Open" : "Closed", symbol: "powerplug")
                 }
             }

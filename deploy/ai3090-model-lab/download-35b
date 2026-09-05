@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# Downloads only the 35B quantisations that leave operational headroom on 24 GB.
+set -euo pipefail
+
+MODEL_LAB_ROOT="${MODEL_LAB_ROOT:-$HOME/pilot-model-lab}"
+DESTINATION="$MODEL_LAB_ROOT/models/qwen36-35b"
+REPOSITORY="https://huggingface.co/unsloth/Qwen3.6-35B-A3B-MTP-GGUF/resolve/main"
+mkdir -p "$DESTINATION"
+
+for artifact in Qwen3.6-35B-A3B-UD-IQ4_XS.gguf Qwen3.6-35B-A3B-UD-IQ4_NL.gguf; do
+  target="$DESTINATION/$artifact"
+  if [[ -s "$target" ]]; then
+    echo "Already present: $target"
+  else
+    echo "Downloading $artifact"
+    curl --fail --location --continue-at - --retry 5 --retry-delay 5 --output "$target" "$REPOSITORY/$artifact"
+  fi
+done
+
+find "$DESTINATION" -maxdepth 1 -type f -name '*.gguf' -printf '%f %s bytes\n' | sort

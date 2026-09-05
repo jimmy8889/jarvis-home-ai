@@ -1212,6 +1212,26 @@ struct DashboardControls: Codable, Equatable, Sendable {
         case mediaRoomMode = "media_room_mode"
     }
 
+    init(
+        chargingMode: DashboardChargingMode,
+        mediaRoomMode: DashboardMediaRoomMode
+    ) {
+        self.chargingMode = chargingMode
+        self.mediaRoomMode = mediaRoomMode
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        chargingMode = try container.decodeIfPresent(
+            DashboardChargingMode.self,
+            forKey: .chargingMode
+        ) ?? DashboardChargingMode(value: nil, options: [], available: false)
+        mediaRoomMode = try container.decodeIfPresent(
+            DashboardMediaRoomMode.self,
+            forKey: .mediaRoomMode
+        ) ?? DashboardMediaRoomMode(available: false)
+    }
+
     static let empty = DashboardControls(
         chargingMode: DashboardChargingMode(value: nil, options: [], available: false),
         mediaRoomMode: DashboardMediaRoomMode(available: false)
@@ -1455,11 +1475,73 @@ struct MeetingProcessEnvelope: Codable, Sendable {
     let meeting: PilotMeeting
 }
 
+struct MeetingRecordingUploadTicket: Codable, Hashable, Sendable {
+    let schemaVersion: String
+    let ticketID: String
+    let meetingID: String
+    let uploadURL: String
+    let uploadToken: String
+    let expiresAt: String
+    let recording: MeetingRecordingUploadBinding
+
+    enum CodingKeys: String, CodingKey {
+        case schemaVersion = "schema_version"
+        case ticketID = "ticket_id"
+        case meetingID = "meeting_id"
+        case uploadURL = "upload_url"
+        case uploadToken = "upload_token"
+        case expiresAt = "expires_at"
+        case recording
+    }
+
+    func isBound(
+        toMeetingID expectedMeetingID: String,
+        filename expectedFilename: String,
+        contentType expectedContentType: String = "audio/m4a",
+        sha256 expectedSHA256: String,
+        sizeBytes expectedSizeBytes: Int64
+    ) -> Bool {
+        schemaVersion == "pilot.meeting-recording-upload-ticket.v1"
+            && !ticketID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && meetingID == expectedMeetingID
+            && recording.filename == expectedFilename
+            && Self.normalizedContentType(recording.contentType)
+                == Self.normalizedContentType(expectedContentType)
+            && Self.normalizedContentType(recording.contentType) == "audio/m4a"
+            && recording.sha256.trimmingCharacters(
+                in: .whitespacesAndNewlines
+            ).lowercased() == expectedSHA256.trimmingCharacters(
+                in: .whitespacesAndNewlines
+            ).lowercased()
+            && recording.sizeBytes == expectedSizeBytes
+    }
+
+    private static func normalizedContentType(_ value: String) -> String {
+        String(value.split(separator: ";", maxSplits: 1).first ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+    }
+}
+
+struct MeetingRecordingUploadBinding: Codable, Hashable, Sendable {
+    let filename: String
+    let contentType: String
+    let sha256: String
+    let sizeBytes: Int64
+
+    enum CodingKeys: String, CodingKey {
+        case filename, sha256
+        case contentType = "content_type"
+        case sizeBytes = "size_bytes"
+    }
+}
+
 struct PilotMeeting: Codable, Identifiable, Hashable, Sendable {
     let id: String
     let title: String
     let language: String
     let sourceDeviceID: String?
+    let sourceCaptureID: String?
     let startedAt: String
     let endedAt: String?
     let status: String
@@ -1471,6 +1553,7 @@ struct PilotMeeting: Codable, Identifiable, Hashable, Sendable {
     enum CodingKeys: String, CodingKey {
         case id, title, language, status, summary
         case sourceDeviceID = "source_device_id"
+        case sourceCaptureID = "source_capture_id"
         case startedAt = "started_at"
         case endedAt = "ended_at"
         case hasRecording = "has_recording"
@@ -1496,6 +1579,7 @@ struct PilotMeetingDetail: Codable, Identifiable, Hashable, Sendable {
     let title: String
     let language: String
     let sourceDeviceID: String?
+    let sourceCaptureID: String?
     let startedAt: String
     let endedAt: String?
     let status: String
@@ -1509,6 +1593,7 @@ struct PilotMeetingDetail: Codable, Identifiable, Hashable, Sendable {
     enum CodingKeys: String, CodingKey {
         case id, title, language, status, summary, recording, participants, transcript, decisions
         case sourceDeviceID = "source_device_id"
+        case sourceCaptureID = "source_capture_id"
         case startedAt = "started_at"
         case endedAt = "ended_at"
         case actionItems = "action_items"

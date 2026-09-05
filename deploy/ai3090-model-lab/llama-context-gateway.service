@@ -1,0 +1,17 @@
+[Unit]
+Description=Authenticated Qwen 35B context-selector gateway
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/vllm/api.env
+ExecStart=/usr/local/libexec/llama-context-gateway
+Restart=on-failure
+RestartSec=5s
+PrivateTmp=true
+ProtectSystem=full
+ReadWritePaths=/var/lib/llama-context-gateway
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=profiles.sh
+source "$SCRIPT_DIR/profiles.sh"
+
+for profile in fast quality agent-iq4-xs agent-iq4-nl; do
+  model_lab_profile "$profile"
+  if [[ -f "$MODEL_LAB_MODEL" ]]; then
+    bytes="$(stat --format=%s "$MODEL_LAB_MODEL")"
+    if [[ "$bytes" -eq "$MODEL_LAB_EXPECTED_BYTES" ]]; then
+      printf '%-16s READY %s bytes %s\n' "$profile" "$bytes" "$MODEL_LAB_MODEL"
+    else
+      printf '%-16s PARTIAL %s of %s bytes %s\n' "$profile" "$bytes" "$MODEL_LAB_EXPECTED_BYTES" "$MODEL_LAB_MODEL"
+    fi
+  else
+    printf '%-16s MISSING %s\n' "$profile" "$MODEL_LAB_MODEL"
+  fi
+done
+
+if find "$MODEL_LAB_ROOT/models/qwen36-35b" -maxdepth 1 -type f -name '*Q4_K_*.gguf' -print -quit 2>/dev/null | grep -q .; then
+  echo "35B Q4 artifacts are intentionally unsupported on this 24 GB host." >&2
+  exit 4
+fi

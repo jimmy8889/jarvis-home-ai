@@ -40,10 +40,24 @@ device as the source, hide meetings created by any other device, and queue
 processing with `202 Accepted` so a long recording never holds a mobile
 request open.
 
+Device meeting creation may include `source_capture_id`. Core uniquely scopes
+that identifier to the authenticated source device and returns the existing
+meeting for a repeated create, making capture delivery safe to resume after a
+lost response without weakening device ownership.
+
 The upload endpoint accepts common WAV, FLAC, M4A/MP4, AAC, MP3, Ogg, and WebM
 audio types. It sanitizes the supplied filename, rejects empty or oversized
 content, writes through a private temporary file, fsyncs, atomically replaces
 the destination, and never returns its server filesystem path.
+
+An authenticated device may request a short-lived recording upload ticket for
+a meeting it owns. The ticket is bound to that meeting, device credential
+revision, expected size, and SHA-256 and is claimed atomically on first use.
+This permits an advertised HTTPS upload origin without exposing the reusable
+device bearer to that origin. The normal device-authenticated upload route
+remains the fail-closed same-origin path. The client validates the complete
+ticket binding before upload, and Core stops a stream as soon as it exceeds the
+ticket's byte count rather than allowing it to grow to the global asset limit.
 
 Status advances through `created`, `recorded`, `processing`, `transcribed`, and
 `ready`. Worker failures are stored as `failed` with a bounded operational
@@ -67,7 +81,13 @@ will be added only after production transcript quality is measured.
 Pilot iOS can create a meeting, record mono AAC with the iOS background-audio
 mode, upload the recording, queue processing, and display processing status,
 summaries, evidence-linked decisions and actions, and the timestamped speaker
-transcript. Real-device background and long-meeting acceptance remains required.
+transcript. The watchOS 10 companion records to its own durable outbox and uses
+Watch Connectivity to hand the file to the paired iPhone. The phone verifies
+and retains it, then uses the existing device credential and background upload
+path. Off-origin storage receives only a short-lived meeting-specific upload
+ticket. The Watch deletes only after the phone returns a Core-accepted
+acknowledgement. See [PILOT_WATCH_MEETINGS.md](PILOT_WATCH_MEETINGS.md).
+Real-device background and long-meeting acceptance remains required.
 
 ## Remaining work
 

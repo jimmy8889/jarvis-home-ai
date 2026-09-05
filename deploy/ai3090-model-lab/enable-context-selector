@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+# Run as root on ai3090. Replaces static llama-35b.service with the 8k template
+# and installs the authenticated model-ID context selector on port 8001.
+set -euo pipefail
+
+MODEL=/srv/models/llama-35b/Qwen3.6-35B-A3B-UD-IQ4_NL.gguf
+[[ -f "$MODEL" ]] || { echo "Production model missing: $MODEL" >&2; exit 1; }
+
+rollback() {
+  systemctl stop llama-context-gateway || true
+  systemctl stop 'llama-35b@8192' || true
+  systemctl enable --now llama-35b || true
+}
+
+install -D -m 0644 /home/jameshazell/pilot-model-lab/scripts/llama-35b@.service /etc/systemd/system/llama-35b@.service
+install -D -m 0755 /home/jameshazell/pilot-model-lab/scripts/llama_context_gateway.py /usr/local/libexec/llama-context-gateway
+install -D -m 0644 /home/jameshazell/pilot-model-lab/scripts/llama-context-gateway.service /etc/systemd/system/llama-context-gateway.service
+install -d -m 0750 /var/lib/llama-context-gateway
+printf '8192\n' >/var/lib/llama-context-gateway/active-context
+systemctl daemon-reload
+systemctl stop llama-35b
+systemctl disable llama-35b
+systemctl enable --now 'llama-35b@8192'
+systemctl enable --now llama-context-gateway
+
+for _ in $(seq 1 90); do
+  if curl --fail --silent http://127.0.0.1:8001/health >/dev/null; then
+    echo "Context selector ready: port 8001; default qwen35b-8k"
+    exit 0
+  fi
+  sleep 1
+done
+
+echo "Context selector did not become healthy; restoring static 8k service." >&2
+rollback
+exit 1

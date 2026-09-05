@@ -17,6 +17,7 @@ struct CarView: View {
                 if let car = model.overview {
                     LazyVStack(spacing: 18) {
                         vehicleHeader(car)
+                        activeRouteCard(car)
                         quickDestinations
                         conditionGrid(car)
                         chargingCard(car)
@@ -190,6 +191,45 @@ struct CarView: View {
         .pilotCard()
     }
 
+    @ViewBuilder
+    private func activeRouteCard(_ car: VehicleOverview) -> some View {
+        if let destination = car.text("navigation_destination"),
+           !destination.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Label("Active route", systemImage: "arrow.triangle.turn.up.right.diamond.fill")
+                        .font(.headline)
+                    Spacer()
+                    StatusPill(text: "On touchscreen", tint: DriveTheme.accent)
+                }
+                Text(destination)
+                    .font(.title3.weight(.semibold))
+                    .lineLimit(2)
+                LazyVGrid(columns: columns, spacing: 12) {
+                    MetricTile(
+                        title: "Distance",
+                        value: car.number("distance_to_destination_km").map {
+                            "\($0.formatted(.number.precision(.fractionLength(1)))) km"
+                        } ?? "—",
+                        symbol: "road.lanes"
+                    )
+                    MetricTile(
+                        title: "Arrival",
+                        value: Formatters.arrivalRemaining(hours: car.number("time_to_destination_hours")),
+                        symbol: "clock.arrow.circlepath",
+                        detail: car.number("state_of_charge_at_arrival_percent").map {
+                            "Estimated SOC \(Int($0))%"
+                        }
+                    )
+                }
+                Text("This is the route currently loaded by Tesla Fleet. Saved quick destinations remain below.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .pilotCard()
+        }
+    }
+
     private func conditionGrid(_ car: VehicleOverview) -> some View {
         LazyVGrid(columns: columns, spacing: 12) {
             MetricTile(
@@ -254,9 +294,10 @@ struct CarView: View {
                     symbol: "slider.horizontal.3"
                 )
                 MetricTile(
-                    title: "Time remaining",
-                    value: car.number("time_to_full_hours").map { Duration.seconds($0 * 3_600).formatted(.units(allowed: [.hours, .minutes])) } ?? "—",
-                    symbol: "clock"
+                    title: "Until full",
+                    value: Formatters.timeRemaining(hours: car.number("time_to_full_hours")),
+                    symbol: "clock.badge.checkmark",
+                    detail: car.number("charge_limit_percent").map { "Target \(Int($0))%" }
                 )
             }
         }

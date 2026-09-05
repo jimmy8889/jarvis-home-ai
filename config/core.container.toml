@@ -7,7 +7,7 @@ audio_asset_max_bytes = 20000000
 audio_asset_retention_seconds = 3600
 meeting_asset_path = "/data/meetings"
 meeting_asset_max_bytes = 2000000000
-public_upload_base_url = "https://pilot-upload.jameshomeautomation.work"
+public_upload_base_url = ""
 public_client_base_url = "https://pilot.jameshomeautomation.work"
 firmware_asset_path = "/data/firmware"
 firmware_asset_max_bytes = 8000000
@@ -21,6 +21,11 @@ bootstrap_token_env = "PILOT_CORE_BOOTSTRAP_TOKEN"
 legacy_bootstrap_enabled = false
 
 [integrations]
+energy_manager_url = "http://10.0.1.205:8787"
+energy_manager_timeout_seconds = 2
+energy_manager_snapshot_interval_seconds = 2
+energy_manager_plan_interval_seconds = 20
+energy_manager_stale_after_seconds = 10
 music_assistant_url = "http://10.0.2.72:8095"
 music_assistant_token_env = "MUSIC_ASSISTANT_TOKEN"
 home_assistant_url = "http://10.0.2.72:8123"
@@ -51,7 +56,10 @@ energy_history_hours = 24
 amber_import_price_entity_id = "sensor.amber_01k9pncwz9prbf508wt588p9mn_amber_price_now"
 amber_feed_in_price_entity_id = "sensor.amber_01k9pncwz9prbf508wt588p9mn_amber_fit_now"
 amber_feed_in_forecast_entity_id = "sensor.amber_express_trader_sheena_street_feed_in_price"
-tesla_charging_mode_entity_id = "input_select.tesla_charging_mode"
+office_sim_rig_switch_entity_id = "switch.james_office_sim_rig_master"
+codex_usage_used_entity_id = "sensor.codex_5_hour_used"
+codex_usage_remaining_entity_id = "sensor.codex_5_hour_remaining"
+codex_usage_reset_entity_id = "sensor.codex_5_hour_reset"
 teslamate_adapter_url = "http://10.0.1.192:8781"
 teslamate_adapter_token_env = "PILOT_TESLAMATE_ADAPTER_TOKEN"
 media_room_mode_on_script_id = "script.movie_mode_on"
@@ -94,7 +102,7 @@ voice_stt_token_env = "PILOT_VOICE_STT_TOKEN"
 voice_stt_model = "small.en"
 voice_stt_timeout_seconds = 20
 llm_provider = "vllm"
-llm_url = "http://10.0.1.20:8000/v1"
+llm_url = "http://10.0.1.219:8000/v1"
 llm_token_env = "PILOT_LLM_TOKEN"
 llm_model = "auto"
 llm_reasoning_effort = ""
@@ -119,9 +127,9 @@ meeting_analysis_model = "auto"
 meeting_transcript_max_characters = 500000
 
 [[integrations.llm_backends]]
-id = "ai3090-primary"
-url = "http://10.0.1.20:8000/v1"
-token_env = "PILOT_LLM_3090_TOKEN"
+id = "omarchy-rtx3080-primary"
+url = "http://10.0.1.219:8000/v1"
+token_env = "PILOT_LLM_3080_TOKEN"
 model = "primary"
 roles = ["assistant", "reasoning", "meeting"]
 priority = 10
@@ -131,8 +139,8 @@ timeout_seconds = 90
 # The RTX 3080 exposes one GPU mode at a time. When verifier mode is active it
 # is a bounded assistant fallback; in speech mode this route is simply offline.
 [[integrations.llm_backends]]
-id = "ai3080-verifier"
-url = "http://10.0.1.43:8000/v1"
+id = "omarchy-rtx3080-verifier"
+url = "http://10.0.1.219:8000/v1"
 token_env = "PILOT_LLM_3080_TOKEN"
 model = "verifier"
 roles = ["assistant", "verification"]
@@ -141,8 +149,8 @@ max_output_tokens = 1024
 timeout_seconds = 60
 
 [[integrations.llm_backends]]
-id = "ai3080-vision"
-url = "http://10.0.1.43:8000/v1"
+id = "omarchy-rtx3080-vision"
+url = "http://10.0.1.219:8000/v1"
 token_env = "PILOT_LLM_3080_TOKEN"
 model = "vision"
 roles = ["vision"]

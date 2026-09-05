@@ -1,0 +1,8 @@
+{
+  "domain": "energy_manager_tesla",
+  "name": "Energy Manager Tesla BLE Proxy",
+  "codeowners": [],
+  "documentation": "http://10.0.1.205:8787/",
+  "iot_class": "local_polling",
+  "version": "0.1.0"
+}

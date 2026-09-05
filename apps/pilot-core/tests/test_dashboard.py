@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from copy import deepcopy
 from datetime import datetime
 from unittest.mock import AsyncMock
 
@@ -39,6 +40,10 @@ class DashboardServiceTests(unittest.IsolatedAsyncioTestCase):
             amber_feed_in_price_entity_id="sensor.fit",
             amber_feed_in_forecast_entity_id="sensor.fit_forecast",
             tesla_charging_mode_entity_id="input_select.car_mode",
+            office_sim_rig_switch_entity_id="switch.sim_rig",
+            codex_usage_used_entity_id="sensor.codex_used",
+            codex_usage_remaining_entity_id="sensor.codex_remaining",
+            codex_usage_reset_entity_id="sensor.codex_reset",
             media_room_mode_on_script_id="script.movie_on",
             media_room_mode_off_script_id="script.movie_off",
             temperature_office_entity_id="sensor.office",
@@ -72,6 +77,12 @@ class DashboardServiceTests(unittest.IsolatedAsyncioTestCase):
                 },
             },
             "input_select.car_mode": state("input_select.car_mode", "Solar"),
+            "switch.sim_rig": state("switch.sim_rig", "on"),
+            "sensor.codex_used": state("sensor.codex_used", 39, "%"),
+            "sensor.codex_remaining": state("sensor.codex_remaining", 61, "%"),
+            "sensor.codex_reset": state(
+                "sensor.codex_reset", "2026-08-18T10:02:13+10:00"
+            ),
             "sensor.office": state("sensor.office", 21.9, "°C"),
             "sensor.tv": state("sensor.tv", 22.0, "°C"),
             "sensor.bedroom": state("sensor.bedroom", 22.5, "°C"),
@@ -165,7 +176,15 @@ class DashboardServiceTests(unittest.IsolatedAsyncioTestCase):
         ended_at = datetime.fromisoformat(result["history"]["ended_at"])
         self.assertEqual((started_at.hour, started_at.minute), (0, 0))
         self.assertEqual((ended_at - started_at).total_seconds(), 86_400)
-        self.assertEqual(result["controls"]["tesla_charging_mode"]["options"], ["Grid", "Solar"])
+        self.assertNotIn("tesla_charging_mode", result["controls"])
+        self.assertEqual(result["controls"]["sim_rig"]["value"], "on")
+        self.assertTrue(result["controls"]["sim_rig"]["available"])
+        self.assertEqual(result["codex_usage"]["used_percent"], 39)
+        self.assertEqual(result["codex_usage"]["remaining_percent"], 61)
+        self.assertEqual(
+            result["codex_usage"]["reset_at"], "2026-08-18T10:02:13+10:00"
+        )
+        self.assertTrue(result["codex_usage"]["available"])
         self.assertNotIn("attributes", str(result))
 
         energy_call, temperature_call = integrations.home_assistant_history.await_args_list[:2]
@@ -229,6 +248,95 @@ class DashboardServiceTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertFalse(result["power"]["flow_active"]["battery"])
         self.assertEqual(result["power"]["directions"]["battery"], "idle")
+
+    async def test_manager_overlay_stays_live_while_ha_context_is_cached(self) -> None:
+        class Manager:
+            configured = True
+
+            def __init__(self) -> None:
+                self.solar_w = 12_400.0
+
+            def dashboard_fields(self) -> dict:
+                return deepcopy(
+                    {
+                        "source": "standalone_energy_manager",
+                        "observed_at": "2026-08-26T01:20:00+00:00",
+                        "stale": False,
+                        "energy_status": "ok",
+                        "power": {
+                            "solar_w": self.solar_w,
+                            "grid_w": -2_000.0,
+                            "battery_w": 3_000.0,
+                            "battery_soc_percent": 74.3,
+                            "home_load_w": 7_400.0,
+                            "server_rack_w": 940.0,
+                            "vehicle_w": 0.0,
+                            "hot_water_w": 3_700.0,
+                            "directions": {"grid": "exporting", "battery": "discharging"},
+                            "flow_active": {},
+                        },
+                        "daily": {
+                            "solar_generated_kwh": 120.08,
+                            "home_used_kwh": 47.42,
+                            "grid_exported_kwh": 62.12,
+                        },
+                        "arrays": {"pv1": {"measured_w": 3_100.0}},
+                        "vehicle": {"home": True, "connected": True},
+                        "hot_water": {"relay_on": True, "confirmed": True},
+                        "tariff": {"feed_in_cents_per_kwh": 10.4},
+                        "plan": {"plan_id": "plan-1"},
+                        "flow": {"mode": "export"},
+                        "financial": {"planned_export_revenue": 4.27},
+                        "server": {"label": "Server + desk", "power_w": 940.0},
+                        "manager_health": {"status": "ok", "age_seconds": 0.2},
+                        "history": {
+                            "window": "calendar_day",
+                            "started_at": "2026-08-25T14:00:00+00:00",
+                            "ended_at": "2026-08-26T14:00:00+00:00",
+                            "series": [],
+                        },
+                    }
+                )
+
+        settings = IntegrationSettings(
+            energy_manager_url="http://energy-manager.test:8787",
+            sun_entity_id="sun.sun",
+            energy_solar_power_entity_id="sensor.solar",
+            energy_grid_power_entity_id="sensor.grid",
+            energy_battery_power_entity_id="sensor.battery",
+            energy_battery_soc_entity_id="sensor.battery_soc",
+            energy_home_load_entity_id="sensor.home",
+            energy_vehicle_power_entity_id="sensor.ev",
+        )
+        integrations = AsyncMock()
+        integrations.home_assistant_selected_states.return_value = {
+            "sun.sun": {
+                "entity_id": "sun.sun",
+                "state": "above_horizon",
+                "attributes": {},
+            }
+        }
+        integrations.home_assistant_history.return_value = {}
+        integrations.home_assistant_weather.return_value = {
+            "entity_id": "",
+            "current": {},
+            "forecast_response": {},
+        }
+        manager = Manager()
+        service = DashboardService(settings, integrations, manager)  # type: ignore[arg-type]
+
+        first = await service.snapshot()
+        manager.solar_w = 13_200.0
+        second = await service.snapshot()
+
+        self.assertEqual(first["power"]["solar_w"], 12_400.0)
+        self.assertEqual(second["power"]["solar_w"], 13_200.0)
+        self.assertEqual(second["source"], "standalone_energy_manager")
+        self.assertEqual(second["daily"]["solar_generated_kwh"], 120.08)
+        self.assertEqual(second["manager_health"]["status"], "ok")
+        selected = integrations.home_assistant_selected_states.await_args.args[0]
+        self.assertEqual(selected, ("sun.sun",))
+        integrations.home_assistant_history.assert_not_awaited()
 
     def test_scene_falls_back_to_unknown_when_sun_is_not_configured(self) -> None:
         service = DashboardService(IntegrationSettings(), AsyncMock())

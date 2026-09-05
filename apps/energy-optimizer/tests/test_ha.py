@@ -91,3 +91,18 @@ def test_authenticated_state_change_subscription_filters_entities(tmp_path: Path
         "type": "subscribe_events",
         "event_type": "state_changed",
     }
+
+
+def test_hot_water_rescue_bypasses_economic_off_dwell() -> None:
+    path = (
+        Path(__file__).parents[1]
+        / "home-assistant"
+        / "energy-optimizer-hot-water-actuator.yaml"
+    )
+    text = path.read_text()
+    rescue_branch = text.split("Service rescue is coordinated", 1)[1].split(
+        "Ordinary starts wait", 1
+    )[0]
+
+    assert "rescue_authorized | bool and runtime_due | bool and guarantee_due | bool" in rescue_branch
+    assert "off_dwell_complete" not in rescue_branch

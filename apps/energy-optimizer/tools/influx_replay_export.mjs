@@ -16,7 +16,10 @@ const stop = localStop.toISOString();
 const entities = {
   solar_kw: "pv_power_mqtt_abs",
   load_kw: "saj_home_load",
-  grid_kw: "saj_ct_grid_power_total",
+  grid_kw: "saj_meter_a_real_power_total",
+  hot_water_kw: "energy_optimizer_hot_water_confirmed_power",
+  ev_ble_kw: "tesla_ble_charge_power",
+  ev_cloud_kw: "tesla_charging_power",
   soc_pct: "saj_battery_1_soc",
   import_price: "amber_express_trader_sheena_street_general_price",
   export_price: "amber_express_trader_sheena_street_feed_in_price",
@@ -41,7 +44,7 @@ for (const row of rows) {
   const timestamp = new Date(String(row._time)).toISOString();
   const record = byTime.get(timestamp) ?? { timestamp };
   let value = Number(row._value);
-  if (["solar_kw", "load_kw", "grid_kw"].includes(key) && String(row._measurement) !== "kW") value /= 1000;
+  if (key.endsWith("_kw") && String(row._measurement).toLowerCase() !== "kw") value /= 1000;
   record[key] = value;
   byTime.set(timestamp, record);
 }
@@ -59,8 +62,27 @@ for (let millis = localStart.getTime(); millis < localStop.getTime(); millis += 
   if (!Number.isFinite(row.solar_kw)) row.solar_kw = 0;
   if (!Number.isFinite(row.load_kw)) row.load_kw = 1.67;
   if (!Number.isFinite(row.grid_kw)) row.grid_kw = row.load_kw - row.solar_kw;
+  const measuredEv = [row.ev_ble_kw, row.ev_cloud_kw].filter(Number.isFinite);
+  if (Number.isFinite(row.hot_water_kw) && measuredEv.length > 0) {
+    row.hot_water_kw = Math.max(0, row.hot_water_kw);
+    row.ev_kw = Math.max(0, ...measuredEv);
+    // SAJ home load is inclusive of both controllable loads.  Preserve the
+    // components and expose a non-flexible base so replay can reschedule them
+    // without charging the same historical demand twice.
+    row.base_load_kw = Math.max(0, row.load_kw - row.hot_water_kw - row.ev_kw);
+    row.flex_load_decomposition_complete = true;
+  } else {
+    // Do not infer an absent power series as zero.  The Python replay will
+    // explicitly mark this payload ineligible for flex-inclusive acceptance
+    // rather than manufacture a favourable result from incomplete history.
+    row.flex_load_decomposition_complete = false;
+  }
+  delete row.ev_ble_kw;
+  delete row.ev_cloud_kw;
   intervals.push(row);
 }
+
+const flexLoadIntervals = intervals.filter((item) => item.flex_load_decomposition_complete).length;
 
 const dates = [];
 for (let index = 0; index < completedDays; index += 1) {
@@ -80,6 +102,17 @@ const daily = flows.map((item) => ({
 process.stdout.write(JSON.stringify({
   intervals,
   daily,
+  interval_coverage: {
+    total_intervals: intervals.length,
+    flex_load_intervals: flexLoadIntervals,
+    flex_load_pct: intervals.length ? 100 * flexLoadIntervals / intervals.length : 0,
+    required_for_acceptance: "100%",
+    sources: {
+      hot_water_kw: entities.hot_water_kw,
+      ev_kw: [entities.ev_ble_kw, entities.ev_cloud_kw],
+      base_load_kw: `${entities.load_kw} - hot_water_kw - ev_kw`,
+    },
+  },
   known_baseline: {
     near_full_cycles: 6,
     morning_soc_pct: 19.4,

@@ -32,13 +32,14 @@ The node deliberately avoids a full desktop:
 
 - Cage provides the single-application Wayland compositor.
 - Chromium runs as the unprivileged `pilot-display` user in kiosk mode.
-- The Pi resolves `display_node_performance_profile: auto` to `low-power`.
-  This keeps the power-scaled travelling paths, directional battery motion and
-  rack LEDs while pausing redundant SVG particles and removing repaint-heavy
-  blur/drop-shadow effects. It uses solid flow strokes plus speed-optimized SVG
-  rendering, and quantizes dash motion to at most 10 paint updates per second;
-  all motion also pauses when the energy page is hidden or the user requests
-  reduced motion. Pin `balanced` only after measuring adequate thermal headroom.
+- The Pi is pinned to `display_node_performance_profile: smooth`. This keeps
+  the power-scaled travelling paths continuous while pausing redundant SVG
+  particles and removing repaint-heavy blur/drop-shadow effects. The energy
+  scene is paint-contained and uses solid, speed-optimized SVG strokes so
+  Chromium can present motion at the 60 Hz compositor rate when the Pi has
+  headroom. All motion pauses when the energy page is hidden or the user
+  requests reduced motion. The `low-power` profile remains available and
+  quantizes dash motion to at most 10 paint updates per second.
 - The browser profile and its bounded caches live under
   `/var/lib/pilot-display`.
 - `pilot-display-web.service` serves the local surface only on
@@ -48,6 +49,12 @@ The node deliberately avoids a full desktop:
   read-only surface. No Pilot administrator, Home Assistant, or Music
   Assistant credential is installed on the node or browser.
 - SSH remains enabled for administration.
+- Display polls are coalesced so a slow response cannot overlap the next one.
+  The live feed follows the two-second energy-meter cadence, while homelab
+  snapshots use Pilot Core's cache and refresh every 15 seconds instead of
+  forcing an expensive provider collection every five seconds. Docker process
+  health uses `/healthz`; the richer `/readyz` remains a diagnostic and
+  deployment gate.
 
 The deployed touch surface provides:
 
@@ -77,7 +84,7 @@ Assistant, or Pilot administrator credentials.
 
 ## Current source release
 
-Pilot Linux Display 0.7.2 implements:
+Pilot Linux Display 0.8.5 implements:
 
 - a configurable `display` or `media-console` presentation mode;
 - the shared Flow, History, Daily and Climate monitoring surfaces, including
@@ -117,6 +124,11 @@ Pilot Linux Display 0.7.2 implements:
   browser storage;
 - an optional pinned Sendspin 7.5.0 player so the Pi can become a Music
   Assistant output through a USB DAC.
+- a dedicated Office Audio page that securely proxies the N150's current
+  output, live volume, FiiO/KEF selection, and confirmed reboot recovery
+  action. The reboot button warns that office audio and the N150 voice
+  assistant will be unavailable for about a minute; the browser never receives
+  the N150 CSRF token or private CA material.
 
 The production inventory installs the Pi's Sendspin runtime but intentionally
 leaves it stopped and disabled because no USB DAC is connected yet. After the
@@ -127,11 +139,12 @@ DAC is attached, identify and accept its stable PipeWire sink, set
 default sink. On a co-located N150, leave all three display audio settings false
 because Room Agent owns that host's one audio graph and Sendspin process.
 
-The updated Python service tests and JavaScript syntax check validate these
-source paths. They have not yet replaced the physically accepted Pi release
-described below. A new deployment requires the normal immutable-release,
-health, touch and rollback acceptance before these additions can be called
-operational on `pilot-display-pi`.
+The 0.8.5 Python service tests and JavaScript syntax check validate these source
+paths. Immutable release `20260825T182649` is active on `pilot-display-pi`; the
+web and kiosk services are healthy with zero restarts, the live N150 proxy
+reports KEF Coda W with zero receiver packet loss, and no Pi or N150 reboot was
+triggered during deployment. Release `20260825T175333` is retained as the
+immediate Pi rollback.
 
 ## Storage controls
 

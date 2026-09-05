@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import tempfile
@@ -14,6 +15,8 @@ from pilot_display_node.server import (
     _core_device_request,
     _core_status,
     _core_surface,
+    _office_audio_request,
+    _office_audio_url,
     _performance_profile,
     _prune_artwork_cache,
     _static_cache_control,
@@ -31,6 +34,10 @@ class CoreStatusTests(unittest.TestCase):
         self.assertEqual(
             _performance_profile("balanced", "Raspberry Pi 4 Model B"),
             "balanced",
+        )
+        self.assertEqual(
+            _performance_profile("smooth", "Raspberry Pi 4 Model B"),
+            "smooth",
         )
 
     def test_artwork_proxy_allows_only_configured_https_hosts(self) -> None:
@@ -108,6 +115,147 @@ class CoreStatusTests(unittest.TestCase):
         policy = _static_cache_control("/assets/house-day.png")
         self.assertEqual(policy, "public, max-age=0, must-revalidate")
         self.assertNotIn("immutable", policy)
+
+    def test_homelab_page_allows_vertical_touch_scrolling(self) -> None:
+        styles = (
+            Path(__file__).parents[1]
+            / "pilot_display_node"
+            / "static"
+            / "styles.css"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn(
+            ".pages { position: relative; min-height: 0; touch-action: pan-y; }",
+            styles,
+        )
+        homelab_rule = styles.split('[data-page="homelab"] {', 1)[1].split("}", 1)[0]
+        self.assertIn("overflow-y: auto;", homelab_rule)
+        self.assertIn("touch-action: pan-y;", homelab_rule)
+
+    def test_display_polling_is_coalesced_and_uses_cached_homelab(self) -> None:
+        app = (
+            Path(__file__).parents[1]
+            / "pilot_display_node"
+            / "static"
+            / "app.js"
+        ).read_text(encoding="utf-8")
+        server = (
+            Path(__file__).parents[1]
+            / "pilot_display_node"
+            / "server.py"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("live: 2000", app)
+        self.assertIn("homelab: 15000", app)
+        for guard in (
+            "statusPollActive",
+            "dashboardPollActive",
+            "livePollActive",
+            "homelabPollActive",
+        ):
+            self.assertIn(guard, app)
+        self.assertIn('"homelab",', server)
+        self.assertNotIn("homelab?force=true", server)
+
+    def test_reboot_control_is_confirmation_gated_and_local(self) -> None:
+        app = (
+            Path(__file__).parents[1]
+            / "pilot_display_node"
+            / "static"
+            / "app.js"
+        ).read_text(encoding="utf-8")
+        server = (
+            Path(__file__).parents[1]
+            / "pilot_display_node"
+            / "server.py"
+        ).read_text(encoding="utf-8")
+        page = (
+            Path(__file__).parents[1]
+            / "pilot_display_node"
+            / "static"
+            / "index.html"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn('window.confirm("Reboot this Raspberry Pi display now?")', app)
+        self.assertIn('fetch("/api/reboot", { method: "POST"', app)
+        self.assertIn('if path == "/api/reboot":', server)
+        self.assertIn('systemctl reboot', server)
+        self.assertIn('id="reboot-button"', page)
+
+    def test_office_audio_reboot_control_is_confirmed_and_proxy_only(self) -> None:
+        app = (
+            Path(__file__).parents[1]
+            / "pilot_display_node"
+            / "static"
+            / "app.js"
+        ).read_text(encoding="utf-8")
+        server = (
+            Path(__file__).parents[1]
+            / "pilot_display_node"
+            / "server.py"
+        ).read_text(encoding="utf-8")
+        page = (
+            Path(__file__).parents[1]
+            / "pilot_display_node"
+            / "static"
+            / "index.html"
+        ).read_text(encoding="utf-8")
+
+        warning = "Reboot the Office N150 now? Audio and the N150 voice assistant will be unavailable for about a minute."
+        self.assertIn(f'window.confirm("{warning}")', app)
+        self.assertIn('fetch("/api/office-audio/reboot", { method: "POST"', app)
+        self.assertIn('if path == "/api/office-audio/reboot":', server)
+        self.assertIn('id="office-audio-reboot"', page)
+        self.assertEqual(
+            _office_audio_url("https://10.0.1.54:8443", "/api/v1/system/reboot"),
+            "https://10.0.1.54:8443/api/v1/system/reboot",
+        )
+        with self.assertRaises(ValueError):
+            _office_audio_url("http://10.0.1.54:8443", "/api/v1/system/reboot")
+
+    @patch("pilot_display_node.server.ssl.create_default_context")
+    @patch("pilot_display_node.server.urlopen")
+    def test_office_audio_reboot_proxy_forwards_csrf_and_returns_accepted(
+        self,
+        urlopen: MagicMock,
+        _create_default_context: MagicMock,
+    ) -> None:
+        status_response = MagicMock()
+        status_response.__enter__.return_value = status_response
+        status_response.read.return_value = json.dumps(
+            {"mixer": {"selected_output": "kef-coda-w"}}
+        ).encode()
+        status_response.headers = {"Set-Cookie": "office_csrf=test-token; Secure"}
+        reboot_response = MagicMock()
+        reboot_response.__enter__.return_value = reboot_response
+        reboot_response.read.return_value = json.dumps(
+            {"ok": True, "status": "rebooting", "delay_seconds": 3}
+        ).encode()
+        urlopen.side_effect = [status_response, reboot_response]
+
+        with tempfile.NamedTemporaryFile() as certificate:
+            status, result = _office_audio_request(
+                "https://10.0.1.54:8443",
+                certificate.name,
+                reboot=True,
+            )
+
+        self.assertEqual(status, 202)
+        self.assertEqual(result["status"], "rebooting")
+        request = urlopen.call_args_list[1].args[0]
+        self.assertEqual(request.get_method(), "POST")
+        self.assertEqual(request.full_url, "https://10.0.1.54:8443/api/v1/system/reboot")
+        self.assertEqual(request.get_header("X-csrf-token"), "test-token")
+        self.assertEqual(urlopen.call_count, 2)
+
+    def test_display_navigation_is_one_row_at_pi_width(self) -> None:
+        styles = (
+            Path(__file__).parents[1]
+            / "pilot_display_node"
+            / "static"
+            / "styles.css"
+        ).read_text(encoding="utf-8")
+        self.assertIn("nav { grid-template-columns: repeat(9, minmax(0, 1fr));", styles)
 
     @patch("pilot_display_node.server._core_surface", return_value={})
     @patch("pilot_display_node.server._core_status", return_value={"connected": True})
@@ -262,6 +410,9 @@ class CoreStatusTests(unittest.TestCase):
             self.assertIn(f'id="flow-{name}"', html)
             self.assertIn(f'id="particles-{name}"', html)
         self.assertIn('id="node-home"', html)
+        self.assertIn('id="sim-rig-control"', html)
+        self.assertIn('id="codex-meter-fill"', html)
+        self.assertIn('id="codex-reset-at"', html)
         self.assertIn('class="flow-base home-flow-base"', html)
         self.assertIn('id="particles-home"', html)
         self.assertIn("setFlow(elements.flow_grid", script)
@@ -309,6 +460,7 @@ class CoreStatusTests(unittest.TestCase):
         self.assertIn('window.matchMedia("(prefers-reduced-motion: reduce)")', script)
         self.assertIn("!homeVisible || reducedMotion.matches", script)
         self.assertIn('data-performance-profile="low-power"', styles)
+        self.assertIn('data-performance-profile="smooth"', styles)
         self.assertIn("steps(var(--flow-steps, 36), end)", styles)
         self.assertIn("Math.round(speedSeconds * 10)", script)
         self.assertIn("bounded 10 visual updates per second", styles)
@@ -318,7 +470,22 @@ class CoreStatusTests(unittest.TestCase):
         self.assertIn(".motion-paused .energy-house", styles)
         self.assertIn('path.style.setProperty("--flow-steps", steps)', script)
         self.assertIn("battery-charge-efficient", styles)
+        self.assertIn('action: "set_sim_rig_power"', script)
+        self.assertIn('const codexUsage = value.codex_usage || {}', script)
+        self.assertIn('new Intl.DateTimeFormat("en-AU"', script)
+        self.assertIn(".codex-meter", styles)
+        self.assertIn(".sim-rig-control.active", styles)
         self.assertIn(".motion-paused .flow-active.active", styles)
+        self.assertIn("will-change: stroke-dashoffset", styles)
+        self.assertIn('document.body.dataset.performanceProfile !== "balanced"', script)
+        self.assertIn("observedAt < lastEnergyObservedAt", script)
+        self.assertIn('id="node-hot-water"', html)
+        self.assertIn('id="flow-hot-water"', html)
+        self.assertIn("Server + desk", html)
+        self.assertIn('id="plan-export"', html)
+        self.assertIn("priceNumber", script)
+        self.assertNotIn("data-charge-mode", html)
+        self.assertNotIn("set_tesla_charging_mode", script)
 
     def test_dashboard_assets_and_media_console_are_packaged(self) -> None:
         static = Path(__file__).parents[1] / "pilot_display_node" / "static"
@@ -342,6 +509,15 @@ class CoreStatusTests(unittest.TestCase):
             "house-night-tesla.png",
         ):
             self.assertIn(f'"/assets/{scene}"', server)
+        canonical_hot_water = Path(__file__).parents[3] / "assets" / "energy" / "hot-water.png"
+        packaged_hot_water = static / "assets" / "hot-water.png"
+        self.assertGreater(packaged_hot_water.stat().st_size, 100_000)
+        self.assertEqual(
+            hashlib.sha256(packaged_hot_water.read_bytes()).hexdigest(),
+            hashlib.sha256(canonical_hot_water.read_bytes()).hexdigest(),
+        )
+        self.assertIn('"/assets/hot-water.png"', server)
+        self.assertIn('src="/assets/hot-water.png"', html)
         self.assertIn("value.scene?.is_day", script)
         self.assertIn("transition: opacity 450ms ease", styles)
         self.assertIn('data-page="media"', html)

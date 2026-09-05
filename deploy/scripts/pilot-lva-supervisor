@@ -1,0 +1,91 @@
+#!/bin/bash
+set -u
+
+entrypoint=${1:?usage: pilot-lva-supervisor ENTRYPOINT}
+retry_seconds=${DEVICE_RETRY_SECONDS:-5}
+child_pid=
+
+source_available() {
+  local source_name
+
+  if ! pactl info >/dev/null 2>&1; then
+    return 1
+  fi
+
+  if [[ -n ${AUDIO_INPUT_DEVICE:-} ]]; then
+    pactl list short sources 2>/dev/null \
+      | cut -f2 \
+      | grep -Fqx -- "$AUDIO_INPUT_DEVICE"
+    return
+  fi
+
+  source_name=$(pactl get-default-source 2>/dev/null) || return 1
+  [[ -n $source_name && $source_name != auto_null ]]
+}
+
+stop_child() {
+  if [[ -n ${child_pid:-} ]] && kill -0 "$child_pid" 2>/dev/null; then
+    # The upstream script launches Python through a helper process. Give the
+    # whole dedicated session the signal so no recorder or bound socket is
+    # orphaned when the microphone disappears.
+    kill -TERM -- "-$child_pid" 2>/dev/null || true
+    for _ in $(seq 1 20); do
+      if ! kill -0 -- "-$child_pid" 2>/dev/null; then
+        break
+      fi
+      sleep 0.25
+    done
+    kill -KILL -- "-$child_pid" 2>/dev/null || true
+    wait "$child_pid" 2>/dev/null || true
+  fi
+  child_pid=
+}
+
+trap 'stop_child; exit 0' TERM INT
+
+while true; do
+  wait_count=0
+  until source_available; do
+    if (( wait_count == 0 || wait_count % 12 == 0 )); then
+      printf 'Microphone source %q is unavailable; waiting without restarting\n' \
+        "${AUDIO_INPUT_DEVICE:-default}"
+    fi
+    sleep "$retry_seconds" &
+    wait $!
+    ((wait_count += 1))
+  done
+
+  if (( wait_count > 0 )); then
+    printf 'Microphone source %q is available; starting voice assistant\n' \
+      "${AUDIO_INPUT_DEVICE:-default}"
+  fi
+
+  setsid "$entrypoint" &
+  child_pid=$!
+
+  while kill -0 "$child_pid" 2>/dev/null; do
+    sleep "$retry_seconds" &
+    wait $!
+    if ! source_available; then
+      printf 'Microphone source %q disappeared; pausing voice assistant until it returns\n' \
+        "${AUDIO_INPUT_DEVICE:-default}"
+      stop_child
+      break
+    fi
+  done
+
+  if [[ -n ${child_pid:-} ]]; then
+    wait "$child_pid"
+    status=$?
+    child_pid=
+    if (( status == 0 )); then
+      exit 0
+    fi
+
+    # A real application failure while the configured source is present still
+    # belongs to systemd's on-failure policy.
+    if source_available; then
+      exit "$status"
+    fi
+  fi
+done

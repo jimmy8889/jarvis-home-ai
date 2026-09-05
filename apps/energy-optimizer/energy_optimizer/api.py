@@ -6,6 +6,7 @@ import asyncio
 from fastapi import FastAPI, HTTPException
 
 from .config import Settings
+from . import __version__
 from .service import Coordinator
 
 
@@ -26,7 +27,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             if task:
                 await task
 
-    app = FastAPI(title="Pilot Energy Optimizer", version="0.1.0", lifespan=lifespan)
+    app = FastAPI(title="Pilot Energy Optimizer", version=__version__, lifespan=lifespan)
 
     @app.get("/healthz")
     async def healthz():
@@ -36,8 +37,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/readyz")
     async def readyz():
-        if coordinator is None or coordinator.last_plan is None:
-            raise HTTPException(status_code=503, detail="no successful plan yet")
+        if coordinator is None:
+            raise HTTPException(status_code=503, detail="coordinator is starting")
+        ready, reason = coordinator.readiness()
+        if not ready:
+            raise HTTPException(status_code=503, detail=reason)
         return coordinator.health()
 
     @app.get("/v1/plan")

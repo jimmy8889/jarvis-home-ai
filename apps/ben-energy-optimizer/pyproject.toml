@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ben-energy-optimizer"
+version = "1.0.0"
+requires-python = ">=3.11"
+dependencies = ["fastapi>=0.116,<1", "httpx>=0.28,<1", "uvicorn>=0.35,<1", "websockets>=15,<17"]
+
+[project.optional-dependencies]
+test = ["pytest>=8.3,<9"]
+
+[project.scripts]
+ben-energy-optimizer = "ben_energy_optimizer.main:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["ben_energy_optimizer*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

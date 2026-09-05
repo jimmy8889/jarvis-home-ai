@@ -2,21 +2,31 @@ const elements = Object.fromEntries(
   [
     "clock", "date", "core-state", "core-detail", "registry", "rooms", "players",
     "hostname", "node-detail", "temperature", "storage", "updated",
-    "energy-state", "energy-solar", "energy-home", "energy-grid",
+    "energy-state", "energy-solar", "energy-pv-arrays", "energy-home", "energy-grid",
     "energy-grid-direction", "energy-battery", "energy-battery-direction",
     "energy-soc", "soc-fill", "energy-flow", "flow-solar", "flow-grid",
     "flow-battery", "flow-home", "particles-solar", "particles-grid", "particles-battery",
     "particles-home",
     "node-solar", "node-grid", "node-home", "node-battery",
-    "flow-vehicle", "flow-server", "particles-vehicle", "particles-server",
+    "flow-vehicle", "flow-server", "flow-hot-water", "particles-vehicle", "particles-server",
+    "particles-hot-water",
     "node-vehicle", "node-server", "energy-vehicle", "energy-server", "vehicle-state",
+    "node-hot-water", "energy-hot-water", "hot-water-state",
     "daily-generated", "daily-home", "daily-export", "daily-generated-large",
-    "daily-home-large", "daily-export-large", "vehicle-soc", "vehicle-connected",
+    "daily-home-large", "daily-export-large", "vehicle-soc", "vehicle-connected", "vehicle-plan",
+    "hot-water-runtime", "hot-water-plan", "plan-action", "plan-export", "plan-revenue", "plan-health",
+    "codex-usage-value", "codex-reset-at", "codex-meter-fill",
     "tariff-buy", "tariff-fit", "tariff-chart", "energy-chart", "chart-legend",
     "weather-condition", "weather-icon", "weather-temperature", "weather-detail",
+    "sim-rig-control", "sim-rig-state",
+    "reboot-button",
     "temperature-grid", "forecast-row",
     "music-state", "now-playing-list", "music-query", "music-search-button",
     "music-output", "music-message", "music-results",
+    "office-audio-state", "office-audio-current", "office-audio-format", "office-audio-message",
+    "office-audio-fiio", "office-audio-speakers",
+    "office-audio-volume", "office-audio-volume-value", "office-audio-volume-detail",
+    "office-audio-reboot",
     "onscreen-keyboard", "keyboard-keys", "keyboard-space", "keyboard-delete",
     "keyboard-clear", "keyboard-search", "keyboard-close",
     "assistant-overlay", "assistant-room", "assistant-response", "assistant-provider",
@@ -31,13 +41,14 @@ const elements = Object.fromEntries(
   ].map((id) => [id.replaceAll("-", "_"), document.querySelector(`#${id}`)]),
 );
 
-const dashboardPages = ["home", "history", "daily", "climate", "music", "homelab", "system"];
+const dashboardPages = ["home", "history", "daily", "climate", "music", "office-audio", "homelab", "system"];
 function pageNames() {
   return document.body.dataset.mode === "media-console"
     ? ["media", ...dashboardPages]
     : dashboardPages;
 }
 const number = new Intl.NumberFormat("en-AU", { maximumFractionDigits: 1 });
+const priceNumber = new Intl.NumberFormat("en-AU", { maximumSignificantDigits: 3 });
 let mediaModel = null;
 let lastSuccessfulUpdate = 0;
 const selectedOutputKey = "pilot-display-selected-output";
@@ -47,7 +58,17 @@ let lastAssistantEvent = null;
 let assistantOverlayTimer = null;
 let dashboardModel = null;
 let mediaPollPromise = null;
+let statusPollActive = false;
+let dashboardPollActive = false;
+let livePollActive = false;
+let homelabPollActive = false;
+let officeAudioPollActive = false;
+let officeAudioVolumePending = null;
+let officeAudioVolumeInFlight = false;
+let officeAudioVolumeTimer = null;
+let officeAudioVolumeLastSentAt = 0;
 let lastMediaObservedAt = 0;
+let lastEnergyObservedAt = 0;
 let currentMediaEntries = [];
 let mediaCommandSequence = 0;
 let musicSearchSequence = 0;
@@ -61,9 +82,26 @@ const HOUSE_SCENES = Object.freeze({
 const flowDiagram = document.querySelector(".flow-lines");
 const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
 let smilPaused = null;
+let simRigCommandPending = false;
+let rebootPending = false;
+let officeAudioRebootPending = false;
+// Keep the Pi display live without allowing each surface to create its own
+// aggressive Home Assistant polling loop. The live feed follows the two-second
+// inverter meter cadence; expensive infrastructure snapshots are cached and
+// refreshed much less frequently.
+const UPDATE_INTERVALS_MS = Object.freeze({
+  status: 2000,
+  media: 1000,
+  dashboard: 30000,
+  live: 2000,
+  homelab: 15000,
+  officeAudio: 5000,
+});
 
 function applyPerformanceProfile(profile) {
-  const normalized = profile === "low-power" ? "low-power" : "balanced";
+  const normalized = ["balanced", "smooth", "low-power"].includes(profile)
+    ? profile
+    : "balanced";
   if (document.body.dataset.performanceProfile !== normalized) {
     document.body.dataset.performanceProfile = normalized;
     smilPaused = null;
@@ -75,7 +113,7 @@ function syncAnimationActivity() {
   const homeVisible = document.querySelector('.page.active')?.dataset.page === "home";
   const pagePaused = document.hidden || !homeVisible || reducedMotion.matches;
   document.body.classList.toggle("motion-paused", pagePaused);
-  const pauseSmil = pagePaused || document.body.dataset.performanceProfile === "low-power";
+  const pauseSmil = pagePaused || document.body.dataset.performanceProfile !== "balanced";
   if (smilPaused === pauseSmil) return;
   if (pauseSmil) flowDiagram?.pauseAnimations?.();
   else flowDiagram?.unpauseAnimations?.();
@@ -93,7 +131,8 @@ function renderHouseScene(value, power, vehicle) {
   if (images.length !== 2) return;
   const configuredDay = value.scene?.is_day;
   const isDay = typeof configuredDay === "boolean" ? configuredDay : false;
-  const scene = `house-${isDay ? "day" : "night"}${vehicle.connected ? "-tesla" : ""}`;
+  const vehicleHome = vehicle.home ?? vehicle.connected;
+  const scene = `house-${isDay ? "day" : "night"}${vehicleHome ? "-tesla" : ""}`;
   const current = images[activeHouseSceneIndex];
   if (current?.dataset.scene === scene) return;
 
@@ -175,6 +214,9 @@ function setFlow(path, particles, node, value, reverse = false, threshold = 25) 
 }
 
 function renderEnergy(energy = {}) {
+  const observedAt = Date.parse(energy.observed_at || energy.manager_health?.observed_at || "");
+  if (Number.isFinite(observedAt) && observedAt < lastEnergyObservedAt) return;
+  if (Number.isFinite(observedAt)) lastEnergyObservedAt = observedAt;
   const power = energy.power || {};
   const solar = power.solar_w ?? energy.solar?.value;
   const home = power.home_load_w ?? energy.home_load?.value;
@@ -182,7 +224,17 @@ function renderEnergy(energy = {}) {
   const battery = power.battery_w ?? energy.battery?.value;
   const soc = power.battery_soc_percent ?? energy.battery_soc?.value;
   const directions = power.directions || {};
+  const vehicle = energy.vehicle || {};
+  const hotWater = energy.hot_water || {};
+  const arrays = energy.arrays || {};
   elements.energy_solar.textContent = watts(solar);
+  if (elements.energy_pv_arrays) {
+    const values = ["pv1", "pv2", "pv3"].map((name, index) => {
+      const value = arrays[name]?.measured_w;
+      return `P${index + 1} ${typeof value === "number" ? number.format(value / 1000) : "—"}`;
+    });
+    elements.energy_pv_arrays.textContent = `${values.join(" · ")} kW`;
+  }
   elements.energy_home.textContent = watts(home);
   elements.energy_grid.textContent = watts(grid);
   const batteryActive = typeof battery === "number" && Math.abs(battery) >= 100;
@@ -192,10 +244,27 @@ function renderEnergy(energy = {}) {
   elements.energy_battery_direction.textContent = batteryActive
     ? (directions.battery || energy.battery?.direction || "Unknown")
     : "Idle";
-  elements.energy_state.textContent = energy.status === "ok" ? "Live" : "Unavailable";
-  elements.energy_state.className = `data-state ${energy.status === "ok" ? "online" : "offline"}`;
+  const energyStatus = energy.energy_status || energy.status || energy.manager_health?.status;
+  const energyLive = energyStatus === "ok" && energy.stale !== true;
+  elements.energy_state.textContent = energyLive ? "Manager live" : energyStatus === "stale" ? "Manager stale" : "Unavailable";
+  elements.energy_state.className = `data-state ${energyLive ? "online" : "offline"}`;
   const clampedSoc = typeof soc === "number" ? Math.max(0, Math.min(100, soc)) : 0;
   elements.soc_fill.style.width = `${clampedSoc}%`;
+
+  const vehicleDrawingPower = typeof vehicle.power_w === "number" && Math.abs(vehicle.power_w) >= 100;
+  elements.energy_vehicle.textContent = vehicleDrawingPower
+    ? watts(vehicle.power_w)
+    : (vehicle.home ? (vehicle.connected ? "Plugged in" : "Home") : "Away");
+  elements.vehicle_state.textContent = vehicle.home
+    ? (vehicle.charging ? "Charging" : vehicle.connected ? "Plugged in" : "At home")
+    : "Away";
+  elements.energy_server.textContent = watts(power.server_rack_w ?? energy.server?.power_w);
+  elements.energy_hot_water.textContent = hotWater.relay_on
+    ? (hotWater.confirmed ? watts(hotWater.power_w || 3700) : "Relay on")
+    : "Off";
+  elements.hot_water_state.textContent = hotWater.relay_on
+    ? (hotWater.confirmed ? "Heating" : "Confirming")
+    : "Idle";
 
   setFlow(elements.flow_solar, elements.particles_solar, elements.node_solar, solar);
   setFlow(elements.flow_grid, elements.particles_grid, elements.node_grid, grid, grid < 0, 100);
@@ -208,6 +277,24 @@ function renderEnergy(energy = {}) {
     100,
   );
   setFlow(elements.flow_home, elements.particles_home, elements.node_home, home);
+  setFlow(elements.flow_vehicle, elements.particles_vehicle, elements.node_vehicle, vehicle.power_w, false, 100);
+  setFlow(
+    elements.flow_server,
+    elements.particles_server,
+    elements.node_server,
+    power.server_rack_w ?? energy.server?.power_w,
+  );
+  setFlow(
+    elements.flow_hot_water,
+    elements.particles_hot_water,
+    elements.node_hot_water,
+    hotWater.confirmed ? hotWater.power_w || 3700 : 0,
+    false,
+    1000,
+  );
+  elements.node_vehicle.classList.toggle("connected", vehicle.home === true);
+  elements.node_battery.classList.toggle("charging", directions.battery === "charging");
+  elements.node_battery.classList.toggle("discharging", directions.battery === "discharging");
   const batteryDirection = directions.battery || energy.battery?.direction;
   const batteryDischarging = batteryDirection === "discharging" || (
     !batteryDirection && typeof battery === "number" && battery >= 25
@@ -218,7 +305,7 @@ function renderEnergy(energy = {}) {
   );
   elements.energy_flow.setAttribute(
     "aria-label",
-    `Solar ${watts(solar)}, home load ${watts(home)}, grid ${
+    `Solar ${watts(solar)}, home load ${watts(home)}, hot water ${watts(hotWater.power_w)}, grid ${
       energy.grid?.direction || "unknown"
     } ${watts(grid)}, battery ${
       energy.battery?.direction || "unknown"
@@ -230,6 +317,19 @@ function renderEnergy(energy = {}) {
 
 function energyKWh(value) {
   return typeof value === "number" ? `${number.format(value)} kWh` : "—";
+}
+
+function localTime(value) {
+  const at = value ? new Date(value) : null;
+  return at && !Number.isNaN(at.valueOf())
+    ? new Intl.DateTimeFormat("en-AU", { hour: "numeric", minute: "2-digit" }).format(at)
+    : "—";
+}
+
+function human(value) {
+  return typeof value === "string" && value
+    ? value.replaceAll("_", " ").replace(/^./, (character) => character.toUpperCase())
+    : "Waiting for plan";
 }
 
 function renderLineChart(svg, series, options = {}) {
@@ -385,25 +485,56 @@ function renderDashboard(value = {}) {
   for (const element of [elements.daily_export, elements.daily_export_large]) {
     if (element) element.textContent = energyKWh(daily.grid_exported_kwh);
   }
+  const codexUsage = value.codex_usage || {};
+  const usedPercent = typeof codexUsage.used_percent === "number"
+    ? Math.max(0, Math.min(100, codexUsage.used_percent))
+    : null;
+  elements.codex_usage_value.textContent = usedPercent === null
+    ? "—"
+    : `${number.format(usedPercent)}% used`;
+  elements.codex_meter_fill.style.width = `${usedPercent ?? 0}%`;
+  const resetAt = codexUsage.reset_at ? new Date(codexUsage.reset_at) : null;
+  elements.codex_reset_at.textContent = resetAt && !Number.isNaN(resetAt.valueOf())
+    ? `Resets ${new Intl.DateTimeFormat("en-AU", {
+      weekday: "short", day: "numeric", month: "short", hour: "numeric", minute: "2-digit",
+    }).format(resetAt)}`
+    : "Reset unavailable";
   const power = value.power || {};
   const vehicle = value.vehicle || {};
+  const hotWater = value.hot_water || {};
+  const plan = value.plan || {};
+  const managerHealth = value.manager_health || {};
   const vehicleDrawingPower = typeof vehicle.power_w === "number" && Math.abs(vehicle.power_w) >= 100;
   elements.energy_vehicle.textContent = vehicleDrawingPower
     ? watts(vehicle.power_w)
-    : (vehicle.connected ? "Plugged in" : "Away");
-  elements.energy_server.textContent = watts(power.server_rack_w);
-  elements.vehicle_state.textContent = vehicle.connected
-    ? (vehicle.charging ? "Charging" : "Plugged in") : "Not connected";
+    : (vehicle.home ? (vehicle.connected ? "Plugged in" : "Home") : "Away");
+  elements.energy_server.textContent = watts(power.server_rack_w ?? value.server?.power_w);
+  elements.vehicle_state.textContent = vehicle.home
+    ? (vehicle.charging ? "Charging" : vehicle.connected ? "Plugged in" : "At home") : "Away";
   elements.vehicle_soc.textContent = typeof vehicle.state_of_charge_percent === "number"
     ? `${number.format(vehicle.state_of_charge_percent)}%` : "—";
   elements.vehicle_connected.textContent = vehicle.connected
     ? (vehicle.charging ? `${watts(vehicle.power_w)} · charging` : "Plugged in")
-    : "Not plugged in";
-  setFlow(elements.flow_vehicle, elements.particles_vehicle, elements.node_vehicle, vehicle.power_w, false, 100);
-  setFlow(elements.flow_server, elements.particles_server, elements.node_server, power.server_rack_w);
-  elements.node_vehicle.classList.toggle("connected", vehicle.connected === true);
-  elements.node_battery.classList.toggle("charging", power.directions?.battery === "charging");
-  elements.node_battery.classList.toggle("discharging", power.directions?.battery === "discharging");
+    : (vehicle.home ? "Home · unplugged" : "Away");
+  elements.vehicle_plan.textContent = vehicle.recommendation || "No charging block currently planned";
+  elements.hot_water_runtime.textContent = typeof hotWater.runtime_hours === "number"
+    ? `${hotWater.runtime_hours.toFixed(2)} / 3.00 h`
+    : "Runtime unavailable";
+  elements.hot_water_plan.textContent = hotWater.planned_start
+    ? `${localTime(hotWater.planned_start)}–${localTime(hotWater.planned_end)} · ${human(hotWater.source)}`
+    : hotWater.remaining_hours === 0 ? "Daily service complete" : "Waiting for the best solar window";
+  elements.plan_action.textContent = human(plan.current_action);
+  const nextExport = (plan.export_windows || [])[0];
+  elements.plan_export.textContent = nextExport
+    ? `${localTime(nextExport.start)}–${localTime(nextExport.end)} · ${watts((nextExport.max_power_kw || 0) * 1000)} at ${priceNumber.format((nextExport.max_price_per_kwh || 0) * 100)}¢`
+    : "No profitable export window planned";
+  const plannedRevenue = value.financial?.planned_export_revenue;
+  elements.plan_revenue.textContent = typeof plannedRevenue === "number"
+    ? `$${plannedRevenue.toFixed(2)} planned export revenue`
+    : human(plan.current_reason);
+  elements.plan_health.textContent = managerHealth.status === "ok"
+    ? `Live · ${number.format(managerHealth.age_seconds || 0)} s old`
+    : human(managerHealth.status);
   renderHouseScene(value, power, vehicle);
   if (elements.console_energy_solar) elements.console_energy_solar.textContent = watts(power.solar_w);
   if (elements.console_energy_home) elements.console_energy_home.textContent = watts(power.home_load_w);
@@ -428,9 +559,9 @@ function renderDashboard(value = {}) {
   }));
   const tariff = value.tariff || {};
   elements.tariff_buy.textContent = typeof tariff.import_cents_per_kwh === "number"
-    ? `${number.format(tariff.import_cents_per_kwh)}¢/kWh` : "—";
+    ? `${priceNumber.format(tariff.import_cents_per_kwh)}¢/kWh` : "—";
   elements.tariff_fit.textContent = typeof tariff.feed_in_cents_per_kwh === "number"
-    ? `${number.format(tariff.feed_in_cents_per_kwh)}¢/kWh` : "—";
+    ? `${priceNumber.format(tariff.feed_in_cents_per_kwh)}¢/kWh` : "—";
   renderLineChart(elements.tariff_chart, [{
     color: "#61e6a8",
     points: (tariff.feed_in_forecast || []).map((point) => ({
@@ -439,9 +570,14 @@ function renderDashboard(value = {}) {
     })),
   }], { width: 420, height: 90, strokeWidth: "3" });
 
-  document.querySelectorAll("[data-charge-mode]").forEach((button) => {
-    button.classList.toggle("active", button.dataset.chargeMode === value.controls?.tesla_charging_mode?.value);
-  });
+  const simRig = value.controls?.sim_rig || {};
+  const simRigOn = simRig.value === "on";
+  elements.sim_rig_control.classList.toggle("active", simRigOn);
+  elements.sim_rig_control.setAttribute("aria-pressed", String(simRigOn));
+  elements.sim_rig_control.disabled = simRigCommandPending || simRig.available !== true;
+  elements.sim_rig_state.textContent = simRig.available === true
+    ? (simRigOn ? "On" : "Off")
+    : "Unavailable";
   const weather = value.weather || {};
   elements.weather_condition.textContent = weather.condition || "Unavailable";
   elements.weather_icon.textContent = weatherGlyph(weather.condition || "");
@@ -744,29 +880,176 @@ function renderMusicControls(value) {
   elements.music_state.className = `data-state ${providerOnline ? "online" : "offline"}`;
 }
 
+function renderOfficeAudio(value = {}) {
+  const mixer = value.mixer || {};
+  const selected = mixer.selected_output || value.receiver?.selected_output;
+  const devices = value.devices || {};
+  const device = devices[selected] || {};
+  const online = Boolean(selected && device.name);
+  elements.office_audio_state.textContent = online ? "Online" : "Unavailable";
+  elements.office_audio_state.className = `data-state ${online ? "online" : "offline"}`;
+  elements.office_audio_current.textContent = online ? device.name : "Office N150 unavailable";
+  elements.office_audio_format.textContent = device.format || "Output state unavailable";
+  const volumeDb = Number(mixer.masters_db?.[selected] ?? -90);
+  const volumePercent = volumeDb <= -89.9 ? 0 : Math.round(100 * (10 ** (volumeDb / 20)));
+  if (document.activeElement !== elements.office_audio_volume) {
+    elements.office_audio_volume.value = String(volumePercent);
+    elements.office_audio_volume_value.textContent = `${volumePercent}%`;
+    elements.office_audio_volume_detail.textContent = volumeDb <= -89.9 ? "Muted" : `${volumeDb.toFixed(1)} dB · ${device.name || "Office audio"}`;
+  }
+  [elements.office_audio_fiio, elements.office_audio_speakers].forEach((button) => {
+    const active = button.dataset.officeOutput === selected;
+    button.classList.toggle("active", active);
+    button.disabled = !online;
+    button.setAttribute("aria-pressed", String(active));
+  });
+  if (online) elements.office_audio_message.textContent = `${device.purpose || "Output"} selected · changes apply on the N150.`;
+}
+
+function officeAudioPercentToDb(percent) {
+  return percent <= 0 ? -90 : Math.max(-90, Math.min(0, 20 * Math.log10(percent / 100)));
+}
+
+function scheduleOfficeAudioVolume(flush = false) {
+  if (officeAudioVolumeTimer !== null) {
+    clearTimeout(officeAudioVolumeTimer);
+    officeAudioVolumeTimer = null;
+  }
+  if (officeAudioVolumeInFlight || officeAudioVolumePending === null) return;
+  const wait = flush ? 0 : Math.max(0, 60 - (Date.now() - officeAudioVolumeLastSentAt));
+  officeAudioVolumeTimer = setTimeout(sendOfficeAudioVolume, wait);
+}
+
+async function sendOfficeAudioVolume() {
+  officeAudioVolumeTimer = null;
+  if (officeAudioVolumeInFlight || officeAudioVolumePending === null) return;
+  const percent = officeAudioVolumePending;
+  officeAudioVolumePending = null;
+  officeAudioVolumeInFlight = true;
+  officeAudioVolumeLastSentAt = Date.now();
+  try {
+    const value = await putJSON("/api/office-audio/volume", { volume_db: officeAudioPercentToDb(percent) });
+    renderOfficeAudio(value);
+  } catch (error) {
+    elements.office_audio_message.textContent = String(error);
+  } finally {
+    officeAudioVolumeInFlight = false;
+    if (officeAudioVolumePending !== null) scheduleOfficeAudioVolume();
+  }
+}
+
+async function updateOfficeAudio() {
+  if (officeAudioPollActive) return;
+  officeAudioPollActive = true;
+  try {
+    const response = await fetch("/api/office-audio", { cache: "no-store" });
+    const value = await response.json();
+    if (!response.ok) throw new Error(value.detail || `HTTP ${response.status}`);
+    renderOfficeAudio(value);
+  } catch (error) {
+    elements.office_audio_state.textContent = "Unavailable";
+    elements.office_audio_state.className = "data-state offline";
+    elements.office_audio_message.textContent = String(error);
+  } finally {
+    officeAudioPollActive = false;
+  }
+}
+
 elements.music_output.addEventListener("change", () => {
   if (elements.music_output.value) {
     localStorage.setItem(selectedOutputKey, elements.music_output.value);
   }
 });
 
-document.querySelectorAll("[data-charge-mode]").forEach((button) => {
+elements.sim_rig_control.addEventListener("click", async () => {
+  const turnOn = elements.sim_rig_control.getAttribute("aria-pressed") !== "true";
+  simRigCommandPending = true;
+  elements.sim_rig_control.disabled = true;
+  elements.sim_rig_state.textContent = turnOn ? "Turning on…" : "Turning off…";
+  try {
+    await postJSON("/api/dashboard/actions", {
+      action: "set_sim_rig_power",
+      value: turnOn ? "on" : "off",
+    });
+    await updateDashboard();
+  } catch (error) {
+    elements.updated.textContent = String(error);
+  } finally {
+    simRigCommandPending = false;
+    elements.sim_rig_control.disabled = dashboardModel?.controls?.sim_rig?.available !== true;
+  }
+});
+
+document.querySelectorAll("[data-office-output]").forEach((button) => {
   button.addEventListener("click", async () => {
+    button.disabled = true;
+    elements.office_audio_message.textContent = `Switching to ${button.querySelector("strong").textContent}…`;
     try {
-      await postJSON("/api/dashboard/actions", {
-        action: "set_tesla_charging_mode",
-        value: button.dataset.chargeMode,
+      const response = await fetch("/api/office-audio/output", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ output: button.dataset.officeOutput }),
       });
-      await updateDashboard();
+      const value = await response.json();
+      if (!response.ok) throw new Error(value.detail || `HTTP ${response.status}`);
+      renderOfficeAudio(value);
+      await updateOfficeAudio();
     } catch (error) {
-      elements.updated.textContent = String(error);
+      elements.office_audio_message.textContent = String(error);
+    } finally {
+      button.disabled = false;
     }
   });
+});
+
+elements.office_audio_volume.addEventListener("input", (event) => {
+  const percent = Number(event.target.value);
+  officeAudioVolumePending = percent;
+  elements.office_audio_volume_value.textContent = `${percent}%`;
+  const db = officeAudioPercentToDb(percent);
+  elements.office_audio_volume_detail.textContent = db <= -89.9 ? "Muted" : `${db.toFixed(1)} dB · updating live`;
+  scheduleOfficeAudioVolume();
+});
+for (const eventName of ["change", "pointerup", "keyup"]) {
+  elements.office_audio_volume.addEventListener(eventName, () => scheduleOfficeAudioVolume(true));
+}
+
+elements.office_audio_reboot.addEventListener("click", async () => {
+  if (
+    officeAudioRebootPending
+    || !window.confirm("Reboot the Office N150 now? Audio and the N150 voice assistant will be unavailable for about a minute.")
+  ) return;
+  officeAudioRebootPending = true;
+  elements.office_audio_reboot.disabled = true;
+  elements.office_audio_reboot.textContent = "Reboot queued…";
+  elements.office_audio_message.textContent = "The Office N150 will reboot in three seconds.";
+  try {
+    const response = await fetch("/api/office-audio/reboot", { method: "POST", cache: "no-store" });
+    const value = await response.json();
+    if (!response.ok) throw new Error(value.detail || `HTTP ${response.status}`);
+    elements.office_audio_message.textContent = "Rebooting Office N150 · reconnecting automatically.";
+  } catch (error) {
+    officeAudioRebootPending = false;
+    elements.office_audio_reboot.disabled = false;
+    elements.office_audio_reboot.textContent = "Reboot N150";
+    elements.office_audio_message.textContent = String(error);
+  }
 });
 
 async function postJSON(path, payload) {
   const response = await fetch(path, {
     method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  const value = await response.json();
+  if (!response.ok) throw new Error(value.detail || `HTTP ${response.status}`);
+  return value;
+}
+
+async function putJSON(path, payload) {
+  const response = await fetch(path, {
+    method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
@@ -1127,6 +1410,24 @@ function showPage(name) {
   syncAnimationActivity();
 }
 
+elements.reboot_button?.addEventListener("click", async () => {
+  if (rebootPending || !window.confirm("Reboot this Raspberry Pi display now?")) return;
+  rebootPending = true;
+  elements.reboot_button.disabled = true;
+  elements.reboot_button.querySelector("strong").textContent = "Rebooting…";
+  try {
+    const response = await fetch("/api/reboot", { method: "POST", cache: "no-store" });
+    const value = await response.json();
+    if (!response.ok || value.ok !== true) throw new Error(value.detail || "Reboot failed");
+    elements.reboot_button.querySelector("strong").textContent = "Rebooting";
+  } catch (error) {
+    rebootPending = false;
+    elements.reboot_button.disabled = false;
+    elements.reboot_button.querySelector("strong").textContent = "Reboot";
+    window.alert(error.message || "The display could not be rebooted.");
+  }
+});
+
 document.querySelectorAll("nav button").forEach((button) => {
   button.addEventListener("click", () => {
     showPage(button.dataset.target);
@@ -1155,7 +1456,8 @@ pages.addEventListener("pointerup", (event) => {
 pages.addEventListener("pointercancel", () => { swipeStart = null; });
 
 async function updateLiveSnapshot() {
-  if (!liveSnapshotsSupported) return;
+  if (!liveSnapshotsSupported || livePollActive) return;
+  livePollActive = true;
   const query = eventCursor ? "?cursor=" + encodeURIComponent(eventCursor) : "";
   try {
     const response = await fetch("/api/events/snapshot" + query, { cache: "no-store" });
@@ -1183,10 +1485,14 @@ async function updateLiveSnapshot() {
     if (Date.now() - lastSuccessfulUpdate > 20000) {
       document.body.classList.add("stale");
     }
+  } finally {
+    livePollActive = false;
   }
 }
 
 async function updateDashboard() {
+  if (dashboardPollActive) return;
+  dashboardPollActive = true;
   try {
     const response = await fetch("/api/dashboard", { cache: "no-store" });
     const value = await response.json();
@@ -1196,10 +1502,14 @@ async function updateDashboard() {
     document.body.classList.remove("stale");
   } catch (error) {
     elements.updated.textContent = `Dashboard: ${String(error)}`;
+  } finally {
+    dashboardPollActive = false;
   }
 }
 
 async function updateStatus() {
+  if (statusPollActive) return;
+  statusPollActive = true;
   try {
     const response = await fetch("/api/status", { cache: "no-store" });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -1256,6 +1566,8 @@ async function updateStatus() {
       document.body.classList.add("stale");
       elements.core_state.textContent = "State stale";
     }
+  } finally {
+    statusPollActive = false;
   }
 }
 
@@ -1316,15 +1628,19 @@ function renderHomeLab(value) {
 }
 
 async function updateHomeLab() {
+  if (homelabPollActive) return;
+  homelabPollActive = true;
   try {
     const response = await fetch("/api/homelab", { cache: "no-store" });
     const value = await response.json();
     if (!response.ok) throw new Error(value.detail || `HTTP ${response.status}`);
     renderHomeLab(value);
   } catch (error) {
-    elements.homelab_state.textContent = "Unavailable";
-    elements.homelab_state.className = "state offline";
+    // Keep the last accepted snapshot visible through one transient provider
+    // timeout. Sustained failures are represented by the page stale indicator.
     if (!elements.homelab_compute.children.length) elements.homelab_compute.append(textNode("p", "homelab-empty", String(error)));
+  } finally {
+    homelabPollActive = false;
   }
 }
 
@@ -1335,12 +1651,14 @@ updateMedia();
 updateDashboard();
 updateLiveSnapshot();
 updateHomeLab();
+updateOfficeAudio();
 setInterval(updateClock, 1000);
-setInterval(updateStatus, 5000);
-setInterval(updateMedia, 10000);
-setInterval(updateDashboard, 30000);
-setInterval(updateLiveSnapshot, 2500);
-setInterval(updateHomeLab, 5000);
+setInterval(updateStatus, UPDATE_INTERVALS_MS.status);
+setInterval(updateMedia, UPDATE_INTERVALS_MS.media);
+setInterval(updateDashboard, UPDATE_INTERVALS_MS.dashboard);
+setInterval(updateLiveSnapshot, UPDATE_INTERVALS_MS.live);
+setInterval(updateHomeLab, UPDATE_INTERVALS_MS.homelab);
+setInterval(updateOfficeAudio, UPDATE_INTERVALS_MS.officeAudio);
 setInterval(() => {
   document.querySelectorAll(".track-progress i, #console-progress-fill")
     .forEach(updateProgressClock);

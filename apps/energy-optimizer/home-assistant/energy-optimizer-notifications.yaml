@@ -1,68 +1,99 @@
-# Version-controlled export of the live Home Assistant notification automations.
-# The live copies are stored in /config/automations.yaml and managed by Home Assistant.
+# Activity and safety notifications use persistent input_boolean latches. No
+# automation remains blocked in a long wait, so Home Assistant restart cannot
+# forget whether a physical session has already been announced.
+
 - id: energy_optimizer_phone_notifications
   alias: Energy Optimizer - Battery Selling iPhone Notification
-  description: >-
-    Notify once per continuous battery-selling session after physical inverter
-    and grid-export confirmation; brief five-minute settlement-boundary stops
-    do not rearm it.
+  description: Notify once per physically confirmed battery-export session.
   triggers:
     - trigger: template
       value_template: >-
-        {{
-          states('input_text.energy_optimizer_actuator_status').startswith('feedback_confirmed_discharge')
-          and is_state('input_boolean.battery_discharge', 'on')
-          and is_state('input_boolean.battery_charge', 'off')
-          and (states('sensor.saj_battery_power') | float(0)) > 1000
-          and (states('sensor.saj_ct_grid_power_total') | float(0)) < -1000
-        }}
+        {% set battery_raw = states('sensor.saj_battery_power') | float(0) %}
+        {% set battery_unit = state_attr('sensor.saj_battery_power', 'unit_of_measurement') | default('', true) | lower %}
+        {% set battery_kw = battery_raw / 1000 if battery_unit == 'w' else battery_raw if battery_unit == 'kw' else 0 %}
+        {% set grid_raw = states('sensor.saj_meter_a_real_power_total') | float(0) %}
+        {% set grid_unit = state_attr('sensor.saj_meter_a_real_power_total', 'unit_of_measurement') | default('', true) | lower %}
+        {% set grid_kw = grid_raw / 1000 if grid_unit == 'w' else grid_raw if grid_unit == 'kw' else 0 %}
+        {{ states('input_text.energy_optimizer_actuator_status').split(' | ')[0]
+             in ['feedback_confirmed', 'semantic_noop_confirmed']
+           and is_state('input_boolean.battery_discharge', 'on')
+           and is_state('input_boolean.battery_charge', 'off')
+           and battery_kw > 1
+           and grid_kw < -1 }}
       for: "00:00:01"
-  conditions: []
+  conditions:
+    - condition: state
+      entity_id: input_boolean.energy_optimizer_notify_battery_selling_active
+      state: "off"
   actions:
+    - action: input_boolean.turn_on
+      target:
+        entity_id: input_boolean.energy_optimizer_notify_battery_selling_active
     - action: notify.mobile_app_iphone
       data:
         title: Battery selling
         message: >-
+          {% set battery_raw = states('sensor.saj_battery_power') | float(0) %}
+          {% set battery_unit = state_attr('sensor.saj_battery_power', 'unit_of_measurement') | default('', true) | lower %}
+          {% set battery_kw = battery_raw / 1000 if battery_unit == 'w' else battery_raw if battery_unit == 'kw' else 0 %}
+          {% set grid_raw = states('sensor.saj_meter_a_real_power_total') | float(0) %}
+          {% set grid_unit = state_attr('sensor.saj_meter_a_real_power_total', 'unit_of_measurement') | default('', true) | lower %}
+          {% set grid_kw = grid_raw / 1000 if grid_unit == 'w' else grid_raw if grid_unit == 'kw' else 0 %}
           Battery export has started at
-          {{ (states('sensor.saj_battery_power') | float(0) / 1000) | round(1) }} kW;
+          {{ battery_kw | round(1) }} kW;
           the site is exporting
-          {{ (states('sensor.saj_ct_grid_power_total') | float(0) / -1000) | round(1) }} kW.
+          {{ (-grid_kw) | round(1) }} kW.
           Current FIT:
-          {{ (states('sensor.amber_express_trader_sheena_street_feed_in_price') | float(0) * 100) | round(1) }} c/kWh.
+          {{ ((states('sensor.amber_express_trader_sheena_street_feed_in_price') | float(0) * 100) | round(1) ~ ' c/kWh')
+             if has_value('sensor.amber_express_trader_sheena_street_feed_in_price') else 'unavailable' }}.
         data:
           tag: energy-optimizer-battery-selling
-    - wait_for_trigger:
-        - trigger: template
-          value_template: >-
-            {{
-              not (
-                is_state('input_boolean.battery_discharge', 'on')
-                and is_state('input_boolean.battery_charge', 'off')
-                and (states('sensor.saj_battery_power') | float(0)) > 1000
-                and (states('sensor.saj_ct_grid_power_total') | float(0)) < -1000
-              )
-            }}
-          for: "00:02:00"
-      timeout: "12:00:00"
-      continue_on_timeout: true
   mode: single
-  max_exceeded: silent
 
-- id: energy_optimizer_ev_charging_notification
-  alias: Energy Optimizer - EV Charging iPhone Notification
-  description: >-
-    Notify once per physically measured Tesla charging session and rearm only
-    after charging has remained stopped for two minutes.
+- id: energy_optimizer_battery_selling_notification_rearm
+  alias: Energy Optimizer - Rearm Battery Selling Notification
   triggers:
     - trigger: template
       value_template: >-
-        {{
-          (states('sensor.tesla_ble_charge_power') | float(0)) > 1
-          or (states('sensor.tesla_charging_power') | float(0)) > 1
-        }}
-      for: "00:00:10"
-  conditions: []
+        {% set battery_raw = states('sensor.saj_battery_power') | float(0) %}
+        {% set battery_unit = state_attr('sensor.saj_battery_power', 'unit_of_measurement') | default('', true) | lower %}
+        {% set battery_kw = battery_raw / 1000 if battery_unit == 'w' else battery_raw if battery_unit == 'kw' else 0 %}
+        {% set grid_raw = states('sensor.saj_meter_a_real_power_total') | float(0) %}
+        {% set grid_unit = state_attr('sensor.saj_meter_a_real_power_total', 'unit_of_measurement') | default('', true) | lower %}
+        {% set grid_kw = grid_raw / 1000 if grid_unit == 'w' else grid_raw if grid_unit == 'kw' else 0 %}
+        {{ not (
+          is_state('input_boolean.battery_discharge', 'on')
+          and is_state('input_boolean.battery_charge', 'off')
+          and battery_kw > 1
+          and grid_kw < -1
+        ) }}
+      for: "00:02:00"
+  conditions:
+    - condition: state
+      entity_id: input_boolean.energy_optimizer_notify_battery_selling_active
+      state: "on"
   actions:
+    - action: input_boolean.turn_off
+      target:
+        entity_id: input_boolean.energy_optimizer_notify_battery_selling_active
+  mode: restart
+
+- id: energy_optimizer_ev_charging_notification
+  alias: Energy Optimizer - EV Charging iPhone Notification
+  description: Notify once per physically measured Tesla charging session.
+  triggers:
+    - trigger: template
+      value_template: >-
+        {{ state_attr('sensor.energy_optimizer_ev_source', 'charging_kw') | float(0) > 1 }}
+      for: "00:00:10"
+  conditions:
+    - condition: state
+      entity_id: input_boolean.energy_optimizer_notify_ev_charging_active
+      state: "off"
+  actions:
+    - action: input_boolean.turn_on
+      target:
+        entity_id: input_boolean.energy_optimizer_notify_ev_charging_active
     - action: notify.mobile_app_iphone
       data:
         title: Car charging
@@ -71,68 +102,373 @@
           {{ states('number.tesla_ble_039d9c_charging_amps') | int(0) }} A three-phase
           (about
           {{ (states('number.tesla_ble_039d9c_charging_amps') | float(0) * 3 * 247 / 1000) | round(1) }} kW).
+          Source: {{ states('sensor.energy_optimizer_ev_source') | replace('_', ' ') }}.
         data:
           tag: energy-optimizer-ev-start
-    - wait_for_trigger:
-        - trigger: template
-          value_template: >-
-            {{
-              (states('sensor.tesla_ble_charge_power') | float(0)) < 0.5
-              and (states('sensor.tesla_charging_power') | float(0)) < 0.5
-            }}
-          for: "00:02:00"
-      timeout: "16:00:00"
-      continue_on_timeout: true
   mode: single
-  max_exceeded: silent
+
+- id: energy_optimizer_ev_charging_notification_rearm
+  alias: Energy Optimizer - Rearm EV Charging Notification
+  triggers:
+    - trigger: template
+      value_template: "{{ is_state('sensor.energy_optimizer_ev_source', 'off') }}"
+      for: "00:02:00"
+  conditions:
+    - condition: state
+      entity_id: input_boolean.energy_optimizer_notify_ev_charging_active
+      state: "on"
+  actions:
+    - action: input_boolean.turn_off
+      target:
+        entity_id: input_boolean.energy_optimizer_notify_ev_charging_active
+  mode: restart
 
 - id: energy_optimizer_hot_water_start_notification
   alias: Energy Optimizer - Hot Water Start iPhone Notification
-  description: >-
-    Notify when hot water is switched on; brief optimizer block gaps do not
-    rearm the alert.
+  description: Notify from confirmed element power, not relay state alone.
   triggers:
     - trigger: state
-      entity_id: switch.hot_water
+      entity_id: binary_sensor.hot_water_heating_active
       from: "off"
       to: "on"
-  conditions: []
+      for: "00:00:10"
+  conditions:
+    - condition: state
+      entity_id: input_boolean.energy_optimizer_notify_hot_water_active
+      state: "off"
   actions:
+    - action: input_boolean.turn_on
+      target:
+        entity_id: input_boolean.energy_optimizer_notify_hot_water_active
     - action: notify.mobile_app_iphone
       data:
         title: Hot water heating
         message: >-
-          Hot water has been turned on. Today's runtime is
-          {{ states('sensor.hot_water_runtime_today') | float(0) | round(2) }}
+          Hot-water element power is confirmed at
+          {{ state_attr('sensor.energy_optimizer_hot_water_source', 'element_kw') }} kW.
+          Source: {{ states('sensor.energy_optimizer_hot_water_source') | replace('_', ' ') }}.
+          Confirmed runtime is
+          {{ states('sensor.hot_water_confirmed_runtime_today') | float(0) | round(2) }}
           of 3 hours.
         data:
           tag: energy-optimizer-hot-water-start
-    - wait_for_trigger:
-        - trigger: state
-          entity_id: switch.hot_water
-          to: "off"
-          for: "00:30:00"
-      timeout: "08:00:00"
-      continue_on_timeout: true
   mode: single
-  max_exceeded: silent
+
+- id: energy_optimizer_hot_water_start_notification_rearm
+  alias: Energy Optimizer - Rearm Hot Water Start Notification
+  triggers:
+    - trigger: state
+      entity_id: binary_sensor.hot_water_heating_active
+      to: "off"
+      for: "00:30:00"
+  conditions:
+    - condition: state
+      entity_id: input_boolean.energy_optimizer_notify_hot_water_active
+      state: "on"
+  actions:
+    - action: input_boolean.turn_off
+      target:
+        entity_id: input_boolean.energy_optimizer_notify_hot_water_active
+  mode: restart
 
 - id: energy_optimizer_hot_water_complete_notification
   alias: Energy Optimizer - Hot Water Complete iPhone Notification
-  description: >-
-    Notify once when the daily hot-water runtime reaches the three-hour service
-    target.
+  description: Reconciles completion every minute against confirmed element-hours.
   triggers:
-    - trigger: numeric_state
-      entity_id: sensor.hot_water_runtime_today
-      above: 2.99
-      for: "00:00:30"
-  conditions: []
+    - trigger: time_pattern
+      minutes: /1
+  conditions:
+    - condition: state
+      entity_id: binary_sensor.energy_optimizer_hot_water_service_complete
+      state: "on"
+    - condition: state
+      entity_id: input_boolean.energy_optimizer_notify_hot_water_complete_sent
+      state: "off"
   actions:
+    - action: input_boolean.turn_on
+      target:
+        entity_id: input_boolean.energy_optimizer_notify_hot_water_complete_sent
     - action: notify.mobile_app_iphone
       data:
         title: Hot water complete
-        message: Hot water has completed today's 3-hour heating allocation.
+        message: >-
+          Hot water service is complete via
+          {{ state_attr('binary_sensor.energy_optimizer_hot_water_service_complete', 'completion_basis') | replace('_', ' ') }}.
+          Confirmed element runtime was
+          {{ states('sensor.hot_water_confirmed_runtime_today') | float(0) | round(2) }} hours.
         data:
           tag: energy-optimizer-hot-water-complete
+  mode: single
+
+- id: energy_optimizer_hot_water_service_rescue_notification
+  alias: Energy Optimizer - Hot Water Service Rescue Notification
+  triggers:
+    - trigger: state
+      entity_id: input_boolean.energy_optimizer_hot_water_service_rescue
+      from: "off"
+      to: "on"
+  conditions:
+    - condition: state
+      entity_id: input_boolean.energy_optimizer_notify_hot_water_rescue_sent
+      state: "off"
+    - condition: template
+      value_template: >-
+        {% set protected = state_attr('sensor.energy_optimizer_hot_water', 'protected_soc_pct') |
+           float(state_attr('sensor.energy_optimizer_plan', 'protected_soc_pct') | float(100)) %}
+        {{ is_state('sensor.energy_optimizer_hot_water', 'on')
+           and state_attr('sensor.energy_optimizer_hot_water', 'control_mode') == 'service_rescue'
+           and is_state('binary_sensor.energy_optimizer_plan_fresh', 'on')
+           and state_attr('sensor.energy_optimizer_plan', 'actuation_allowed') == true
+           and state_attr('sensor.energy_optimizer_hot_water', 'plan_id') == states('sensor.energy_optimizer_plan')
+           and states('sensor.saj_battery_1_soc') | float(-1) > protected }}
+  actions:
+    - action: input_boolean.turn_on
+      target:
+        entity_id: input_boolean.energy_optimizer_notify_hot_water_rescue_sent
+    - action: notify.mobile_app_iphone
+      data:
+        title: Hot water service rescue
+        message: >-
+          The economic plan has authorised grid-only hot-water service rescue.
+          The house battery remains available for normal household demand but is
+          excluded from the element load. Current source:
+          {{ states('sensor.energy_optimizer_hot_water_source') | replace('_', ' ') }}.
+        data:
+          tag: energy-optimizer-hot-water-rescue
+  mode: single
+
+- id: energy_optimizer_daily_notification_reset
+  alias: Energy Optimizer - Daily Notification Reset
+  triggers:
+    - trigger: time
+      at: "00:01:00"
+    - trigger: homeassistant
+      event: start
+  conditions:
+    - condition: template
+      value_template: >-
+        {{ has_value('sensor.hot_water_confirmed_runtime_today')
+           and states('sensor.hot_water_confirmed_runtime_today') | float(0) < 0.1 }}
+  actions:
+    - action: input_boolean.turn_off
+      target:
+        entity_id:
+          - input_boolean.energy_optimizer_notify_hot_water_complete_sent
+          - input_boolean.energy_optimizer_notify_hot_water_rescue_sent
+          - input_boolean.energy_optimizer_alert_hot_water_deadline_sent
+  mode: restart
+
+- id: energy_optimizer_production_degraded_notification
+  alias: Energy Optimizer - Production Degraded Notification
+  triggers:
+    - trigger: template
+      value_template: >-
+        {{ is_state('input_boolean.energy_optimizer_production_expected', 'on')
+           and not is_state('binary_sensor.energy_optimizer_actuation_ready', 'on') }}
+      for: "00:05:00"
+  conditions:
+    - condition: state
+      entity_id: input_boolean.energy_optimizer_alert_degraded_active
+      state: "off"
+  actions:
+    - action: input_boolean.turn_on
+      target:
+        entity_id: input_boolean.energy_optimizer_alert_degraded_active
+    - action: notify.mobile_app_iphone
+      data:
+        title: Energy optimizer degraded
+        message: >-
+          Production is expected but readiness is
+          {{ states('sensor.energy_optimizer_readiness') | replace('_', ' ') }}.
+          Mode {{ states('input_select.energy_optimizer_mode') }};
+          plan fresh {{ states('binary_sensor.energy_optimizer_plan_fresh') }};
+          telemetry fresh {{ states('binary_sensor.energy_optimizer_core_telemetry_fresh') }}.
+        data:
+          tag: energy-optimizer-degraded
+  mode: single
+
+- id: energy_optimizer_production_recovered_notification
+  alias: Energy Optimizer - Production Recovered Notification
+  triggers:
+    - trigger: state
+      entity_id: binary_sensor.energy_optimizer_actuation_ready
+      to: "on"
+      for: "00:01:00"
+  conditions:
+    - condition: state
+      entity_id: input_boolean.energy_optimizer_alert_degraded_active
+      state: "on"
+  actions:
+    - action: input_boolean.turn_off
+      target:
+        entity_id: input_boolean.energy_optimizer_alert_degraded_active
+    - action: notify.mobile_app_iphone
+      data:
+        title: Energy optimizer recovered
+        message: >-
+          Production readiness has recovered on plan
+          {{ states('sensor.energy_optimizer_plan') }}.
+        data:
+          tag: energy-optimizer-degraded
+  mode: single
+
+- id: energy_optimizer_hot_water_battery_alert
+  alias: Energy Optimizer - Hot Water Battery Source Alert
+  triggers:
+    - trigger: state
+      entity_id: binary_sensor.energy_optimizer_hot_water_battery_violation
+      to: "on"
+      for: "00:00:01"
+  conditions:
+    - condition: state
+      entity_id: input_boolean.energy_optimizer_alert_hot_water_battery_active
+      state: "off"
+  actions:
+    - action: input_boolean.turn_on
+      target:
+        entity_id: input_boolean.energy_optimizer_alert_hot_water_battery_active
+    - action: notify.mobile_app_iphone
+      data:
+        title: Hot water battery draw blocked
+        message: >-
+          Hot water was drawing
+          {{ state_attr('sensor.energy_optimizer_hot_water_source', 'battery_discharge_kw') }} kW
+          from the house battery outside service rescue. The source governor has
+          ordered the element off.
+        data:
+          tag: energy-optimizer-hot-water-battery
+  mode: single
+
+- id: energy_optimizer_hot_water_battery_alert_rearm
+  alias: Energy Optimizer - Rearm Hot Water Battery Alert
+  triggers:
+    - trigger: state
+      entity_id: binary_sensor.energy_optimizer_hot_water_battery_violation
+      to: "off"
+      for: "00:02:00"
+  conditions:
+    - condition: state
+      entity_id: input_boolean.energy_optimizer_alert_hot_water_battery_active
+      state: "on"
+  actions:
+    - action: input_boolean.turn_off
+      target:
+        entity_id: input_boolean.energy_optimizer_alert_hot_water_battery_active
+  mode: restart
+
+- id: energy_optimizer_ev_battery_alert
+  alias: Energy Optimizer - EV Battery Source Alert
+  triggers:
+    - trigger: state
+      entity_id: binary_sensor.energy_optimizer_ev_battery_violation
+      to: "on"
+      for: "00:00:01"
+  conditions:
+    - condition: state
+      entity_id: input_boolean.energy_optimizer_alert_ev_battery_active
+      state: "off"
+  actions:
+    - action: input_boolean.turn_on
+      target:
+        entity_id: input_boolean.energy_optimizer_alert_ev_battery_active
+    - action: notify.mobile_app_iphone
+      data:
+        title: EV battery draw blocked
+        message: >-
+          EV charging coincided with
+          {{ state_attr('sensor.energy_optimizer_ev_source', 'battery_discharge_kw') }} kW
+          stationary-battery discharge. The local charger has been ordered off.
+        data:
+          tag: energy-optimizer-ev-battery
+  mode: single
+
+- id: energy_optimizer_ev_battery_alert_rearm
+  alias: Energy Optimizer - Rearm EV Battery Alert
+  triggers:
+    - trigger: state
+      entity_id: binary_sensor.energy_optimizer_ev_battery_violation
+      to: "off"
+      for: "00:02:00"
+  conditions:
+    - condition: state
+      entity_id: input_boolean.energy_optimizer_alert_ev_battery_active
+      state: "on"
+  actions:
+    - action: input_boolean.turn_off
+      target:
+        entity_id: input_boolean.energy_optimizer_alert_ev_battery_active
+  mode: restart
+
+- id: energy_optimizer_negative_fit_export_alert
+  alias: Energy Optimizer - Negative FIT Export Violation Alert
+  triggers:
+    - trigger: state
+      entity_id: binary_sensor.energy_optimizer_negative_fit_export_violation
+      to: "on"
+      for: "00:00:05"
+  conditions:
+    - condition: state
+      entity_id: input_boolean.energy_optimizer_alert_negative_export_active
+      state: "off"
+  actions:
+    - action: input_boolean.turn_on
+      target:
+        entity_id: input_boolean.energy_optimizer_alert_negative_export_active
+    - action: notify.mobile_app_iphone
+      data:
+        title: Negative FIT export detected
+        message: >-
+          The site is exporting
+          {{ (state_attr('binary_sensor.energy_optimizer_negative_fit_export_violation', 'export_w') | float(0) / 1000) | round(2) }} kW
+          while FIT is
+          {{ (states('sensor.amber_express_trader_sheena_street_feed_in_price') | float(0) * 100) | round(2) }} c/kWh.
+          Node-RED is the sole curtailment authority; inspect its rejection status.
+        data:
+          tag: energy-optimizer-negative-fit-export
+  mode: single
+
+- id: energy_optimizer_negative_fit_export_alert_rearm
+  alias: Energy Optimizer - Rearm Negative FIT Export Alert
+  triggers:
+    - trigger: state
+      entity_id: binary_sensor.energy_optimizer_negative_fit_export_violation
+      to: "off"
+      for: "00:02:00"
+  conditions:
+    - condition: state
+      entity_id: input_boolean.energy_optimizer_alert_negative_export_active
+      state: "on"
+  actions:
+    - action: input_boolean.turn_off
+      target:
+        entity_id: input_boolean.energy_optimizer_alert_negative_export_active
+  mode: restart
+
+- id: energy_optimizer_hot_water_deadline_alert
+  alias: Energy Optimizer - Hot Water Deadline Miss Alert
+  triggers:
+    - trigger: time_pattern
+      minutes: /5
+  conditions:
+    - condition: template
+      value_template: >-
+        {{ as_timestamp(now()) >= as_timestamp(today_at('16:00'))
+           and not is_state('binary_sensor.energy_optimizer_hot_water_service_complete', 'on') }}
+    - condition: state
+      entity_id: input_boolean.energy_optimizer_alert_hot_water_deadline_sent
+      state: "off"
+  actions:
+    - action: input_boolean.turn_on
+      target:
+        entity_id: input_boolean.energy_optimizer_alert_hot_water_deadline_sent
+    - action: notify.mobile_app_iphone
+      data:
+        title: Hot water service incomplete
+        message: >-
+          The 4pm hard deadline passed with
+          {{ states('sensor.hot_water_confirmed_runtime_today') | float(0) | round(2) }}
+          of 3 confirmed element-hours and the tank thermostat has not reported
+          satisfied. Grid-only service rescue is now scheduled.
+        data:
+          tag: energy-optimizer-hot-water-deadline
   mode: single

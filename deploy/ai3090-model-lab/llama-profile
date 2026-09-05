@@ -1,0 +1,69 @@
+#!/usr/bin/env bash
+# Starts one foreground experimental llama.cpp profile. It never stops vLLM.
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=profiles.sh
+source "$SCRIPT_DIR/profiles.sh"
+
+usage() {
+  echo "Usage: $0 <fast|quality|agent-iq4-xs|agent-iq4-nl> [--mtp]" >&2
+}
+
+[[ $# -ge 1 && $# -le 2 ]] || { usage; exit 2; }
+profile="$1"
+mtp=false
+if [[ ${2:-} == "--mtp" ]]; then
+  mtp=true
+elif [[ $# -eq 2 ]]; then
+  usage
+  exit 2
+fi
+model_lab_profile "$profile"
+
+[[ -x "$MODEL_LAB_BIN" ]] || { echo "llama-server not found: $MODEL_LAB_BIN" >&2; exit 1; }
+[[ -f "$MODEL_LAB_MODEL" ]] || { echo "Model is not downloaded: $MODEL_LAB_MODEL" >&2; exit 1; }
+model_bytes="$(stat --format=%s "$MODEL_LAB_MODEL")"
+if [[ "$model_bytes" -ne "$MODEL_LAB_EXPECTED_BYTES" ]]; then
+  echo "Refusing to start: incomplete or unexpected model size ($model_bytes, expected $MODEL_LAB_EXPECTED_BYTES)." >&2
+  exit 1
+fi
+
+# The service is deliberately not stopped here: only an operator with sudo can
+# open a maintenance window. This makes an accidental concurrent GPU launch
+# impossible from the lab account.
+if systemctl is-active --quiet vllm; then
+  echo "Refusing to start: vLLM is active. Stop it in an approved maintenance window first." >&2
+  exit 3
+fi
+
+vram_used="$(nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits | head -n1 | tr -dc '0-9')"
+if [[ -z "$vram_used" || "$vram_used" -gt 512 ]]; then
+  echo "Refusing to start: GPU has ${vram_used:-unknown} MiB in use (limit: 512 MiB)." >&2
+  exit 3
+fi
+
+mkdir -p "$MODEL_LAB_ROOT/logs"
+exec 9>"$MODEL_LAB_ROOT/.llama-profile.lock"
+flock -n 9 || { echo "Another model-lab launcher is already running." >&2; exit 3; }
+
+args=(
+  --model "$MODEL_LAB_MODEL"
+  --host "$MODEL_LAB_HOST"
+  --port "$MODEL_LAB_PORT"
+  --ctx-size "$MODEL_LAB_CONTEXT"
+  --gpu-layers 99
+  --flash-attn on
+  --parallel 1
+)
+if [[ "$mtp" == true ]]; then
+  args+=(--spec-type draft-mtp --spec-draft-n-max 2)
+fi
+
+mode_label="normal"
+[[ "$mtp" == true ]] && mode_label="MTP"
+echo "Starting $MODEL_LAB_PROFILE in $mode_label mode on $MODEL_LAB_HOST:$MODEL_LAB_PORT (context $MODEL_LAB_CONTEXT)."
+echo "OpenAI endpoint: http://$MODEL_LAB_HOST:$MODEL_LAB_PORT/v1"
+log_suffix=""
+[[ "$mtp" == true ]] && log_suffix="-mtp"
+exec "$MODEL_LAB_BIN" "${args[@]}" >>"$MODEL_LAB_ROOT/logs/${MODEL_LAB_PROFILE}${log_suffix}.log" 2>&1

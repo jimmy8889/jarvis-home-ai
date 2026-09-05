@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+# Run one profile/mode during a pre-opened maintenance window, then stop it.
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=profiles.sh
+source "$SCRIPT_DIR/profiles.sh"
+
+usage() {
+  echo "Usage: $0 <fast|quality|agent-iq4-xs|agent-iq4-nl> [--mtp]" >&2
+}
+[[ $# -ge 1 && $# -le 2 ]] || { usage; exit 2; }
+profile="$1"
+mtp_arg="${2:-}"
+[[ -z "$mtp_arg" || "$mtp_arg" == "--mtp" ]] || { usage; exit 2; }
+model_lab_profile "$profile"
+
+mode="normal"
+[[ "$mtp_arg" == "--mtp" ]] && mode="mtp"
+results_dir="$MODEL_LAB_ROOT/results"
+mkdir -p "$results_dir"
+output="$results_dir/${profile}-${mode}.json"
+telemetry="$results_dir/${profile}-${mode}-gpu.csv"
+
+launch=(setsid "$SCRIPT_DIR/llama-profile" "$profile")
+[[ -n "$mtp_arg" ]] && launch+=("$mtp_arg")
+"${launch[@]}" >"$MODEL_LAB_ROOT/logs/${profile}-${mode}-runner.log" 2>&1 &
+server_pid=$!
+cleanup() {
+  kill -- -"$server_pid" 2>/dev/null || true
+  wait "$server_pid" 2>/dev/null || true
+  for _ in $(seq 1 20); do
+    vram_used="$(nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits | head -n1 | tr -dc '0-9')"
+    [[ -n "$vram_used" && "$vram_used" -le 512 ]] && return
+    sleep 1
+  done
+  echo "Warning: temporary llama.cpp process did not release the GPU promptly." >&2
+}
+trap cleanup EXIT INT TERM
+
+for _ in $(seq 1 120); do
+  if curl --fail --silent "http://$MODEL_LAB_HOST:$MODEL_LAB_PORT/health" >/dev/null; then
+    break
+  fi
+  if ! kill -0 "$server_pid" 2>/dev/null; then
+    cat "$MODEL_LAB_ROOT/logs/${profile}-${mode}-runner.log" >&2
+    exit 1
+  fi
+  sleep 1
+done
+curl --fail --silent "http://$MODEL_LAB_HOST:$MODEL_LAB_PORT/health" >/dev/null || {
+  echo "Timed out waiting for llama-server health." >&2
+  exit 1
+}
+
+nvidia-smi --query-gpu=name,memory.used,memory.total,utilization.gpu,temperature.gpu,power.draw --format=csv >"$telemetry"
+python3 "$MODEL_LAB_ROOT/local_model_lab.py" \
+  --url "http://$MODEL_LAB_HOST:$MODEL_LAB_PORT/v1" \
+  --model "$profile" \
+  --no-thinking \
+  --output "$output"
+nvidia-smi --query-gpu=name,memory.used,memory.total,utilization.gpu,temperature.gpu,power.draw --format=csv >>"$telemetry"
+echo "Result: $output"

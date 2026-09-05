@@ -1,0 +1,9 @@
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Swift UserDefaults key names in tests are identifiers, not credentials"
+condition = "AND"
+paths = ['''apps/pilot-ios/PilotTests/PilotTests\.swift''']
+regexTarget = "match"
+regexes = ['''forKey:\s*"[^"]+"''']

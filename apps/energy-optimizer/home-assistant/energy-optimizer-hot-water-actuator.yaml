@@ -1,68 +1,480 @@
 - id: energy_optimizer_hot_water_actuator
-  alias: Energy Optimizer - Hot Water Plan Actuator
+  alias: Energy Optimizer - Hot Water Source Governor
   description: >-
-    Production actuator for fresh optimiser hot-water commands. It immediately
-    starts a valid new heating block, while retaining a 15-minute minimum
-    on-dwell before a planned stop can interrupt it. Disarming stays immediate.
+    Single production authority for hot water. It accepts only a fresh committed
+    schema-v2 command, measures delivered service from physical element activity,
+    requires thirty continuous seconds of solar margin before an ordinary start,
+    allows a stale static zero-power reading only while the relay is off, then
+    requires fresh post-command element-power confirmation within sixty seconds.
+    Ordinary operation is solar-only. If the daily service would otherwise
+    miss 4pm, a coordinated grid-only rescue starts early enough to finish;
+    the inverter contract then forces only non-element house demand so the
+    stationary battery does not supply the element. Once qualified, a
+    run remains committed across harmless rolling-plan changes. Every trigger,
+    startup and ten-second watchdog evaluates the same hard-stop rules. 4pm is
+    the target completion time; an incomplete service is retried at the next
+    suitable solar opportunity rather than being skipped.
   triggers:
     - trigger: state
-      entity_id: sensor.energy_optimizer_hot_water
+      entity_id:
+        - sensor.energy_optimizer_plan
       id: plan
-    - trigger: time_pattern
-      minutes: /5
-      id: watchdog
     - trigger: state
       entity_id:
-        - input_select.energy_optimizer_mode
+        - input_boolean.energy_optimizer_production_expected
         - input_boolean.energy_optimizer_hot_water_control
         - input_boolean.energy_optimizer_rollout_approved
         - input_boolean.energy_optimizer_manual_override
-      id: gate_changed
+        - input_select.energy_optimizer_mode
+        - input_boolean.energy_optimizer_hot_water_thermostat_satisfied
+      id: gate
+    - trigger: state
+      entity_id:
+        - sensor.saj_battery_power
+        - sensor.saj_battery_1_soc
+        - sensor.saj_pv_power
+        - sensor.saj_home_load
+        - sensor.energy_optimizer_hot_water_confirmed_power
+        - binary_sensor.hot_water_heating_active
+        - binary_sensor.energy_optimizer_hot_water_solar_start_ready
+      id: physical
+    - trigger: state
+      entity_id: switch.hot_water
+      id: relay
+    - trigger: numeric_state
+      entity_id: sensor.hot_water_confirmed_runtime_today
+      above: 2.99
+      id: complete
+    - trigger: time
+      at: "16:00:00"
+      id: deadline
+    - trigger: time_pattern
+      seconds: /10
+      id: watchdog
+    - trigger: homeassistant
+      event: start
+      id: startup
   conditions: []
   actions:
     - variables:
-        gates_enabled: >-
-          {{ is_state('input_select.energy_optimizer_mode', 'Active') and
-             is_state('input_boolean.energy_optimizer_hot_water_control', 'on') and
-             is_state('input_boolean.energy_optimizer_rollout_approved', 'on') and
-             is_state('input_boolean.energy_optimizer_manual_override', 'off') }}
-        plan_fresh: >-
-          {{ as_timestamp(state_attr('sensor.energy_optimizer_hot_water',
-             'valid_until'), 0) > as_timestamp(now()) }}
-        # A dwell protects an active heating block from being interrupted; it
-        # must never delay a valid new start simply because the switch was off
-        # recently.
-        on_dwell_ok: >-
-          {{ not is_state('switch.hot_water', 'on') or
-             as_timestamp(now()) - as_timestamp(states.switch.hot_water.last_changed) >= 900 }}
-        off_dwell_ok: >-
-          {{ not is_state('switch.hot_water', 'on') or
-             as_timestamp(now()) - as_timestamp(states.switch.hot_water.last_changed) >= 900 }}
-        runtime: "{{ states('sensor.hot_water_runtime_today') | float(0) }}"
+        committed_plan_id: "{{ states('sensor.energy_optimizer_plan') }}"
+        hot_water_plan_id: "{{ state_attr('sensor.energy_optimizer_hot_water', 'plan_id') | default('', true) }}"
+        command_generated_ts: "{{ as_timestamp(state_attr('sensor.energy_optimizer_hot_water', 'generated_at'), 0) }}"
+        command_valid_until_ts: "{{ as_timestamp(state_attr('sensor.energy_optimizer_hot_water', 'valid_until'), 0) }}"
+        committed_generated_ts: "{{ as_timestamp(state_attr('sensor.energy_optimizer_plan', 'generated_at'), 0) }}"
+        plan_stage_age_seconds: >-
+          {% set command_changed = as_timestamp(states['sensor.energy_optimizer_hot_water'].last_updated, 0) %}
+          {% set plan_changed = as_timestamp(states['sensor.energy_optimizer_plan'].last_updated, 0) %}
+          {{ as_timestamp(now()) - [command_changed, plan_changed] | max }}
+        control_mode: "{{ state_attr('sensor.energy_optimizer_hot_water', 'control_mode') | default('off', true) }}"
+        confirmed_runtime_h: "{{ states('sensor.hot_water_confirmed_runtime_today') | float(-1) }}"
+        battery_discharge_kw: >-
+          {% set raw = states('sensor.saj_battery_power') | float(0) %}
+          {% set unit = state_attr('sensor.saj_battery_power', 'unit_of_measurement') | default('', true) | lower %}
+          {{ [0, raw / 1000 if unit == 'w' else raw if unit == 'kw' else 999] | max }}
+        battery_soc_pct: "{{ states('sensor.saj_battery_1_soc') | float(-1) }}"
+        protected_soc_pct: >-
+          {{ state_attr('sensor.energy_optimizer_hot_water', 'protected_soc_pct') |
+             float(state_attr('sensor.energy_optimizer_plan', 'protected_soc_pct') | float(100)) }}
+        battery_guard_kw: 0.3
+        pv_kw: >-
+          {% set raw = states('sensor.saj_pv_power') | float(0) %}
+          {% set unit = state_attr('sensor.saj_pv_power', 'unit_of_measurement') | default('', true) | lower %}
+          {{ raw / 1000 if unit == 'w' else raw if unit == 'kw' else -1 }}
+        home_load_kw: >-
+          {% set raw = states('sensor.saj_home_load') | float(0) %}
+          {% set unit = state_attr('sensor.saj_home_load', 'unit_of_measurement') | default('', true) | lower %}
+          {{ raw / 1000 if unit == 'w' else raw if unit == 'kw' else 999 }}
+        measured_element_kw: >-
+          {% set raw = states('sensor.energy_optimizer_hot_water_confirmed_power') | float(0) %}
+          {% set unit = state_attr('sensor.energy_optimizer_hot_water_confirmed_power', 'unit_of_measurement') | default('', true) | lower %}
+          {{ raw / 1000 if unit == 'w' else raw if unit == 'kw' else -1 }}
+        element_power_age_seconds: >-
+          {{ as_timestamp(now()) - as_timestamp(states['sensor.energy_optimizer_hot_water_confirmed_power'].last_reported, 0)
+             if has_value('sensor.energy_optimizer_hot_water_confirmed_power') else 999999 }}
+        nominal_element_kw: "{{ states('input_number.hot_water_nominal_kw') | float(3.7) }}"
+        service_target_h: >-
+          {{ state_attr('sensor.energy_optimizer_hot_water', 'service_target_hours') | float(3.05) }}
+        solar_margin_kw: "{{ states('input_number.energy_optimizer_hot_water_solar_margin_kw') | float(0.5) }}"
+        battery_charge_target_kw: "{{ state_attr('sensor.energy_optimizer_plan', 'battery_charge_target_kw') | float(0) }}"
+        now_ts: "{{ as_timestamp(now()) }}"
+        deadline_ts: "{{ as_timestamp(today_at('16:00')) }}"
+        relay_on_seconds: >-
+          {{ as_timestamp(now()) - as_timestamp(states['switch.hot_water'].last_changed, as_timestamp(now())) }}
+        relay_off_seconds: >-
+          {{ as_timestamp(now()) - as_timestamp(states['switch.hot_water'].last_changed, as_timestamp(now())) }}
+        relay_start_grace_seconds: 60
+    - variables:
+        production_gates_ok: >-
+          {{ is_state('input_boolean.energy_optimizer_production_expected', 'on')
+             and is_state('input_boolean.energy_optimizer_manual_override', 'off')
+             and is_state('binary_sensor.energy_optimizer_saj_control_contract_ready', 'on')
+             and is_state('input_select.energy_optimizer_mode', 'Active')
+             and is_state('input_boolean.energy_optimizer_hot_water_control', 'on')
+             and is_state('input_boolean.energy_optimizer_rollout_approved', 'on') }}
+        economic_plan_authorized: >-
+          {{ is_state('sensor.energy_optimizer_status', 'active')
+             and is_state('binary_sensor.energy_optimizer_plan_fresh', 'on')
+             and state_attr('sensor.energy_optimizer_plan', 'actuation_allowed') == true
+             and committed_plan_id == hot_water_plan_id
+             and command_generated_ts | float(0) > as_timestamp(now()) - 600
+             and command_generated_ts | float(0) < as_timestamp(now()) + 60
+             and command_valid_until_ts | float(0) > as_timestamp(now()) }}
+        plan_commit_settling: >-
+          {{ is_state('sensor.energy_optimizer_status', 'active')
+             and state_attr('sensor.energy_optimizer_plan', 'actuation_allowed') == true
+             and command_valid_until_ts | float(0) > as_timestamp(now())
+             and as_timestamp(now())
+                 - [command_generated_ts | float(0), committed_generated_ts | float(0)] | max
+                 < 15 }}
+        core_telemetry_ok: "{{ is_state('binary_sensor.energy_optimizer_core_telemetry_fresh', 'on') }}"
+        hot_water_idle_values_ok: >-
+          {% set unit = state_attr('sensor.energy_optimizer_hot_water_confirmed_power', 'unit_of_measurement') | default('', true) | lower %}
+          {{ states('switch.hot_water') in ['on', 'off']
+             and has_value('sensor.hot_water_confirmed_runtime_today')
+             and has_value('sensor.energy_optimizer_hot_water_confirmed_power')
+             and unit in ['w', 'kw']
+             and (is_state('switch.hot_water', 'on')
+                  or states('binary_sensor.hot_water_heating_active') in ['on', 'off']) }}
+        element_power_fresh: >-
+          {% set unit = state_attr('sensor.energy_optimizer_hot_water_confirmed_power', 'unit_of_measurement') | default('', true) | lower %}
+          {% set reported = as_timestamp(states['sensor.energy_optimizer_hot_water_confirmed_power'].last_reported, 0)
+             if has_value('sensor.energy_optimizer_hot_water_confirmed_power') else 0 %}
+          {{ has_value('sensor.energy_optimizer_hot_water_confirmed_power') and unit in ['w', 'kw']
+             and element_power_age_seconds | float(999999) >= -60
+             and element_power_age_seconds | float(999999) <= 330
+             and reported >= as_timestamp(states['switch.hot_water'].last_changed, 0) - 2 }}
+        before_deadline: "{{ now_ts | float(0) < deadline_ts | float(0) }}"
+        runtime_due: "{{ confirmed_runtime_h | float(-1) >= 0 and confirmed_runtime_h | float(0) < 3 }}"
+        service_complete: >-
+          {{ confirmed_runtime_h | float(0) >= 3
+             or is_state('input_boolean.energy_optimizer_hot_water_thermostat_satisfied', 'on') }}
+        guarantee_due: >-
+          {% set remaining_h = [0, service_target_h | float(3.05) - confirmed_runtime_h | float(0)] | max %}
+          {{ confirmed_runtime_h | float(-1) >= 0
+             and remaining_h > 0
+             and now_ts | float(0) >= deadline_ts | float(0) - remaining_h * 3600 }}
+        on_dwell_complete: "{{ not is_state('switch.hot_water', 'on') or relay_on_seconds | float(0) >= 900 }}"
+        off_dwell_complete: "{{ not is_state('switch.hot_water', 'off') or relay_off_seconds | float(0) >= 300 }}"
+        relay_start_grace_active: >-
+          {{ is_state('switch.hot_water', 'on')
+             and relay_on_seconds | float(999999) < relay_start_grace_seconds | float(60) }}
+        thermostat_satisfied_now: >-
+          {{ is_state('switch.hot_water', 'on')
+             and element_power_fresh | bool
+             and relay_on_seconds | float(0) >= 300
+             and not is_state('binary_sensor.hot_water_heating_active', 'on')
+             and measured_element_kw | float(999) < 0.3 }}
+    - variables:
+        physical_element_confirmed: >-
+          {{ is_state('switch.hot_water', 'on')
+             and element_power_fresh | bool
+             and is_state('binary_sensor.hot_water_heating_active', 'on')
+             and measured_element_kw | float(-1) >= 0.3 }}
+        element_kw: >-
+          {{ measured_element_kw | float(0)
+             if element_power_fresh | bool and measured_element_kw | float(0) >= 0.3
+             else nominal_element_kw | float(3.7) }}
+        non_hot_water_load_kw: >-
+          {{ [0, home_load_kw | float(0) -
+             (measured_element_kw | float(0)
+              if element_power_fresh | bool and is_state('binary_sensor.hot_water_heating_active', 'on')
+              else nominal_element_kw | float(3.7) if relay_start_grace_active | bool
+              else 0)] | max }}
+        charge_reservation_kw: >-
+          {{ battery_charge_target_kw | float(0)
+             if state_attr('sensor.energy_optimizer_plan', 'battery_mode') in ['pv_charge', 'grid_charge']
+             else 0 }}
+    - variables:
+        solar_headroom_kw: >-
+          {{ pv_kw | float(0) - non_hot_water_load_kw | float(0) - charge_reservation_kw | float(0) }}
+        normal_authorized: >-
+          {{ production_gates_ok | bool and economic_plan_authorized | bool
+             and is_state('sensor.energy_optimizer_hot_water', 'on')
+             and control_mode == 'solar_surplus' }}
+        rescue_authorized: >-
+          {{ production_gates_ok | bool and core_telemetry_ok | bool
+             and hot_water_idle_values_ok | bool
+             and economic_plan_authorized | bool
+             and is_state('sensor.energy_optimizer_hot_water', 'on')
+             and control_mode == 'service_rescue'
+             and state_attr('sensor.energy_optimizer_hot_water', 'rescue_source') == 'grid_only' }}
+        solar_margin_ok: >-
+          {{ solar_headroom_kw | float(0) >= element_kw | float(3.7) + solar_margin_kw | float(0.5) }}
+        solar_start_sustained: >-
+          {{ is_state('binary_sensor.energy_optimizer_hot_water_solar_start_ready', 'on') }}
+        committed_solar_run: >-
+          {{ is_state('switch.hot_water', 'on')
+             and production_gates_ok | bool
+             and core_telemetry_ok | bool
+             and hot_water_idle_values_ok | bool
+             and economic_plan_authorized | bool
+             and runtime_due | bool
+             and solar_margin_ok | bool
+             and battery_discharge_kw | float(999) <= battery_guard_kw | float(0.3) }}
+        active_plan_rollover_grace: >-
+          {{ is_state('switch.hot_water', 'on')
+             and production_gates_ok | bool
+             and core_telemetry_ok | bool
+             and hot_water_idle_values_ok | bool
+             and runtime_due | bool
+             and solar_margin_ok | bool
+             and battery_discharge_kw | float(999) <= battery_guard_kw | float(0.3)
+             and ((command_valid_until_ts | float(0) <= as_timestamp(now())
+                   and command_valid_until_ts | float(0) > as_timestamp(now()) - 15)
+                  or as_timestamp(now())
+                     - [command_generated_ts | float(0), committed_generated_ts | float(0)] | max
+                     < 15
+                  or (plan_stage_age_seconds | float(999999) >= -2
+                      and plan_stage_age_seconds | float(999999) < 15
+                      and command_generated_ts | float(0) > as_timestamp(now()) - 600
+                      and command_valid_until_ts | float(0) > as_timestamp(now()))) }}
+    - variables:
+        hard_stop_reason: >-
+          {% if trigger is defined and trigger.id == 'startup' %}
+            startup_reconciliation
+          {% elif confirmed_runtime_h | float(-1) < 0 %}
+            confirmed_runtime_unavailable
+          {% elif thermostat_satisfied_now | bool %}
+            thermostat_satisfied
+          {% elif service_complete | bool %}
+            service_complete
+          {% elif not production_gates_ok | bool %}
+            disarmed
+          {% elif not core_telemetry_ok | bool %}
+            telemetry_stale
+          {% elif not hot_water_idle_values_ok | bool %}
+            hot_water_control_values_unavailable
+          {% elif not economic_plan_authorized | bool and active_plan_rollover_grace | bool %}
+            active_plan_rollover_grace
+          {% elif not economic_plan_authorized | bool and plan_commit_settling | bool %}
+            plan_commit_settling
+          {% elif not economic_plan_authorized | bool and not guarantee_due | bool %}
+            plan_stale_or_uncommitted
+          {% elif control_mode not in ['off', 'solar_surplus', 'service_rescue']
+               and not guarantee_due | bool %}
+            invalid_control_mode
+          {% elif is_state('switch.hot_water', 'on')
+               and not is_state('input_boolean.energy_optimizer_hot_water_service_rescue', 'on')
+               and not relay_start_grace_active | bool
+               and not solar_margin_ok | bool %}
+            insufficient_solar
+          {% elif is_state('switch.hot_water', 'on')
+               and not is_state('input_boolean.energy_optimizer_hot_water_service_rescue', 'on')
+               and not relay_start_grace_active | bool
+               and battery_discharge_kw | float(999) > battery_guard_kw | float(0.3) %}
+            stationary_battery_draw
+          {% else %}
+            none
+          {% endif %}
     - choose:
         - conditions:
             - condition: template
-              value_template: "{{ trigger.id == 'gate_changed' and not gates_enabled | bool }}"
+              value_template: "{{ hard_stop_reason == 'active_plan_rollover_grace' }}"
           sequence:
-            - action: switch.turn_off
+            - action: input_text.set_value
               target:
-                entity_id: switch.hot_water
+                entity_id: input_text.energy_optimizer_hot_water_status
+              data:
+                value: >-
+                  heating | active_plan_rollover_grace | solar={{ solar_headroom_kw | round(2) }}kW |
+                  battery={{ battery_discharge_kw | round(2) }}kW | preserving_current_command
+            - stop: Preserving safe physical hot-water service across the plan commit boundary
+
+        - conditions:
+            - condition: template
+              value_template: "{{ hard_stop_reason == 'plan_commit_settling' }}"
+          sequence:
+            - action: input_text.set_value
+              target:
+                entity_id: input_text.energy_optimizer_hot_water_status
+              data:
+                value: >-
+                  settling_plan_commit | committed={{ committed_plan_id }} |
+                  hot_water={{ hot_water_plan_id }} | preserving_current_command
+            - stop: Waiting for the retained plan commit marker
+
+        # Hard stops are source/safety constraints and never wait for minimum
+        # dwell. The conditional service call avoids hammering an already-off
+        # relay while still reconciling an on relay at startup and every watchdog.
+        - conditions:
+            - condition: template
+              value_template: "{{ hard_stop_reason != 'none' }}"
+          sequence:
+            - if:
+                - condition: template
+                  value_template: "{{ hard_stop_reason == 'thermostat_satisfied' }}"
+              then:
+                - action: input_boolean.turn_on
+                  target:
+                    entity_id: input_boolean.energy_optimizer_hot_water_thermostat_satisfied
+            - if:
+                - condition: state
+                  entity_id: switch.hot_water
+                  state: "on"
+              then:
+                - action: switch.turn_off
+                  target:
+                    entity_id: switch.hot_water
+            - action: input_boolean.turn_off
+              target:
+                entity_id: input_boolean.energy_optimizer_hot_water_service_rescue
+            - action: input_text.set_value
+              target:
+                entity_id: input_text.energy_optimizer_hot_water_status
+              data:
+                value: >-
+                  blocked | {{ hard_stop_reason }} | plan={{ committed_plan_id }}
+            - stop: Hot-water hard stop enforced
+
+        # Once a solar-qualified element run starts, keep it through harmless
+        # five-minute replans. Source and safety hard stops above still win.
+        - conditions:
+            - condition: template
+              value_template: "{{ committed_solar_run | bool }}"
+          sequence:
+            - action: input_boolean.turn_off
+              target:
+                entity_id: input_boolean.energy_optimizer_hot_water_service_rescue
+            - action: input_text.set_value
+              target:
+                entity_id: input_text.energy_optimizer_hot_water_status
+              data:
+                value: >-
+                  {{ 'heating' if physical_element_confirmed | bool else 'starting_awaiting_power' }} |
+                  committed_solar_run | headroom={{ solar_headroom_kw | round(2) }}kW |
+                  battery={{ battery_discharge_kw | round(2) }}kW | plan={{ committed_plan_id }}
+
+        # Service rescue is coordinated with the battery plan: the forced
+        # battery tranche covers only non-element house demand and grid supplies
+        # the element. Solar qualification is deliberately not required.
         - conditions:
             - condition: template
               value_template: >-
-                {{ gates_enabled | bool and plan_fresh | bool and on_dwell_ok | bool and
-                   runtime | float(0) < 3 and is_state('sensor.energy_optimizer_hot_water', 'on') }}
+                {{ rescue_authorized | bool and runtime_due | bool and guarantee_due | bool }}
           sequence:
-            - action: switch.turn_on
+            - action: input_boolean.turn_on
               target:
-                entity_id: switch.hot_water
+                entity_id: input_boolean.energy_optimizer_hot_water_service_rescue
+            - if:
+                - condition: state
+                  entity_id: switch.hot_water
+                  state: "off"
+              then:
+                - action: switch.turn_on
+                  target:
+                    entity_id: switch.hot_water
+            - action: input_text.set_value
+              target:
+                entity_id: input_text.energy_optimizer_hot_water_status
+              data:
+                value: >-
+                  {{ 'heating' if physical_element_confirmed | bool else 'starting_awaiting_power' }} |
+                  service_rescue{{ '_guarantee' if guarantee_due | bool else '' }} |
+                  soc={{ battery_soc_pct | round(1) }}% | reserve={{ protected_soc_pct | round(1) }}% |
+                  source={{ states('sensor.energy_optimizer_hot_water_source') }}
+
+        # Ordinary starts wait for sustained solar headroom. The committed-run
+        # branch above prevents plan chatter while the same source remains safe.
         - conditions:
             - condition: template
               value_template: >-
-                {{ gates_enabled | bool and plan_fresh | bool and off_dwell_ok | bool and
-                   is_state('sensor.energy_optimizer_hot_water', 'off') }}
+                {{ normal_authorized | bool and runtime_due | bool and before_deadline | bool
+                   and solar_margin_ok | bool
+                   and solar_start_sustained | bool
+                   and (is_state('switch.hot_water', 'on') or off_dwell_complete | bool) }}
           sequence:
-            - action: switch.turn_off
+            - action: input_boolean.turn_off
               target:
-                entity_id: switch.hot_water
+                entity_id: input_boolean.energy_optimizer_hot_water_service_rescue
+            - if:
+                - condition: state
+                  entity_id: switch.hot_water
+                  state: "off"
+              then:
+                - action: switch.turn_on
+                  target:
+                    entity_id: switch.hot_water
+            - action: input_text.set_value
+              target:
+                entity_id: input_text.energy_optimizer_hot_water_status
+              data:
+                value: >-
+                  {{ 'heating' if physical_element_confirmed | bool else 'starting_awaiting_power' }} |
+                  solar_surplus | headroom={{ solar_headroom_kw | round(2) }}kW |
+                  required={{ (element_kw | float(3.7) + solar_margin_kw | float(0.5)) | round(2) }}kW
+
+      default:
+        - action: input_boolean.turn_off
+          target:
+            entity_id: input_boolean.energy_optimizer_hot_water_service_rescue
+        - choose:
+            # A relay that reaches this default no longer has safe solar cover;
+            # source hard stops normally catch it immediately above.
+            - conditions:
+                - condition: state
+                  entity_id: switch.hot_water
+                  state: "on"
+                - condition: template
+                  value_template: "{{ on_dwell_complete | bool }}"
+              sequence:
+                - action: switch.turn_off
+                  target:
+                    entity_id: switch.hot_water
+                - action: input_text.set_value
+                  target:
+                    entity_id: input_text.energy_optimizer_hot_water_status
+                  data:
+                    value: >-
+                      off | economic_plan={{ control_mode }} | plan={{ committed_plan_id }}
+            - conditions:
+                - condition: state
+                  entity_id: switch.hot_water
+                  state: "on"
+              sequence:
+                - action: input_text.set_value
+                  target:
+                    entity_id: input_text.energy_optimizer_hot_water_status
+                  data:
+                    value: holding | minimum_on_dwell | {{ relay_on_seconds | int(0) }}s/900s
+          default:
+            - action: input_text.set_value
+              target:
+                entity_id: input_text.energy_optimizer_hot_water_status
+              data:
+                value: >-
+                  waiting | mode={{ control_mode }} | solar_headroom={{ solar_headroom_kw | round(2) }}kW |
+                  sustained_start={{ solar_start_sustained }}
   mode: restart
+  max_exceeded: silent
+
+- id: energy_optimizer_hot_water_daily_reset
+  alias: Energy Optimizer - Hot Water Daily Service Reset
+  description: Clears the thermostat-satisfied service latch at local midnight.
+  triggers:
+    - trigger: time
+      at: "00:00:00"
+  actions:
+    - action: input_boolean.turn_off
+      target:
+        entity_id: input_boolean.energy_optimizer_hot_water_thermostat_satisfied
+    - action: input_boolean.turn_off
+      target:
+        entity_id: input_boolean.energy_optimizer_notify_hot_water_complete_sent
+  mode: single
+
+# Retired live ID retained as an inert, disabled update target so deployment can
+# replace the former competing latest-start automation without deleting its
+# rollback record. It contains no device action and remains harmless if enabled.
+- id: energy_optimizer_hot_water_deadline_fallback
+  alias: Energy Optimizer - RETIRED Hot Water Deadline Fallback
+  description: Retired; source-aware service rescue is part of the single hot-water governor.
+  initial_state: false
+  triggers:
+    - trigger: event
+      event_type: energy_optimizer_retired_hot_water_fallback
+  conditions:
+    - condition: template
+      value_template: "{{ false }}"
+  actions: []
+  mode: single

@@ -408,6 +408,25 @@ class HomeIntelligenceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(energy["battery"]["direction"], "discharging")
         self.assertEqual(energy["battery_soc"]["value"], 74.0)
 
+    def test_energy_snapshot_uses_standalone_manager_when_configured(self) -> None:
+        class Manager:
+            configured = True
+
+            @staticmethod
+            def energy_snapshot() -> dict:
+                return {
+                    "status": "ok",
+                    "source": "standalone_energy_manager",
+                    "solar": {"value": 12_400.0, "unit": "W"},
+                }
+
+        self.home.energy_manager = Manager()  # type: ignore[assignment]
+
+        energy = self.home.energy_snapshot()
+
+        self.assertEqual(energy["source"], "standalone_energy_manager")
+        self.assertEqual(energy["solar"]["value"], 12_400.0)
+
     def test_home_intelligence_tool_contract_is_read_only(self) -> None:
         self.assertEqual(
             HOME_READ_TOOL_NAMES,

@@ -2,15 +2,19 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 import shutil
 import socket
+import ssl
 import stat
+import subprocess
 import tempfile
 import time
 from datetime import UTC, datetime
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.cookies import SimpleCookie
 from pathlib import Path
 from threading import Lock
 from typing import Any
@@ -29,6 +33,8 @@ MAX_ARTWORK_BYTES = 5_000_000
 DEFAULT_ARTWORK_CACHE_MAX_BYTES = 64_000_000
 DEFAULT_ARTWORK_CACHE_MAX_ITEMS = 256
 DEFAULT_ARTWORK_CACHE_MAX_AGE_SECONDS = 30 * 24 * 60 * 60
+MAX_OFFICE_AUDIO_RESPONSE_BYTES = 64_000
+REBOOT_DELAY_SECONDS = 2
 _ARTWORK_CACHE_LOCK = Lock()
 
 
@@ -221,6 +227,123 @@ def _core_device_request(
         return HTTPStatus.BAD_GATEWAY, {"detail": str(error)[:240]}
 
 
+def _office_audio_url(base_url: str, path: str) -> str:
+    parsed = urlsplit(base_url)
+    if (
+        parsed.scheme != "https"
+        or not parsed.hostname
+        or parsed.username
+        or parsed.password
+        or parsed.query
+        or parsed.fragment
+        or path not in {"/api/v1/status", "/api/v1/output", "/api/v1/volume", "/api/v1/system/reboot"}
+    ):
+        raise ValueError("Office Audio is not configured")
+    return f"{base_url.rstrip('/')}{path}"
+
+
+def _office_audio_request(
+    base_url: str,
+    ca_file: str,
+    *,
+    output: str | None = None,
+    volume_db: float | None = None,
+    reboot: bool = False,
+) -> tuple[int, dict[str, Any]]:
+    """Proxy only bounded Office Audio output, volume and reboot controls."""
+    if not ca_file or not Path(ca_file).is_file():
+        return HTTPStatus.SERVICE_UNAVAILABLE, {"detail": "Office Audio trust is not configured"}
+    try:
+        context = ssl.create_default_context(cafile=ca_file)
+        status_request = Request(
+            _office_audio_url(base_url, "/api/v1/status"),
+            headers={"Accept": "application/json", "User-Agent": "pilot-display-node"},
+        )
+        with urlopen(status_request, timeout=4, context=context) as response:
+            status_body = response.read(MAX_OFFICE_AUDIO_RESPONSE_BYTES + 1)
+            csrf_header = response.headers.get("Set-Cookie", "")
+        if len(status_body) > MAX_OFFICE_AUDIO_RESPONSE_BYTES:
+            raise ValueError("Office Audio response is too large")
+        status_payload = json.loads(status_body)
+        if not isinstance(status_payload, dict):
+            raise TypeError("Office Audio response is not an object")
+        if output is None and volume_db is None and not reboot:
+            return HTTPStatus.OK, status_payload
+        if sum((output is not None, volume_db is not None, bool(reboot))) != 1:
+            return HTTPStatus.BAD_REQUEST, {"detail": "only one Office Audio control may be changed"}
+        if output is not None and output not in {"fiio-k3", "kef-coda-w"}:
+            return HTTPStatus.BAD_REQUEST, {"detail": "output must be fiio-k3 or kef-coda-w"}
+        if volume_db is not None and (not math.isfinite(volume_db) or not -90 <= volume_db <= 0):
+            return HTTPStatus.BAD_REQUEST, {"detail": "volume must be between -90 and 0 dB"}
+        cookies = SimpleCookie()
+        cookies.load(csrf_header)
+        csrf = cookies.get("office_csrf")
+        if csrf is None:
+            raise ValueError("Office Audio did not provide CSRF state")
+        if reboot:
+            mutation_path = "/api/v1/system/reboot"
+            mutation_payload: dict[str, Any] = {}
+            method = "POST"
+        else:
+            mutation_path = "/api/v1/output" if output is not None else "/api/v1/volume"
+            mutation_payload = (
+                {"output": output}
+                if output is not None
+                else {
+                    "output": str(status_payload.get("mixer", {}).get("selected_output", "")),
+                    "volume_db": round(float(volume_db), 2),
+                }
+            )
+            if mutation_payload["output"] not in {"fiio-k3", "kef-coda-w"}:
+                return HTTPStatus.BAD_GATEWAY, {"detail": "Office Audio did not report a valid output"}
+            method = "PUT"
+        payload = json.dumps(mutation_payload, separators=(",", ":")).encode()
+        output_request = Request(
+            _office_audio_url(base_url, mutation_path),
+            method=method,
+            data=payload,
+            headers={
+                "Accept": "application/json",
+                "Content-Type": "application/json",
+                "Cookie": f"office_csrf={csrf.value}",
+                "X-CSRF-Token": csrf.value,
+                "User-Agent": "pilot-display-node",
+            },
+        )
+        with urlopen(output_request, timeout=6, context=context) as response:
+            body = response.read(MAX_OFFICE_AUDIO_RESPONSE_BYTES + 1)
+        if len(body) > MAX_OFFICE_AUDIO_RESPONSE_BYTES:
+            raise ValueError("Office Audio response is too large")
+        result = json.loads(body)
+        if not isinstance(result, dict):
+            raise TypeError("Office Audio response is not an object")
+        if reboot:
+            if result.get("ok") is not True or result.get("status") != "rebooting":
+                raise ValueError("Office Audio did not confirm the reboot")
+            return HTTPStatus.ACCEPTED, result
+        if output is not None and result.get("ok") is not True:
+            raise ValueError("Office Audio did not confirm the output change")
+        with urlopen(status_request, timeout=4, context=context) as response:
+            body = response.read(MAX_OFFICE_AUDIO_RESPONSE_BYTES + 1)
+        if len(body) > MAX_OFFICE_AUDIO_RESPONSE_BYTES:
+            raise ValueError("Office Audio response is too large")
+        result = json.loads(body)
+        if not isinstance(result, dict):
+            raise TypeError("Office Audio response is not an object")
+        return HTTPStatus.OK, result
+    except HTTPError as error:
+        try:
+            body = error.read(MAX_OFFICE_AUDIO_RESPONSE_BYTES + 1)
+            result = json.loads(body)
+            if isinstance(result, dict):
+                return error.code, result
+        except (OSError, ValueError, TypeError):
+            pass
+        return error.code, {"detail": f"Office Audio returned HTTP {error.code}"}
+    except (URLError, TimeoutError, OSError, ValueError, TypeError, ssl.SSLError) as error:
+        return HTTPStatus.BAD_GATEWAY, {"detail": f"Office Audio unavailable: {str(error)[:180]}"}
+
+
 def _artwork_url_allowed(remote_url: str, allowed_hosts: tuple[str, ...]) -> bool:
     parsed = urlsplit(remote_url)
     host = (parsed.hostname or "").lower().rstrip(".")
@@ -376,7 +499,7 @@ def _performance_profile(
 ) -> str:
     """Resolve the browser animation budget without trusting client hints."""
     normalized = requested.strip().lower()
-    if normalized in {"balanced", "low-power"}:
+    if normalized in {"balanced", "smooth", "low-power"}:
         return normalized
     if hardware_model is None:
         hardware_model = _bounded_text(Path("/proc/device-tree/model"), 256)
@@ -509,7 +632,14 @@ class DisplayHandler(BaseHTTPRequestHandler):
                 self.server.core_url,
                 self.server.device_id,
                 self.server.device_token_file,
-                "homelab?force=true",
+                "homelab",
+            )
+            self._send_json(payload, status)
+            return
+        if path == "/api/office-audio":
+            status, payload = _office_audio_request(  # type: ignore[attr-defined]
+                self.server.office_audio_url,
+                self.server.office_audio_ca_file,
             )
             self._send_json(payload, status)
             return
@@ -581,6 +711,7 @@ class DisplayHandler(BaseHTTPRequestHandler):
             "/assets/house-energy.png": ("assets/house-energy.png", "image/png"),
             "/assets/house-no-car.png": ("assets/house-no-car.png", "image/png"),
             "/assets/server-rack.png": ("assets/server-rack.png", "image/png"),
+            "/assets/hot-water.png": ("assets/hot-water.png", "image/png"),
         }
         asset = assets.get(path)
         if asset is None:
@@ -596,6 +727,28 @@ class DisplayHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         path = self.path.partition("?")[0]
+        if path == "/api/office-audio/reboot":
+            status, payload = _office_audio_request(  # type: ignore[attr-defined]
+                self.server.office_audio_url,
+                self.server.office_audio_ca_file,
+                reboot=True,
+            )
+            self._send_json(payload, status)
+            return
+        if path == "/api/reboot":
+            subprocess.Popen(
+                [
+                    "/bin/sh",
+                    "-c",
+                    f"sleep {REBOOT_DELAY_SECONDS}; exec /usr/bin/systemctl reboot",
+                ],
+                start_new_session=True,
+                close_fds=True,
+            )
+            self._send_json(
+                {"ok": True, "status": "rebooting", "delay_seconds": REBOOT_DELAY_SECONDS}
+            )
+            return
         endpoints = {
             "/api/media": "media",
             "/api/media/search": "media/search",
@@ -642,6 +795,43 @@ class DisplayHandler(BaseHTTPRequestHandler):
         )
         self._send_json(result, status)
 
+    def do_PUT(self) -> None:
+        path = self.path.partition("?")[0]
+        if path not in {"/api/office-audio/output", "/api/office-audio/volume"}:
+            self.send_error(HTTPStatus.NOT_FOUND)
+            return
+        try:
+            content_length = int(self.headers.get("Content-Length", "0"))
+            payload = json.loads(self.rfile.read(content_length))
+        except (ValueError, UnicodeError, json.JSONDecodeError):
+            self._send_json({"detail": "invalid JSON"}, HTTPStatus.BAD_REQUEST)
+            return
+        if content_length > 256 or not isinstance(payload, dict):
+            self._send_json({"detail": "invalid Office Audio request"}, HTTPStatus.BAD_REQUEST)
+            return
+        if path == "/api/office-audio/output":
+            if set(payload) != {"output"} or not isinstance(payload.get("output"), str):
+                self._send_json({"detail": "output must be a string"}, HTTPStatus.BAD_REQUEST)
+                return
+            output = payload["output"]
+            volume_db = None
+        else:
+            if set(payload) != {"volume_db"} or not isinstance(payload.get("volume_db"), (int, float)):
+                self._send_json({"detail": "volume must be a number"}, HTTPStatus.BAD_REQUEST)
+                return
+            output = None
+            volume_db = float(payload["volume_db"])
+        if isinstance(volume_db, float) and not math.isfinite(volume_db):
+            self._send_json({"detail": "volume must be finite"}, HTTPStatus.BAD_REQUEST)
+            return
+        status, result = _office_audio_request(  # type: ignore[attr-defined]
+            self.server.office_audio_url,
+            self.server.office_audio_ca_file,
+            output=output,
+            volume_db=volume_db,
+        )
+        self._send_json(result, status)
+
     def log_message(self, format: str, *args: Any) -> None:
         return
 
@@ -663,6 +853,8 @@ class DisplayServer(ThreadingHTTPServer):
         artwork_cache_max_age_seconds: int = DEFAULT_ARTWORK_CACHE_MAX_AGE_SECONDS,
         video_enabled: bool = False,
         performance_profile: str = "balanced",
+        office_audio_url: str = "",
+        office_audio_ca_file: str = "",
     ) -> None:
         super().__init__(address, DisplayHandler)
         self.core_url = core_url
@@ -676,6 +868,8 @@ class DisplayServer(ThreadingHTTPServer):
         self.artwork_cache_max_age_seconds = artwork_cache_max_age_seconds
         self.video_enabled = video_enabled
         self.performance_profile = _performance_profile(performance_profile)
+        self.office_audio_url = office_audio_url
+        self.office_audio_ca_file = office_audio_ca_file
 
 
 def main() -> None:
@@ -716,6 +910,8 @@ def main() -> None:
         "PILOT_ARTWORK_CACHE_MAX_AGE_SECONDS",
         DEFAULT_ARTWORK_CACHE_MAX_AGE_SECONDS,
     )
+    office_audio_url = os.environ.get("PILOT_OFFICE_AUDIO_URL", "")
+    office_audio_ca_file = os.environ.get("PILOT_OFFICE_AUDIO_CA_FILE", "")
     server = DisplayServer(
         (host, port),
         core_url,
@@ -729,6 +925,8 @@ def main() -> None:
         artwork_cache_max_age_seconds,
         video_enabled,
         performance_profile,
+        office_audio_url,
+        office_audio_ca_file,
     )
     try:
         server.serve_forever()

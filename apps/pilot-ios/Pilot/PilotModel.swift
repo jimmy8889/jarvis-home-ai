@@ -4,6 +4,33 @@ import AVFoundation
 import PilotClientKit
 
 @MainActor
+protocol PendingMeetingCoreServing: Sendable {
+    func uploadMeetingRecording(
+        meetingID: String,
+        recordingURL: URL,
+        uploadEndpoint: String?
+    ) async throws
+    func meeting(_ meetingID: String) async throws -> PilotMeetingDetail
+    func processMeeting(_ meetingID: String) async throws -> PilotMeeting
+}
+
+extension PilotAPI: PendingMeetingCoreServing {}
+
+private enum PendingMeetingSubmissionError: LocalizedError {
+    case localCleanupFailed
+    case processingNotAccepted(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .localCleanupFailed:
+            return "Pilot Core accepted the meeting, but the retained local recording could not be removed. Retry to finish cleanup."
+        case let .processingNotAccepted(status):
+            return "Pilot Core did not accept meeting processing (status: \(status))."
+        }
+    }
+}
+
+@MainActor
 @Observable
 final class PilotModel {
     static let productionCoreURL = "https://pilot.jameshomeautomation.work"
@@ -77,6 +104,12 @@ final class PilotModel {
     @ObservationIgnored private var voiceRequestTask: Task<Void, Never>?
     @ObservationIgnored private var retryVoicePCM: Data?
     @ObservationIgnored private var resumePhoneMusicAfterVoice = false
+    @ObservationIgnored private var watchMeetingDelivery: WatchMeetingDeliveryPipeline?
+    @ObservationIgnored private var submittingMeetingIDs = Set<String>()
+    @ObservationIgnored private var meetingSubmissionServiceProvider:
+        (() throws -> any PendingMeetingCoreServing)?
+    @ObservationIgnored private var meetingRecordingFileRemover:
+        (URL) throws -> Void
 
     private enum StorageKey {
         static let mediaCache = "pilot.cache.media.v1"
@@ -90,7 +123,16 @@ final class PilotModel {
         static let eventCursor = "pilot.events.cursor.v1"
     }
 
-    init(loadStoredSettings: Bool = true) {
+    init(
+        loadStoredSettings: Bool = true,
+        meetingSubmissionServiceProvider:
+            (() throws -> any PendingMeetingCoreServing)? = nil,
+        meetingRecordingFileRemover: @escaping (URL) throws -> Void = {
+            try FileManager.default.removeItem(at: $0)
+        }
+    ) {
+        self.meetingSubmissionServiceProvider = meetingSubmissionServiceProvider
+        self.meetingRecordingFileRemover = meetingRecordingFileRemover
         if loadStoredSettings {
             let storedCoreURL = UserDefaults.standard.string(forKey: "pilot.coreURL")
             let resolvedCoreURL = Self.migratedCoreURL(
@@ -142,6 +184,9 @@ final class PilotModel {
                 VoiceAudioError.noSpeechDetected,
                 canRetry: false
             )
+        }
+        if loadStoredSettings {
+            configureWatchMeetingDelivery()
         }
     }
 
@@ -296,6 +341,40 @@ final class PilotModel {
         return PilotAPI(coreURL: url, deviceID: activeDeviceID, token: activeToken)
     }
 
+    private func configureWatchMeetingDelivery() {
+        let delivery = WatchMeetingDeliveryPipeline(
+            configurationProvider: { [weak self] in
+                guard let self,
+                      self.hasActiveConfiguration,
+                      let url = URL(string: self.activeCoreURL)
+                else { throw PilotAPIError.notConfigured }
+                return WatchMeetingDeliveryConfiguration(
+                    coreURL: url,
+                    deviceID: self.activeDeviceID,
+                    token: self.activeToken,
+                    advertisedUploadEndpoint:
+                        self.clientManifest?.endpoints["meeting_recording_upload"]
+                )
+            },
+            coreProvider: { [weak self] in
+                guard let self else { throw PilotAPIError.notConfigured }
+                return try self.api()
+            }
+        )
+        delivery.onCoreAccepted = { [weak self] _ in
+            guard let self else { return }
+            self.meetingError = nil
+            Task { @MainActor [weak self] in
+                await self?.refreshMeetings(silent: true)
+            }
+        }
+        delivery.onFailure = { [weak self] message in
+            self?.meetingError = message
+        }
+        watchMeetingDelivery = delivery
+        delivery.start()
+    }
+
     @discardableResult
     func connect() async -> Bool {
         let candidateURL = Self.normalizedCoreURL(coreURL)
@@ -352,6 +431,7 @@ final class PilotModel {
             await refreshHomeLab(silent: true)
             await refreshMeetings(silent: true)
             await refreshTTSVoices()
+            await watchMeetingDelivery?.resumePending()
             return true
         } catch {
             connectionState = .offline(Self.friendlyMessage(for: error))
@@ -388,6 +468,7 @@ final class PilotModel {
             await refreshHomeLab(silent: true)
             await refreshMeetings(silent: true)
             await refreshTTSVoices()
+            await watchMeetingDelivery?.resumePending()
             return true
         } catch {
             let message = Self.friendlyMessage(for: error)
@@ -461,7 +542,27 @@ final class PilotModel {
     }
 
     func runUpdateLoop() async {
+        // Meeting audio is user data waiting for durable delivery. Recover it
+        // before the broader dashboard refresh chain, which can be delayed by
+        // an unrelated Home, Energy, HomeLab, or TTS integration.
+        await resumePendingMeetingSubmissions()
         _ = await refresh()
+        // Core's energy-manager cache changes every two seconds, but those
+        // samples intentionally do not flood the device event stream. Keep
+        // the live monitoring contracts moving independently of long-poll
+        // events so a connected phone cannot display an indefinitely old
+        // cached power snapshot.
+        let liveMonitoringTask = Task { @MainActor [weak self] in
+            await Self.runPeriodicLiveMonitoring(
+                shouldContinue: { self != nil },
+                refresh: {
+                    guard let self, self.hasActiveConfiguration else { return }
+                    await self.refreshEnergy(silent: true)
+                    await self.refreshDashboard(silent: true)
+                }
+            )
+        }
+        defer { liveMonitoringTask.cancel() }
         while !Task.isCancelled {
             guard hasActiveConfiguration else {
                 try? await Task.sleep(for: .seconds(2))
@@ -498,6 +599,25 @@ final class PilotModel {
                 _ = await refresh(silent: true)
                 try? await Task.sleep(for: .seconds(15))
             }
+        }
+    }
+
+    static func runPeriodicLiveMonitoring(
+        interval: Duration = .seconds(5),
+        shouldContinue: @escaping @MainActor () -> Bool,
+        refresh: @escaping @MainActor () async -> Void,
+        sleep: @escaping @MainActor (Duration) async throws -> Void = {
+            try await Task.sleep(for: $0)
+        }
+    ) async {
+        while !Task.isCancelled, shouldContinue() {
+            do {
+                try await sleep(interval)
+            } catch {
+                return
+            }
+            guard !Task.isCancelled, shouldContinue() else { return }
+            await refresh()
         }
     }
 
@@ -1121,11 +1241,22 @@ final class PilotModel {
         await submitPendingRecording(meetingID)
     }
 
+    func resumePendingMeetingSubmissions() async {
+        // Relaunch is also the recovery path for a retained recording whose
+        // upload failed before Core accepted any bytes. Retry every durable
+        // entry once; submitPendingRecording still deduplicates concurrent
+        // work and preserves the file on another failure.
+        let meetingIDs = pendingMeetingRecordings.map(\.meetingID)
+        for meetingID in meetingIDs {
+            await submitPendingRecording(meetingID)
+        }
+    }
+
     private func submitPendingRecording(_ meetingID: String) async {
         guard
-            let initialIndex = pendingMeetingRecordings.firstIndex(where: { $0.meetingID == meetingID })
+            let pending = pendingMeetingRecordings.first(where: { $0.meetingID == meetingID })
         else { return }
-        let recordingURL = pendingMeetingRecordings[initialIndex].recordingURL
+        let recordingURL = pending.recordingURL
         guard FileManager.default.fileExists(atPath: recordingURL.path) else {
             updatePendingRecording(
                 meetingID,
@@ -1134,11 +1265,16 @@ final class PilotModel {
             )
             return
         }
+        guard submittingMeetingIDs.insert(meetingID).inserted else { return }
         isSubmittingMeeting = true
-        defer { isSubmittingMeeting = false }
+        defer {
+            submittingMeetingIDs.remove(meetingID)
+            isSubmittingMeeting = !submittingMeetingIDs.isEmpty
+        }
         do {
-            let service = try api()
-            if !pendingMeetingRecordings[initialIndex].uploadComplete {
+            let service = try meetingSubmissionService()
+            var uploadedDuringThisSubmission = false
+            if !pending.uploadComplete {
                 updatePendingRecording(meetingID, state: .uploading, failure: nil)
                 try await service.uploadMeetingRecording(
                     meetingID: meetingID,
@@ -1146,22 +1282,94 @@ final class PilotModel {
                     uploadEndpoint: clientManifest?.endpoints["meeting_recording_upload"]
                 )
                 markPendingUploadComplete(meetingID)
+                uploadedDuringThisSubmission = true
             }
+
+            // A retry may follow a process call whose successful response was
+            // lost. Reconcile Core before issuing another processing pass.
+            if !uploadedDuringThisSubmission {
+                let current = try await service.meeting(meetingID)
+                if Self.coreHasAcceptedMeetingProcessing(current.status) {
+                    try await completePendingMeetingSubmission(
+                        meetingID: meetingID,
+                        recordingURL: recordingURL
+                    )
+                    return
+                }
+            }
+
             updatePendingRecording(meetingID, state: .processing, failure: nil)
-            _ = try await service.processMeeting(meetingID)
-            // The local source is removed only after Core has both accepted the
-            // upload and queued processing. Every failure path above retains it.
-            try? FileManager.default.removeItem(at: recordingURL)
-            pendingMeetingRecordings.removeAll { $0.meetingID == meetingID }
-            persistPendingRecordings()
-            await refreshMeetings(silent: true)
-            meetingError = nil
+            do {
+                let processed = try await service.processMeeting(meetingID)
+                guard Self.coreHasAcceptedMeetingProcessing(processed.status) else {
+                    throw PendingMeetingSubmissionError.processingNotAccepted(
+                        processed.status
+                    )
+                }
+            } catch {
+                // The process request may have committed while its response was
+                // lost. Delete the retained source only after Core reports a
+                // durable post-recorded status.
+                if let current = try? await service.meeting(meetingID),
+                   Self.coreHasAcceptedMeetingProcessing(current.status) {
+                    try await completePendingMeetingSubmission(
+                        meetingID: meetingID,
+                        recordingURL: recordingURL
+                    )
+                    return
+                }
+                throw error
+            }
+            try await completePendingMeetingSubmission(
+                meetingID: meetingID,
+                recordingURL: recordingURL
+            )
         } catch {
             let message = Self.friendlyMessage(for: error)
             updatePendingRecording(meetingID, state: .failed, failure: message)
             meetingError = "Recording retained on this device. \(message)"
             await refreshMeetings(silent: true)
         }
+    }
+
+    private func meetingSubmissionService() throws -> any PendingMeetingCoreServing {
+        if let meetingSubmissionServiceProvider {
+            return try meetingSubmissionServiceProvider()
+        }
+        return try api()
+    }
+
+    private func completePendingMeetingSubmission(
+        meetingID: String,
+        recordingURL: URL
+    ) async throws {
+        guard pendingMeetingRecordings.contains(where: {
+            $0.meetingID == meetingID
+        }) else { return }
+        // Core now durably owns the recording and its processing pass. Remove
+        // the ledger only after the local source is confirmed gone. If cleanup
+        // fails, the upload-complete entry remains durable so a retry or the
+        // next launch can finish without uploading or processing twice.
+        if FileManager.default.fileExists(atPath: recordingURL.path) {
+            do {
+                try meetingRecordingFileRemover(recordingURL)
+            } catch {
+                throw PendingMeetingSubmissionError.localCleanupFailed
+            }
+        }
+        guard !FileManager.default.fileExists(atPath: recordingURL.path) else {
+            throw PendingMeetingSubmissionError.localCleanupFailed
+        }
+        pendingMeetingRecordings.removeAll { $0.meetingID == meetingID }
+        persistPendingRecordings()
+        await refreshMeetings(silent: true)
+        meetingError = nil
+    }
+
+    private static func coreHasAcceptedMeetingProcessing(_ status: String) -> Bool {
+        ["processing", "transcribed", "ready", "failed"].contains(
+            status.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        )
     }
 
     private func apply(_ envelope: DeviceMediaEnvelope) {

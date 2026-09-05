@@ -22,8 +22,12 @@ room_endpoint_lva_wake_model: okay_nabu
 room_endpoint_lva_audio_input_device: ""
 room_endpoint_lva_audio_output_device: ""
 room_endpoint_lva_network_interface: "{{ ansible_facts['default_ipv4']['interface'] }}"
-room_endpoint_lva_host: "{{ ansible_facts['default_ipv4']['address'] }}"
+# Let Linux Voice Assistant resolve the current address from the configured
+# interface at each start. Persisting a DHCP address in the unit makes it fail
+# to bind after the endpoint moves networks or receives a new lease.
+room_endpoint_lva_host: ""
 room_endpoint_lva_port: 6053
+room_endpoint_lva_device_retry_seconds: 5
 room_endpoint_airplay_install: false
 room_endpoint_airplay_enabled: false
 room_endpoint_airplay_name: "Pilot {{ room_endpoint_room_id | title }}"

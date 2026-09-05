@@ -8,8 +8,10 @@
   already passed before this client change.
 - Tesla climate control uses the HVAC modes actually advertised by
   `climate.jarvis_hvac_climate_system`: `heat_cool` to start and `off` to stop.
-- Tesla navigation remains restricted to `SEND_GPS_TO_VEHICLE`; production
-  requires the file-backed `tesla_vehicle_id` secret.
+- Tesla navigation uses Home Assistant's native Tesla Fleet integration through
+  the bounded `pilot_vehicle.send_navigation` bridge. Production requires the
+  Tesla public key to be externally reachable and Jarvis virtual-key
+  enrollment; no Tesla vehicle ID or credential is mounted into Core.
 - Bedroom retains its display/assistant response endpoint but no longer
   publishes a nonexistent music player.
 - Pilot Display `0.8.0` adds an authenticated Home Lab page with Proxmox node,

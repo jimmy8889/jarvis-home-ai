@@ -471,4 +471,18 @@ enum Formatters {
         guard let minutes else { return "—" }
         return Duration.seconds(minutes * 60).formatted(.units(allowed: [.hours, .minutes]))
     }
+
+    static func timeRemaining(hours: Double?) -> String {
+        guard let hours, hours.isFinite, hours >= 0 else { return "—" }
+        if hours < (1.0 / 120.0) { return "Charged" }
+        let minutes = max(1, Int((hours * 60).rounded()))
+        return duration(minutes: minutes)
+    }
+
+    static func arrivalRemaining(hours: Double?) -> String {
+        guard let hours, hours.isFinite, hours >= 0 else { return "—" }
+        if hours < (1.0 / 120.0) { return "Arrived" }
+        let minutes = max(1, Int((hours * 60).rounded()))
+        return duration(minutes: minutes)
+    }
 }

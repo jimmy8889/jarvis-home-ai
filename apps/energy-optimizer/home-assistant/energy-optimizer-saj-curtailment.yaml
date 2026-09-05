@@ -1,61 +1,18 @@
+# Node-RED is the sole owner of SAJ anti-reflux/export-limit registers. Keep the
+# former Home Assistant automation ID as a disabled, inert update target so a
+# deployment can retire it without deleting rollback history. This file must
+# never contain a numeric service call or other inverter/device write.
 - id: energy_optimizer_saj_curtailment_governor
-  alias: Energy Optimizer - SAJ Negative-FIT Zero Export
+  alias: Energy Optimizer - RETIRED HA SAJ Curtailment Writer
   description: >-
-    During a negative-FIT curtail plan, enables the SAJ total-power anti-reflux
-    mode and writes a 0 W export limit. The inverter then follows live site
-    load itself, preserving self-consumption without exporting. It restores
-    normal export immediately when the plan permits export.
+    Retired. Guarded Node-RED schema-v2 actuation exclusively owns negative-FIT
+    anti-reflux and raw export-limit writes.
+  initial_state: false
   triggers:
-    - trigger: state
-      entity_id: sensor.energy_optimizer_pv_export
-    - trigger: time_pattern
-      seconds: /15
-    - trigger: homeassistant
-      event: start
-  conditions: []
-  actions:
-    - variables:
-        gates_ok: >-
-          {{ is_state('input_select.energy_optimizer_mode', 'Active') and
-             is_state('input_boolean.energy_optimizer_rollout_approved', 'on') and
-             is_state('input_boolean.energy_optimizer_manual_override', 'off') }}
-        curtail_required: >-
-          {{ is_state('sensor.energy_optimizer_pv_export', 'curtail') }}
-    - choose:
-        - conditions:
-            - condition: template
-              value_template: "{{ gates_ok | bool and curtail_required | bool }}"
-          sequence:
-            - action: number.set_value
-              target:
-                entity_id: number.saj_grid_max_discharge_power_input
-              data:
-                value: 1100
-            - action: number.set_value
-              target:
-                entity_id: number.saj_anti_reflux_mode_input
-              data:
-                value: 1
-            - action: number.set_value
-              target:
-                entity_id: number.saj_export_limit_input
-              data:
-                value: 0
-      default:
-        - action: number.set_value
-          target:
-            entity_id: number.saj_anti_reflux_mode_input
-          data:
-            value: 0
-        - action: number.set_value
-          target:
-            entity_id: number.saj_export_limit_input
-          data:
-            value: 1100
-        - action: number.set_value
-          target:
-            entity_id: number.saj_grid_max_discharge_power_input
-          data:
-            value: 1100
-  mode: restart
-  max_exceeded: silent
+    - trigger: event
+      event_type: energy_optimizer_retired_ha_curtailment_writer
+  conditions:
+    - condition: template
+      value_template: "{{ false }}"
+  actions: []
+  mode: single

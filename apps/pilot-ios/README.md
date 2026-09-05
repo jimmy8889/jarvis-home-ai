@@ -35,6 +35,11 @@ The polished v1 application provides:
 - durable meeting recording handoff: files live in Application Support and are
   only removed after Core accepts both upload and processing, with persisted
   retry state for every failure path;
+- an embedded watchOS 10 meeting companion with explicit Start/Stop recording,
+  a durable Watch outbox, background file handoff to the paired iPhone, and no
+  Pilot Core credential on the Watch; reusable iPhone authentication stays on
+  the paired Core origin, while any off-origin upload uses a short-lived scoped
+  ticket;
 - Dynamic Type-compatible layouts, VoiceOver labels, large touch targets,
   haptics, empty states, skeleton loading, mocks, and iPhone/iPad previews.
 
@@ -42,8 +47,8 @@ All media, assistant, room, and future home-state requests continue to flow
 through device-scoped Pilot Core APIs. The app does not call Home Assistant or
 Music Assistant directly.
 
-The deployment target is iOS 17 so the same client can run on the currently
-available iPad as well as newer iPhone and iPad devices.
+The phone/tablet deployment target is iOS 17. The embedded companion targets
+watchOS 10 and includes both `arm64_32` and `arm64` device architectures.
 
 Generate the Xcode project reproducibly:
 
@@ -83,4 +88,6 @@ The client consumes the device-scoped `pilot.client.v1` product contract:
 The app retains bounded compatibility fallbacks while updated Core is deployed.
 Physical iPhone/iPad acceptance is still required for camera pairing, background
 recording interruptions, retained-upload retry, Dynamic Type, VoiceOver, and
-LAN reconnect behavior.
+LAN reconnect behavior. Apple Watch capture additionally requires the physical
+screen-off, interruption, phone-unavailable, resend, battery, and end-to-end
+Core acceptance listed in `docs/PILOT_WATCH_MEETINGS.md`.

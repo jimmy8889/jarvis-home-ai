@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+# Root-only deferred job: wait without disrupting vLLM, then benchmark 35B.
+set -euo pipefail
+
+LAB_HOME=/home/jameshazell/pilot-model-lab
+SCRIPTS="$LAB_HOME/scripts"
+export MODEL_LAB_ROOT="$LAB_HOME"
+# shellcheck source=profiles.sh
+source "$SCRIPTS/profiles.sh"
+
+ready() {
+  for profile in agent-iq4-xs agent-iq4-nl; do
+    model_lab_profile "$profile"
+    [[ -f "$MODEL_LAB_MODEL" ]] || return 1
+    [[ "$(stat --format=%s "$MODEL_LAB_MODEL")" -eq "$MODEL_LAB_EXPECTED_BYTES" ]] || return 1
+  done
+}
+
+deadline=$(( $(date +%s) + 14400 ))
+while ! ready; do
+  if [[ $(date +%s) -ge $deadline ]]; then
+    echo "Timed out waiting for complete 35B model downloads." >&2
+    exit 1
+  fi
+  sleep 60
+done
+
+systemctl stop vllm
+restore() {
+  systemctl start vllm || true
+  systemctl is-active vllm || true
+}
+trap restore EXIT INT TERM
+
+for spec in 'agent-iq4-xs normal' 'agent-iq4-xs mtp' 'agent-iq4-nl normal' 'agent-iq4-nl mtp'; do
+  set -- $spec
+  echo "=== $1 $2 $(date -Is) ==="
+  if [[ $2 == mtp ]]; then
+    runuser -u jameshazell -- env HOME=/home/jameshazell "$SCRIPTS/benchmark-profile" "$1" --mtp || status=$?
+  else
+    runuser -u jameshazell -- env HOME=/home/jameshazell "$SCRIPTS/benchmark-profile" "$1" || status=$?
+  fi
+  echo "=== $1 $2 status=${status:-0} $(date -Is) ==="
+  unset status
+done

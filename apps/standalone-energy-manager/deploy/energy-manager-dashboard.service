@@ -1,0 +1,32 @@
+[Unit]
+Description=Standalone home energy manager dashboard
+After=network-online.target energy-manager.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=energy-manager
+Group=energy-manager
+WorkingDirectory=/opt/energy-manager/current
+Environment=PYTHONPATH=/opt/energy-manager/current
+ExecStart=/opt/energy-manager/venv/bin/energy-manager-dashboard
+Restart=always
+RestartSec=3
+TimeoutStopSec=10
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,99 @@
+substitutions:
+  friendly_name: Tesla BLE
+  device_name: tesla-ble
+  device_description: Tesla BLE
+  charging_amps_max: "16"
+  board: "esp32-c3-devkitm-1"
+  variant: "ESP32C3"
+  ble_mac_address: !secret ble_mac_address
+  tesla_vin: !secret tesla_vin
+
+api:
+  actions:
+    - action: energy_manager_lease
+      variables:
+        charging: bool
+        amps: int
+        limit: int
+      then:
+        - lambda: |-
+            id(energy_manager_lease_active) = charging;
+            id(energy_manager_lease_renewed_ms) = millis();
+        - number.set:
+            id: charging_amps
+            value: !lambda return amps;
+        - number.set:
+            id: charging_limit
+            value: !lambda return limit;
+        - if:
+            condition:
+              lambda: return charging;
+            then:
+              - switch.turn_on: sw_charger
+            else:
+              - switch.turn_off: sw_charger
+
+globals:
+  - id: energy_manager_lease_active
+    type: bool
+    restore_value: no
+    initial_value: "false"
+  - id: energy_manager_lease_renewed_ms
+    type: uint32_t
+    restore_value: no
+    initial_value: "0"
+
+interval:
+  - interval: 10s
+    then:
+      - if:
+          condition:
+            lambda: |-
+              return id(energy_manager_lease_active) &&
+                     static_cast<uint32_t>(millis() - id(energy_manager_lease_renewed_ms)) >= 300000U;
+          then:
+            - switch.turn_off: sw_charger
+            - lambda: id(energy_manager_lease_active) = false;
+
+packages:
+  remote_package_files:
+    url: https://github.com/PedroKTFC/esphome-tesla-ble/
+    ref: 1a26615da942ce89ba6474177029aa1374ba1fcd
+    refresh: never
+    files:
+      - packages/base.yml
+      - packages/common.yml
+      - packages/project.yml
+      - packages/client.yml
+
+sensor:
+  - platform: ultrasonic
+    id: ultrasonic_sensor1
+    trigger_pin: GPIO4
+    echo_pin: GPIO5
+    name: "James Car Parking"
+    update_interval: 100ms
+    filters:
+      - lambda: if (isnan(x)) { return 2; } return x;
+      - median:
+          window_size: 5
+          send_every: 3
+          send_first_at: 2
+  - platform: template
+    lambda: |-
+      return (int((1.10 - id(ultrasonic_sensor1).state) / 0.01965) + 2);
+    filters:
+      - lambda: if (x > 31) return 31; else if (x < 2) return 2; else return round(x);
+    name: "Garage Preset"
+    update_interval: 100ms
+
+binary_sensor:
+  - platform: template
+    name: "James Car Home"
+    device_class: presence
+    icon: mdi:car
+    lambda: |-
+      return id(ultrasonic_sensor1).state < 0.8;
+    filters:
+      - delayed_on: 2s
+      - delayed_off: 5s

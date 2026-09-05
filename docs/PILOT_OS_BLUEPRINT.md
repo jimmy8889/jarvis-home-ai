@@ -150,8 +150,9 @@ the pinned `stt.faster_whisper` pipeline, and requires at least 80% word
 coverage. The deployed acceptance returned all five expected words with 100%
 coverage. Home Assistant reports Piper 2.3.1 and Whisper 3.5.0 running.
 
-Pilot Core now uses vLLM exclusively for contextual reasoning. The primary RTX
-3090 endpoint is `10.0.1.20:8000/v1` and serves the `primary` model for
+Pilot Core uses authenticated OpenAI-compatible local reasoning endpoints. The
+primary RTX 3090 endpoint is `10.0.1.20:8000/v1`, served by llama.cpp as the
+Qwen3.6 35B-A3B IQ4_NL MTP `primary` model for
 assistant, reasoning and meeting-analysis roles. The RTX 3080 endpoint at
 `10.0.1.43:8000/v1` is configured for verifier or vision roles when its active
 GPU mode provides them; it is not treated as available merely because it is

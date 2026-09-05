@@ -18,7 +18,7 @@ class VehicleIntegrationTests(unittest.TestCase):
     def tearDown(self) -> None:
         os.environ.pop("HOME_ASSISTANT_TOKEN", None)
 
-    def test_navigation_service_is_fixed_to_gps_command_and_bounded_coordinates(self) -> None:
+    def test_navigation_service_is_fixed_to_native_bridge_and_bounded_coordinates(self) -> None:
         captured: dict[str, object] = {}
 
         def handler(request: httpx.Request) -> httpx.Response:
@@ -32,28 +32,26 @@ class VehicleIntegrationTests(unittest.TestCase):
         )
         result = asyncio.run(
             integrations.home_assistant_vehicle_action(
-                "tesla_custom",
-                "api",
-                service_data={
-                    "command": "SEND_GPS_TO_VEHICLE",
-                    "parameters": {
-                        "path_vars": {"vehicle_id": "internal-provider-id"},
-                        "lat": -27.4,
-                        "lon": 153.0,
-                        "order": 0,
-                    },
-                },
+                "pilot_vehicle",
+                "send_navigation",
+                device_id="native-tesla-device-id",
+                service_data={"latitude": -27.4, "longitude": 153.0, "order": 0},
             )
         )
 
         self.assertTrue(result["accepted"])
-        self.assertEqual(captured["path"], "/api/services/tesla_custom/api")
+        self.assertEqual(captured["path"], "/api/services/pilot_vehicle/send_navigation")
         self.assertEqual(
-            captured["payload"]["command"],  # type: ignore[index]
-            "SEND_GPS_TO_VEHICLE",
+            captured["payload"],  # type: ignore[comparison-overlap]
+            {
+                "device_id": "native-tesla-device-id",
+                "latitude": -27.4,
+                "longitude": 153.0,
+                "order": 0,
+            },
         )
 
-    def test_generic_tesla_commands_are_rejected_before_network(self) -> None:
+    def test_navigation_requires_exact_bounded_payload(self) -> None:
         integrations = Integrations(
             IntegrationSettings(home_assistant_url="http://ha.test:8123"),
             transport=httpx.MockTransport(
@@ -64,16 +62,24 @@ class VehicleIntegrationTests(unittest.TestCase):
         with self.assertRaises(IntegrationRequestFailed):
             asyncio.run(
                 integrations.home_assistant_vehicle_action(
-                    "tesla_custom",
-                    "api",
+                    "pilot_vehicle",
+                    "send_navigation",
+                    device_id="native-tesla-device-id",
+                    service_data={"latitude": -91, "longitude": 153, "order": 0},
+                )
+            )
+
+        with self.assertRaises(IntegrationRequestFailed):
+            asyncio.run(
+                integrations.home_assistant_vehicle_action(
+                    "pilot_vehicle",
+                    "send_navigation",
+                    device_id="native-tesla-device-id",
                     service_data={
+                        "latitude": -27.4,
+                        "longitude": 153.0,
+                        "order": 0,
                         "command": "REMOTE_START",
-                        "parameters": {
-                            "path_vars": {"vehicle_id": "internal-provider-id"},
-                            "lat": -27.4,
-                            "lon": 153.0,
-                            "order": 0,
-                        },
                     },
                 )
             )
@@ -106,6 +112,25 @@ class VehicleIntegrationTests(unittest.TestCase):
                 "hvac_mode": "heat_cool",
             },
         )
+
+    def test_native_bridge_preserves_actionable_home_assistant_error(self) -> None:
+        integrations = Integrations(
+            IntegrationSettings(home_assistant_url="http://ha.test:8123"),
+            transport=httpx.MockTransport(
+                lambda _request: httpx.Response(
+                    401, json={"message": "Tesla Fleet rejected navigation; verify key enrollment"}
+                )
+            ),
+        )
+        with self.assertRaisesRegex(IntegrationRequestFailed, "verify key enrollment"):
+            asyncio.run(
+                integrations.home_assistant_vehicle_action(
+                    "pilot_vehicle",
+                    "send_navigation",
+                    device_id="native-tesla-device-id",
+                    service_data={"latitude": -27.4, "longitude": 153.0, "order": 0},
+                )
+            )
 
 
 if __name__ == "__main__":

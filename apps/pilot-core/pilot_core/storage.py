@@ -177,6 +177,7 @@ class Store:
                     title TEXT NOT NULL,
                     language TEXT NOT NULL,
                     source_device_id TEXT,
+                    source_capture_id TEXT,
                     started_at TEXT NOT NULL,
                     ended_at TEXT,
                     status TEXT NOT NULL,
@@ -196,6 +197,27 @@ class Store:
                     path TEXT NOT NULL,
                     created_at TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS meeting_recording_upload_tickets (
+                    id TEXT PRIMARY KEY,
+                    token_hash TEXT NOT NULL UNIQUE,
+                    meeting_id TEXT NOT NULL REFERENCES meetings(id)
+                        ON DELETE CASCADE,
+                    device_id TEXT NOT NULL REFERENCES devices(id)
+                        ON DELETE CASCADE,
+                    credential_revision INTEGER NOT NULL,
+                    filename TEXT NOT NULL,
+                    content_type TEXT NOT NULL,
+                    expected_sha256 TEXT NOT NULL,
+                    expected_size_bytes INTEGER NOT NULL,
+                    created_at TEXT NOT NULL,
+                    expires_at TEXT NOT NULL,
+                    claimed_at TEXT,
+                    completed_at TEXT
+                );
+                CREATE INDEX IF NOT EXISTS meeting_upload_tickets_expiry
+                    ON meeting_recording_upload_tickets(expires_at);
+                CREATE INDEX IF NOT EXISTS meeting_upload_tickets_meeting
+                    ON meeting_recording_upload_tickets(meeting_id, created_at DESC);
                 CREATE TABLE IF NOT EXISTS meeting_participants (
                     id TEXT PRIMARY KEY,
                     meeting_id TEXT NOT NULL REFERENCES meetings(id)
@@ -508,6 +530,20 @@ class Store:
             self._connection.execute(
                 """CREATE INDEX IF NOT EXISTS audio_assets_recipient_created
                    ON audio_assets(recipient_device_id, created_at DESC)"""
+            )
+            meeting_columns = {
+                row["name"]
+                for row in self._connection.execute("PRAGMA table_info(meetings)")
+            }
+            if "source_capture_id" not in meeting_columns:
+                self._connection.execute(
+                    "ALTER TABLE meetings ADD COLUMN source_capture_id TEXT"
+                )
+            self._connection.execute(
+                """CREATE UNIQUE INDEX IF NOT EXISTS meetings_source_capture
+                   ON meetings(source_device_id, source_capture_id)
+                   WHERE source_device_id IS NOT NULL
+                     AND source_capture_id IS NOT NULL"""
             )
             entity_columns = {
                 row["name"]
@@ -1463,20 +1499,35 @@ class Store:
         language: str,
         started_at: str,
         source_device_id: str | None,
+        source_capture_id: str | None = None,
     ) -> dict[str, Any]:
+        normalized_capture_id = (
+            source_capture_id.strip() if source_capture_id else None
+        ) or None
         meeting_id = secrets.token_hex(16)
         now = _now()
         with self._lock, self._connection:
+            if source_device_id and normalized_capture_id:
+                existing = self._connection.execute(
+                    """SELECT id FROM meetings
+                       WHERE source_device_id = ? AND source_capture_id = ?""",
+                    (source_device_id, normalized_capture_id),
+                ).fetchone()
+                if existing is not None:
+                    meeting = self.get_meeting(existing["id"])
+                    assert meeting is not None
+                    return meeting
             self._connection.execute(
                 """INSERT INTO meetings
-                   (id, title, language, source_device_id, started_at, status,
-                    created_at, updated_at)
-                   VALUES (?, ?, ?, ?, ?, 'created', ?, ?)""",
+                   (id, title, language, source_device_id, source_capture_id,
+                    started_at, status, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, 'created', ?, ?)""",
                 (
                     meeting_id,
                     title,
                     language,
                     source_device_id,
+                    normalized_capture_id,
                     started_at,
                     now,
                     now,
@@ -1674,6 +1725,151 @@ class Store:
             "path": row["path"],
         }
 
+    def create_meeting_recording_upload_ticket(
+        self,
+        meeting_id: str,
+        device_id: str,
+        filename: str,
+        content_type: str,
+        expected_sha256: str,
+        expected_size_bytes: int,
+        ttl_seconds: int = 86_400,
+    ) -> dict[str, Any]:
+        ticket_id = secrets.token_hex(16)
+        token = secrets.token_urlsafe(32)
+        now = datetime.now(UTC)
+        expires_at = now + timedelta(seconds=ttl_seconds)
+        with self._lock, self._connection:
+            owner = self._connection.execute(
+                """SELECT m.source_device_id,
+                          d.credential_revision, d.revoked_at,
+                          d.capabilities_json
+                   FROM meetings m
+                   LEFT JOIN devices d ON d.id = ?
+                   WHERE m.id = ?""",
+                (device_id, meeting_id),
+            ).fetchone()
+            if owner is None:
+                raise KeyError(meeting_id)
+            if (
+                owner["source_device_id"] != device_id
+                or owner["credential_revision"] is None
+                or owner["revoked_at"] is not None
+                or "meetings" not in set(json.loads(owner["capabilities_json"]))
+            ):
+                raise PermissionError("meeting upload ticket is not permitted")
+            if self._connection.execute(
+                "SELECT 1 FROM meeting_recordings WHERE meeting_id = ?",
+                (meeting_id,),
+            ).fetchone():
+                raise FileExistsError("meeting recording already exists")
+
+            # Only the newest unclaimed ticket remains usable. This prevents a
+            # lost ticket-issue response from leaving parallel upload powers.
+            self._connection.execute(
+                """UPDATE meeting_recording_upload_tickets
+                   SET claimed_at = ?
+                   WHERE meeting_id = ? AND claimed_at IS NULL""",
+                (now.isoformat(), meeting_id),
+            )
+            self._connection.execute(
+                """INSERT INTO meeting_recording_upload_tickets
+                   (id, token_hash, meeting_id, device_id,
+                    credential_revision, filename, content_type,
+                    expected_sha256, expected_size_bytes, created_at,
+                    expires_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    ticket_id,
+                    _token_hash(token),
+                    meeting_id,
+                    device_id,
+                    int(owner["credential_revision"]),
+                    filename,
+                    content_type,
+                    expected_sha256.lower(),
+                    expected_size_bytes,
+                    now.isoformat(),
+                    expires_at.isoformat(),
+                ),
+            )
+        return {
+            "id": ticket_id,
+            "upload_token": token,
+            "meeting_id": meeting_id,
+            "device_id": device_id,
+            "filename": filename,
+            "content_type": content_type,
+            "sha256": expected_sha256.lower(),
+            "size_bytes": expected_size_bytes,
+            "created_at": now.isoformat(),
+            "expires_at": expires_at.isoformat(),
+        }
+
+    def claim_meeting_recording_upload_ticket(
+        self, ticket_id: str, token: str
+    ) -> dict[str, Any]:
+        now_value = _now()
+        token_hash = _token_hash(token)
+        with self._lock, self._connection:
+            cursor = self._connection.execute(
+                """UPDATE meeting_recording_upload_tickets AS ticket
+                   SET claimed_at = ?
+                   WHERE ticket.id = ?
+                     AND ticket.token_hash = ?
+                     AND ticket.claimed_at IS NULL
+                     AND ticket.expires_at > ?
+                     AND EXISTS (
+                         SELECT 1
+                         FROM devices AS device
+                         JOIN meetings AS meeting
+                           ON meeting.id = ticket.meeting_id
+                         WHERE device.id = ticket.device_id
+                           AND device.revoked_at IS NULL
+                           AND device.credential_revision =
+                               ticket.credential_revision
+                           AND meeting.source_device_id = ticket.device_id
+                           AND EXISTS (
+                               SELECT 1
+                               FROM json_each(device.capabilities_json)
+                               WHERE json_each.value = 'meetings'
+                           )
+                     )""",
+                (now_value, ticket_id, token_hash, now_value),
+            )
+            if cursor.rowcount != 1:
+                raise PermissionError("invalid or expired meeting upload ticket")
+            ticket = self._connection.execute(
+                """SELECT * FROM meeting_recording_upload_tickets
+                   WHERE id = ?""",
+                (ticket_id,),
+            ).fetchone()
+        assert ticket is not None
+        return {
+            "id": ticket["id"],
+            "meeting_id": ticket["meeting_id"],
+            "device_id": ticket["device_id"],
+            "filename": ticket["filename"],
+            "content_type": ticket["content_type"],
+            "sha256": ticket["expected_sha256"],
+            "size_bytes": int(ticket["expected_size_bytes"]),
+            "expires_at": ticket["expires_at"],
+            "claimed_at": now_value,
+        }
+
+    def complete_meeting_recording_upload_ticket(self, ticket_id: str) -> None:
+        now = _now()
+        with self._lock, self._connection:
+            cursor = self._connection.execute(
+                """UPDATE meeting_recording_upload_tickets
+                   SET completed_at = ?
+                   WHERE id = ? AND claimed_at IS NOT NULL
+                     AND completed_at IS NULL""",
+                (now, ticket_id),
+            )
+            if cursor.rowcount != 1:
+                raise KeyError(ticket_id)
+
     def set_meeting_recording(
         self,
         meeting_id: str,
@@ -1682,6 +1878,8 @@ class Store:
         digest: str,
         size_bytes: int,
         path: str,
+        *,
+        replace_existing: bool = True,
     ) -> dict[str, Any]:
         now = _now()
         with self._lock, self._connection:
@@ -1689,28 +1887,45 @@ class Store:
                 "SELECT 1 FROM meetings WHERE id = ?", (meeting_id,)
             ).fetchone():
                 raise KeyError(meeting_id)
-            self._connection.execute(
-                """INSERT INTO meeting_recordings
-                   (meeting_id, filename, content_type, sha256, size_bytes,
-                    path, created_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?)
-                   ON CONFLICT(meeting_id) DO UPDATE SET
-                     filename=excluded.filename,
-                     content_type=excluded.content_type,
-                     sha256=excluded.sha256,
-                     size_bytes=excluded.size_bytes,
-                     path=excluded.path,
-                     created_at=excluded.created_at""",
-                (
-                    meeting_id,
-                    filename,
-                    content_type,
-                    digest,
-                    size_bytes,
-                    path,
-                    now,
-                ),
+            values = (
+                meeting_id,
+                filename,
+                content_type,
+                digest,
+                size_bytes,
+                path,
+                now,
             )
+            try:
+                if replace_existing:
+                    self._connection.execute(
+                        """INSERT INTO meeting_recordings
+                           (meeting_id, filename, content_type, sha256,
+                            size_bytes, path, created_at)
+                           VALUES (?, ?, ?, ?, ?, ?, ?)
+                           ON CONFLICT(meeting_id) DO UPDATE SET
+                             filename=excluded.filename,
+                             content_type=excluded.content_type,
+                             sha256=excluded.sha256,
+                             size_bytes=excluded.size_bytes,
+                             path=excluded.path,
+                             created_at=excluded.created_at""",
+                        values,
+                    )
+                else:
+                    self._connection.execute(
+                        """INSERT INTO meeting_recordings
+                           (meeting_id, filename, content_type, sha256,
+                            size_bytes, path, created_at)
+                           VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                        values,
+                    )
+            except sqlite3.IntegrityError as error:
+                if not replace_existing:
+                    raise FileExistsError(
+                        "meeting recording already exists"
+                    ) from error
+                raise
             self._connection.execute(
                 """UPDATE meetings SET status = 'recorded', updated_at = ?
                    WHERE id = ?""",
@@ -2531,6 +2746,7 @@ class Store:
             "title": row["title"],
             "language": row["language"],
             "source_device_id": row["source_device_id"],
+            "source_capture_id": row["source_capture_id"],
             "started_at": row["started_at"],
             "ended_at": row["ended_at"],
             "status": row["status"],

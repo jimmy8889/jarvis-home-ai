@@ -35,3 +35,18 @@ then converted from a flat magenta key to a transparent PNG. Prompt:
 The raster remains static. Each client draws independently timed LED overlays
 so activity stays crisp, accessible and power-efficient without an animated
 GIF. Clients must stop decorative motion when reduced-motion is enabled.
+
+## Hot water
+
+`hot-water.png` was generated with OpenAI image generation on 2026-08-26 as a
+transparent 1024x1536 PNG. It is the canonical equipment cutout for the live
+hot-water branch in the standalone manager, Home Assistant embeds, and Pilot
+clients. The subject is a premium isometric white-enamel residential electric
+storage cylinder with a charcoal base, compact rear pipework, a lower service
+panel, and a small amber element indicator. The server-rack artwork was used
+only as the lighting, camera-angle, material-quality, and isolation reference.
+
+The first generation incorrectly baked a checkerboard into an RGB image. It
+was rejected. The retained asset was regenerated with genuine alpha and must
+remain RGBA when copied into runtime packages. No client may substitute an
+opaque matte or network-reference this canonical file at runtime.

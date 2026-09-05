@@ -593,6 +593,8 @@ class OpenAICompatibleLLM:
         tools: list[dict[str, Any]],
         *,
         tool_choice: str | dict[str, Any] = "auto",
+        max_output_tokens: int | None = None,
+        reasoning_effort: str | None = None,
     ) -> dict[str, Any]:
         if not self.status()["configured"]:
             raise AssistantUnavailable("local LLM is not configured")
@@ -605,10 +607,15 @@ class OpenAICompatibleLLM:
                     "tools": tools,
                     "tool_choice": tool_choice,
                     "temperature": 0.2,
-                    "max_tokens": backend.max_output_tokens,
+                    "max_tokens": max_output_tokens or backend.max_output_tokens,
                 }
-                if backend.reasoning_effort:
-                    payload["reasoning_effort"] = backend.reasoning_effort
+                requested_reasoning = (
+                    backend.reasoning_effort
+                    if reasoning_effort is None
+                    else reasoning_effort
+                )
+                if requested_reasoning:
+                    payload["reasoning_effort"] = requested_reasoning
                 async with httpx.AsyncClient(
                     timeout=backend.timeout_seconds,
                     transport=self.transport,
@@ -1352,6 +1359,9 @@ class AssistantTools:
             if (normalized := cls._normalized_phrase(value))
         }
 
+ASSISTANT_MODES = ("fast", "standard", "deep", "hermes", "experimental-128k")
+
+
 class ConversationEngine:
     def __init__(
         self,
@@ -1371,8 +1381,62 @@ class ConversationEngine:
         return {
             "session_owner": "pilot_core",
             "deterministic_provider": "home_assistant",
+            "modes": list(ASSISTANT_MODES),
+            "mode_budgets": {
+                mode: self._mode_config(mode)
+                for mode in ASSISTANT_MODES
+            },
             "llm": self.llm.status(),
         }
+
+    def _mode_config(self, mode: str) -> dict[str, int | str]:
+        normalized = mode.strip().casefold() if isinstance(mode, str) else "standard"
+        if normalized not in ASSISTANT_MODES:
+            normalized = "standard"
+        settings = self.llm.settings
+        return {
+            "mode": normalized,
+            "context_tokens": {
+                "fast": settings.llm_fast_context_tokens,
+                "standard": settings.llm_standard_context_tokens,
+                "deep": settings.llm_deep_context_tokens,
+                "hermes": settings.llm_hermes_context_tokens,
+                "experimental-128k": settings.llm_experimental_context_tokens,
+            }[normalized],
+            "output_tokens": {
+                "fast": settings.llm_fast_output_tokens,
+                "standard": settings.llm_standard_output_tokens,
+                "deep": settings.llm_deep_output_tokens,
+                "hermes": settings.llm_hermes_output_tokens,
+                "experimental-128k": settings.llm_deep_output_tokens,
+            }[normalized],
+            "tool_rounds": 2 if normalized == "fast" else 4 if normalized == "standard" else 6,
+            "history_turns": 4 if normalized == "fast" else 10 if normalized == "standard" else 20,
+            "reasoning_effort": "none" if normalized == "fast" else "",
+        }
+
+    @staticmethod
+    def _bound_messages(
+        messages: list[dict[str, Any]],
+        context_chars: int,
+    ) -> list[dict[str, Any]]:
+        """Keep the stable system message and newest exchange/tool results."""
+        if not messages:
+            return messages
+        total = sum(len(str(item.get("content") or "")) for item in messages)
+        if total <= context_chars:
+            return messages
+        system = messages[0]
+        remaining = max(1024, context_chars - len(str(system.get("content") or "")))
+        retained: list[dict[str, Any]] = []
+        for item in reversed(messages[1:]):
+            content = str(item.get("content") or "")
+            if remaining <= 0:
+                break
+            clipped = content[:remaining]
+            retained.append({**item, "content": clipped})
+            remaining -= len(clipped)
+        return [system, *reversed(retained)]
 
     def _guarded_response(
         self,
@@ -1405,6 +1469,7 @@ class ConversationEngine:
         session_id: str | None = None,
         device_id: str | None = None,
         user_id: str | None = None,
+        mode: str = "standard",
     ) -> AssistantResponse:
         if room_id not in self.registry.rooms:
             raise KeyError(room_id)
@@ -1414,6 +1479,7 @@ class ConversationEngine:
             device_id,
             user_id,
         )
+        mode_config = self._mode_config(mode)
         provider_id = session["provider_conversation_id"]
         light_referent = self._recent_light_referent(session["id"])
         high_risk_rejection = _high_risk_home_mutation(text)
@@ -1457,6 +1523,7 @@ class ConversationEngine:
                     provider_id,
                     device_id,
                     light_referent,
+                    mode_config,
                 )
             except (LLMRequestFailed, AssistantUnavailable):
                 return self._guarded_response(
@@ -1509,6 +1576,7 @@ class ConversationEngine:
                     provider_id,
                     device_id,
                     light_referent,
+                    mode_config,
                 )
             except (LLMRequestFailed, AssistantUnavailable):
                 pass
@@ -1541,6 +1609,7 @@ class ConversationEngine:
         provider_conversation_id: str | None,
         device_id: str | None,
         light_referent: dict[str, str] | None,
+        mode_config: dict[str, int | str],
     ) -> AssistantResponse:
         room_id = session["room_id"]
         context = await self.tools.room_context(room_id)
@@ -1564,7 +1633,7 @@ class ConversationEngine:
         )
         history = self.store.conversation_turns(
             session["id"],
-            self.llm.settings.llm_context_turns,
+            int(mode_config["history_turns"]),
         )
         messages: list[dict[str, Any]] = [{"role": "system", "content": system}]
         messages.extend(
@@ -1573,13 +1642,36 @@ class ConversationEngine:
             if turn["role"] in {"user", "assistant"}
         )
         messages.append({"role": "user", "content": text})
+        # Pilot Core does not require a model-specific tokenizer just to keep
+        # context bounded. This conservative character envelope is deliberately
+        # smaller than the token budget and protects tool schemas from eviction.
+        context_chars = max(4_096, int(mode_config["context_tokens"]) * 3)
+        system_chars = len(system)
+        if system_chars > context_chars:
+            messages[0]["content"] = system[:context_chars]
+        else:
+            available = context_chars - system_chars - len(text)
+            retained: list[dict[str, Any]] = []
+            for message in reversed(messages[1:-1]):
+                content = str(message.get("content") or "")
+                if available <= 0:
+                    break
+                clipped = content[:available]
+                retained.append({**message, "content": clipped})
+                available -= len(clipped)
+            messages = [messages[0], *reversed(retained), messages[-1]]
         executed: list[dict[str, Any]] = []
         required_tool = _required_read_tool(text) or _required_action_tool(
             text,
             has_light_referent=light_referent is not None,
         )
 
-        for round_index in range(self.llm.settings.llm_max_tool_rounds + 1):
+        max_tool_rounds = min(
+            self.llm.settings.llm_max_tool_rounds,
+            int(mode_config["tool_rounds"]),
+        )
+        for round_index in range(max_tool_rounds + 1):
+            messages = self._bound_messages(messages, context_chars)
             tool_choice: str | dict[str, Any] = "auto"
             if round_index == 0 and required_tool:
                 tool_choice = {
@@ -1591,6 +1683,8 @@ class ConversationEngine:
                     messages,
                     self.tools.definitions(),
                     tool_choice=tool_choice,
+                    max_output_tokens=int(mode_config["output_tokens"]),
+                    reasoning_effort=str(mode_config["reasoning_effort"]),
                 )
             except (LLMRequestFailed, AssistantUnavailable) as error:
                 fallback = self._deterministic_light_response(
@@ -1628,10 +1722,10 @@ class ConversationEngine:
                     response_text,
                     "pilot_llm",
                     False,
-                    {"message": _bounded(message)},
+                    {"message": _bounded(message), "mode": mode_config["mode"]},
                     tuple(executed),
                 )
-            if round_index >= self.llm.settings.llm_max_tool_rounds:
+            if round_index >= max_tool_rounds:
                 fallback = self._deterministic_light_response(
                     session,
                     text,

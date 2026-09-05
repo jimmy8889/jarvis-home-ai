@@ -2,11 +2,14 @@
 display_node_user: pilot-display
 display_node_hostname: pilot-display
 display_node_timezone: Australia/Brisbane
+display_node_use_dhcp_dns: true
 display_node_core_url: https://pilot.jameshomeautomation.work
 display_node_device_id: ""
 display_node_device_token_source_file: ""
 display_node_mode: display
 display_node_video_enabled: false
+display_node_office_audio_url: ""
+display_node_office_audio_ca_source_file: ""
 # Auto selects the bounded profile on Raspberry Pi hardware and balanced on
 # x86 media consoles. It can be pinned to low-power or balanced per host.
 display_node_performance_profile: auto

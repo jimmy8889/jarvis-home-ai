@@ -111,6 +111,15 @@ llm_timeout_seconds = 60
 llm_max_output_tokens = 1024
 llm_max_tool_rounds = 4
 llm_context_turns = 12
+llm_fast_context_tokens = 8192
+llm_standard_context_tokens = 16384
+llm_deep_context_tokens = 65536
+llm_hermes_context_tokens = 65536
+llm_experimental_context_tokens = 131072
+llm_fast_output_tokens = 512
+llm_standard_output_tokens = 1024
+llm_deep_output_tokens = 2048
+llm_hermes_output_tokens = 4096
 
 [[integrations.llm_backends]]
 id = "ai3090-primary"
@@ -135,6 +144,17 @@ records the active backend. The RTX 3080 is mode-switched: its verifier and
 vision routes are available only when that GPU mode is active; while it runs
 STT/TTS those LLM routes correctly report unavailable. The always-on RTX 3090
 route remains the normal assistant and meeting-analysis path.
+
+Assistant requests support explicit `fast`, `standard`, `deep`, `hermes`, and
+`experimental-128k` modes. Device voice requests default to `fast`; the
+administrator assistant endpoint defaults to `standard`. The mode controls
+history retention, the bounded prompt envelope, output budget, and tool-round
+limit without bypassing deterministic Home Assistant routing.
+
+The approved frontier-distilled model experiments are DavidAU's Qwen3.6 Fable
+Fusion 27B and Qwen3.5 Defiant Fable 9B. Both are GGUF/MTP artifacts and remain
+isolated until a vLLM-compatible serving path is verified. See
+`docs/QWEN_MODEL_LAB.md` for the promotion and safety rules.
 
 The `Pilot Core Conversation` custom integration makes Pilot Core a selectable
 Home Assistant conversation agent. The Office pipeline retains Faster Whisper

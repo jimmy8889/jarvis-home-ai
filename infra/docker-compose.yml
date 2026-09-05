@@ -29,7 +29,6 @@ services:
       PILOT_LLM_3090_TOKEN_FILE: /run/secrets/llm_3090_token
       PILOT_LLM_3080_TOKEN_FILE: /run/secrets/llm_3080_token
       PILOT_TESLAMATE_ADAPTER_TOKEN_FILE: /run/secrets/teslamate_adapter_token
-      PILOT_TESLA_VEHICLE_ID_FILE: /run/secrets/tesla_vehicle_id
       PROXMOX_TOKEN_SECRET_FILE: /run/secrets/proxmox_token_secret
       PROXMOX_MIGRATION_TOKEN_SECRET_FILE: /run/secrets/proxmox_migration_token_secret
       TRUENAS_API_KEY_FILE: /run/secrets/truenas_api_key
@@ -44,7 +43,6 @@ services:
       - llm_3090_token
       - llm_3080_token
       - teslamate_adapter_token
-      - tesla_vehicle_id
       - proxmox_token_secret
       - proxmox_migration_token_secret
       - truenas_api_key
@@ -58,7 +56,7 @@ services:
         - -c
         - >-
           import urllib.request;
-          urllib.request.urlopen('http://127.0.0.1:8770/readyz', timeout=3)
+          urllib.request.urlopen('http://127.0.0.1:8770/healthz', timeout=3)
       interval: 30s
       timeout: 5s
       retries: 3
@@ -93,8 +91,6 @@ secrets:
     file: ./secrets/llm_3080_token
   teslamate_adapter_token:
     file: ./secrets/teslamate_adapter_token
-  tesla_vehicle_id:
-    file: ./secrets/tesla_vehicle_id
   proxmox_token_secret:
     file: ./secrets/proxmox_token_secret
   proxmox_migration_token_secret:

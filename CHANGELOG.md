@@ -1,5 +1,26 @@
 # Changelog
 
+## Unreleased
+
+- Added a watchOS 10 Pilot Meetings companion with explicit AAC recording,
+  durable Watch-to-iPhone transfer, checksum-verified iPhone retention,
+  background Core upload/process recovery, per-device capture idempotency, and
+  deletion only after Pilot Core acceptance. Off-origin recording uploads use
+  one-time, content-bound tickets so the reusable Pilot device credential never
+  leaves its paired Core origin.
+- Fixed vertical touch scrolling on the Home Lab page while preserving
+  horizontal page-swipe navigation.
+- Added an Office-only `Sim Rig` control to the Pi energy-flow screen with
+  live Home Assistant state and deterministic on/off commands.
+- Added a Raspberry Pi `smooth` display profile that targets continuous 60 Hz
+  flow motion while retaining the low-cost, filter-free rendering path.
+- Added Fast, Standard, Deep, Hermes, and experimental 128k assistant context
+  modes with bounded history, output, and tool-round budgets.
+- Added the approved Qwen3.5/Qwen3.6 distilled-model lab contract and a
+  dependency-free OpenAI-compatible benchmark harness.
+- Increased Raspberry Pi live state refresh to one second, status metrics to
+  two seconds, and retained slower cadences for homelab and weather data.
+
 ## 0.32.0 — 2026-08-04
 
 - Added the authenticated `pilot.homelab.v1` monitoring contract with bounded,

@@ -9,6 +9,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from .config import IntegrationSettings
+from .energy_manager import EnergyManagerClient
 from .integrations import IntegrationRequestFailed, IntegrationUnavailable, Integrations
 
 
@@ -22,9 +23,15 @@ DASHBOARD_CACHE_SECONDS = 10.0
 class DashboardService:
     """Build the small, stable home-monitoring contract used by every Pilot display."""
 
-    def __init__(self, settings: IntegrationSettings, integrations: Integrations) -> None:
+    def __init__(
+        self,
+        settings: IntegrationSettings,
+        integrations: Integrations,
+        energy_manager: EnergyManagerClient | None = None,
+    ) -> None:
         self.settings = settings
         self.integrations = integrations
+        self.energy_manager = energy_manager
         self._cached_snapshot: dict[str, Any] | None = None
         self._cached_at = 0.0
         self._refresh_lock = asyncio.Lock()
@@ -32,15 +39,15 @@ class DashboardService:
     async def snapshot(self) -> dict[str, Any]:
         now = monotonic()
         if self._cached_snapshot is not None and now - self._cached_at < DASHBOARD_CACHE_SECONDS:
-            return deepcopy(self._cached_snapshot)
+            return self._with_energy_manager(deepcopy(self._cached_snapshot))
         async with self._refresh_lock:
             now = monotonic()
             if self._cached_snapshot is not None and now - self._cached_at < DASHBOARD_CACHE_SECONDS:
-                return deepcopy(self._cached_snapshot)
+                return self._with_energy_manager(deepcopy(self._cached_snapshot))
             value = await self._fresh_snapshot()
             self._cached_snapshot = value
             self._cached_at = monotonic()
-            return deepcopy(value)
+            return self._with_energy_manager(deepcopy(value))
 
     def invalidate(self) -> None:
         """Discard projected state after a successful dashboard mutation."""
@@ -50,15 +57,19 @@ class DashboardService:
 
     async def _fresh_snapshot(self) -> dict[str, Any]:
         entity_ids = self._configured_entity_ids()
-        power_history_ids = tuple(
-            entity_id
-            for entity_id in (
-                self.settings.energy_home_load_entity_id,
-                self.settings.energy_battery_power_entity_id,
-                self.settings.energy_solar_power_entity_id,
-                self.settings.energy_vehicle_power_entity_id,
+        power_history_ids = (
+            ()
+            if self.energy_manager and self.energy_manager.configured
+            else tuple(
+                entity_id
+                for entity_id in (
+                    self.settings.energy_home_load_entity_id,
+                    self.settings.energy_battery_power_entity_id,
+                    self.settings.energy_solar_power_entity_id,
+                    self.settings.energy_vehicle_power_entity_id,
+                )
+                if entity_id
             )
-            if entity_id
         )
         temperature_history_ids = tuple(
             dict.fromkeys(
@@ -102,6 +113,7 @@ class DashboardService:
                 history_ended_at,
             ),
             "weather": weather,
+            "codex_usage": self._codex_usage(state_by_id),
             "controls": self._controls(state_by_id),
             "diagnostics": {
                 "missing_entities": missing,
@@ -113,31 +125,67 @@ class DashboardService:
         }
 
     def _configured_entity_ids(self) -> tuple[str, ...]:
-        values = (
-            self.settings.energy_solar_power_entity_id,
-            self.settings.energy_grid_power_entity_id,
-            self.settings.energy_battery_power_entity_id,
-            self.settings.energy_battery_soc_entity_id,
-            self.settings.energy_home_load_entity_id,
-            self.settings.energy_server_power_entity_id,
-            self.settings.energy_vehicle_connected_entity_id,
-            self.settings.energy_vehicle_power_entity_id,
-            self.settings.energy_vehicle_soc_entity_id,
+        values = [
             self.settings.sun_entity_id,
             *self.settings.energy_solar_today_entity_ids,
             self.settings.energy_home_today_entity_id,
             self.settings.energy_grid_export_today_entity_id,
-            self.settings.amber_import_price_entity_id,
-            self.settings.amber_feed_in_price_entity_id,
-            self.settings.amber_feed_in_forecast_entity_id,
-            self.settings.tesla_charging_mode_entity_id,
+            self.settings.office_sim_rig_switch_entity_id,
+            self.settings.codex_usage_used_entity_id,
+            self.settings.codex_usage_remaining_entity_id,
+            self.settings.codex_usage_reset_entity_id,
             self.settings.temperature_office_entity_id,
             self.settings.temperature_tv_room_entity_id,
             self.settings.temperature_bedroom_entity_id,
             self.settings.temperature_media_room_entity_id,
             self.settings.outdoor_temperature_entity_id,
-        )
+        ]
+        if not (self.energy_manager and self.energy_manager.configured):
+            values.extend(
+                (
+                    self.settings.energy_solar_power_entity_id,
+                    self.settings.energy_grid_power_entity_id,
+                    self.settings.energy_battery_power_entity_id,
+                    self.settings.energy_battery_soc_entity_id,
+                    self.settings.energy_home_load_entity_id,
+                    self.settings.energy_server_power_entity_id,
+                    self.settings.energy_vehicle_connected_entity_id,
+                    self.settings.energy_vehicle_power_entity_id,
+                    self.settings.energy_vehicle_soc_entity_id,
+                    self.settings.amber_import_price_entity_id,
+                    self.settings.amber_feed_in_price_entity_id,
+                    self.settings.amber_feed_in_forecast_entity_id,
+                )
+            )
         return tuple(dict.fromkeys(value for value in values if value))
+
+    def _with_energy_manager(self, value: dict[str, Any]) -> dict[str, Any]:
+        if not (self.energy_manager and self.energy_manager.configured):
+            return value
+        fields = self.energy_manager.dashboard_fields()
+        for name in (
+            "source",
+            "observed_at",
+            "stale",
+            "energy_status",
+            "power",
+            "arrays",
+            "vehicle",
+            "hot_water",
+            "tariff",
+            "plan",
+            "flow",
+            "financial",
+            "server",
+            "manager_health",
+            "history",
+            "daily",
+        ):
+            value[name] = fields[name]
+        value.setdefault("diagnostics", {})["energy_manager"] = fields[
+            "manager_health"
+        ]
+        return value
 
     async def _states(
         self, entity_ids: tuple[str, ...]
@@ -457,15 +505,10 @@ class DashboardService:
         }
 
     def _controls(self, states: dict[str, dict[str, Any]]) -> dict[str, Any]:
-        mode_state = states.get(self.settings.tesla_charging_mode_entity_id, {})
-        current_mode = self._text(mode_state.get("state"))
+        sim_rig_state = self._text(
+            states.get(self.settings.office_sim_rig_switch_entity_id, {}).get("state")
+        )
         return {
-            "tesla_charging_mode": {
-                "entity_id": self.settings.tesla_charging_mode_entity_id or None,
-                "value": current_mode,
-                "options": ["Grid", "Solar"],
-                "available": current_mode is not None,
-            },
             "media_room_mode": {
                 "on_script_id": self.settings.media_room_mode_on_script_id or None,
                 "off_script_id": self.settings.media_room_mode_off_script_id or None,
@@ -474,6 +517,26 @@ class DashboardService:
                     and self.settings.media_room_mode_off_script_id
                 ),
             },
+            "sim_rig": {
+                "entity_id": self.settings.office_sim_rig_switch_entity_id or None,
+                "value": sim_rig_state,
+                "available": sim_rig_state in {"on", "off"},
+            },
+        }
+
+    def _codex_usage(self, states: dict[str, dict[str, Any]]) -> dict[str, Any]:
+        used = self._percent_state(states, self.settings.codex_usage_used_entity_id)
+        remaining = self._percent_state(
+            states, self.settings.codex_usage_remaining_entity_id
+        )
+        reset_at = self._timestamp_state(
+            states, self.settings.codex_usage_reset_entity_id
+        )
+        return {
+            "used_percent": used,
+            "remaining_percent": remaining,
+            "reset_at": reset_at,
+            "available": used is not None or reset_at is not None,
         }
 
     def _history_points(
@@ -573,6 +636,19 @@ class DashboardService:
     def _percent_state(self, states: dict[str, dict[str, Any]], entity_id: str) -> float | None:
         value = self._number(states.get(entity_id, {}).get("state"))
         return round(value, 1) if value is not None and 0 <= value <= 100 else None
+
+    @staticmethod
+    def _timestamp_state(
+        states: dict[str, dict[str, Any]], entity_id: str
+    ) -> str | None:
+        raw = states.get(entity_id, {}).get("state")
+        if not isinstance(raw, str):
+            return None
+        try:
+            value = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+        return value.isoformat() if value.tzinfo is not None else None
 
     def _temperature_state(self, states: dict[str, dict[str, Any]], entity_id: str) -> float | None:
         value = self._number(states.get(entity_id, {}).get("state"))

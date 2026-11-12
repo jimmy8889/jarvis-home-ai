@@ -51,6 +51,7 @@ fun MoreScreen() {
     val energy by model.energyBootstrap.collectAsStateWithLifecycle()
     val controlOverview by model.controlOverview.collectAsStateWithLifecycle()
     val controlConnection by model.controlConnection.collectAsStateWithLifecycle()
+    val jarvisConnection by com.jameshazell.pilot.ui.LocalAppContainer.current.jarvis.connection.collectAsStateWithLifecycle()
     // Which confirmation is showing: "repair", "unpair" or none.
     var confirm by rememberSaveable { mutableStateOf<String?>(null) }
 
@@ -59,6 +60,7 @@ fun MoreScreen() {
             pilotStatus(snapshot, session.paired, liveEvents),
             energyStatus(energy),
             controlStatus(controlOverview, controlConnection),
+            com.jameshazell.pilot.ui.assistant.jarvis.jarvisStatus(jarvisConnection),
         ),
         config = session.config,
         canControlHome = manifest?.features?.contains(PilotRepository.FEATURE_HOME_CONTROL) == true,

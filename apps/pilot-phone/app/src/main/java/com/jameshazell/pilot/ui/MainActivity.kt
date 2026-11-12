@@ -31,7 +31,7 @@ class MainActivity : ComponentActivity() {
             statusBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),
             navigationBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),
         )
-        container.pilot.offerPairingLink(intent?.dataString)
+        offerLink(intent?.dataString)
         setContent {
             val session by container.pilot.session.collectAsStateWithLifecycle()
             LaunchedEffect(session.config.keepScreenOn) {
@@ -60,6 +60,11 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        container.pilot.offerPairingLink(intent.dataString)
+        offerLink(intent.dataString)
+    }
+
+    /** `pilot://jarvis?…` pairs JARVIS; every other `pilot://` link is a Pilot Core pairing. */
+    private fun offerLink(link: String?) {
+        if (!container.jarvis.offerPairingLink(link)) container.pilot.offerPairingLink(link)
     }
 }

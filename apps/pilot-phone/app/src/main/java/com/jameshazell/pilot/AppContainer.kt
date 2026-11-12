@@ -15,6 +15,8 @@ import com.jameshazell.pilot.data.control.ControlRepository
 import com.jameshazell.pilot.data.energy.EnergyClient
 import com.jameshazell.pilot.data.energy.EnergyKey
 import com.jameshazell.pilot.data.energy.EnergyRepository
+import com.jameshazell.pilot.data.jarvis.JarvisClient
+import com.jameshazell.pilot.data.jarvis.JarvisRepository
 import com.jameshazell.pilot.data.pilot.PilotRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
@@ -45,6 +47,8 @@ class AppContainer(context: Context) {
     val pilot = PilotRepository(scope, dispatchers, http, prefs, deviceTokens, secureStore)
     val energy = EnergyRepository(scope, EnergyClient(http, credentials, EnergyKey(), snapshots, dispatchers))
     val control = ControlRepository(scope, ControlClient(http, credentials, snapshots, dispatchers))
+    /** JARVIS on the laptop. Has its own SecureStore entries; shares nothing with Pilot Core. */
+    val jarvis = JarvisRepository(scope, dispatchers, JarvisClient(http), secureStore)
 
     init {
         // Order matters: a provisioning file must be imported before pairing state is read.
@@ -54,6 +58,7 @@ class AppContainer(context: Context) {
             }
             pilot.load()
             energy.consumePendingGrant()
+            jarvis.load()
         }
     }
 

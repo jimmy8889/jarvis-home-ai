@@ -57,7 +57,7 @@ interface ReplyPlayer {
  * Holds audio focus for one recording or one reply, so music pauses or ducks while Pilot is
  * listening or speaking and comes back afterwards.
  */
-private class AssistantAudioFocus(context: Context, private val exclusive: Boolean, private val onLost: () -> Unit) {
+internal class AssistantAudioFocus(context: Context, private val exclusive: Boolean, private val onLost: () -> Unit) {
     private val manager = context.getSystemService(AudioManager::class.java)
     private val request = AudioFocusRequest.Builder(
         if (exclusive) AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_EXCLUSIVE else AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK,
@@ -89,7 +89,7 @@ private class AssistantAudioFocus(context: Context, private val exclusive: Boole
     }
 }
 
-private fun assistantAttributes(): AudioAttributes = AudioAttributes.Builder()
+internal fun assistantAttributes(): AudioAttributes = AudioAttributes.Builder()
     .setUsage(AudioAttributes.USAGE_ASSISTANT)
     .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
     .build()
@@ -219,6 +219,9 @@ class AndroidReplyPlayer(context: Context) : ReplyPlayer {
         onDone = null
         release()
     }
+
+    /** How far into the reply playback is, in ms; 0 when nothing is playing. */
+    fun positionMs(): Int = runCatching { player?.takeIf { it.isPlaying }?.currentPosition ?: 0 }.getOrDefault(0)
 
     private fun finish(played: Boolean) {
         val callback = onDone

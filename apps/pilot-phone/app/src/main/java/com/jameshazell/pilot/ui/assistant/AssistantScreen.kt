@@ -48,6 +48,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -79,6 +80,9 @@ import com.jameshazell.pilot.data.pilot.AssistantSource
 import com.jameshazell.pilot.ui.adaptive.ListDetailLayout
 import com.jameshazell.pilot.ui.adaptive.LocalPilotWindow
 import com.jameshazell.pilot.ui.appViewModel
+import com.jameshazell.pilot.ui.assistant.jarvis.AssistantMode
+import com.jameshazell.pilot.ui.assistant.jarvis.JarvisScreen
+import com.jameshazell.pilot.ui.components.Chip
 import com.jameshazell.pilot.ui.components.CardNote
 import com.jameshazell.pilot.ui.components.PilotCard
 import com.jameshazell.pilot.ui.components.ScreenHeader
@@ -91,9 +95,35 @@ import com.jameshazell.pilot.ui.theme.PilotColors
 import com.jameshazell.pilot.ui.theme.PilotDimens
 import com.jameshazell.pilot.ui.theme.PilotIcons
 
-/** Pilot: talk or type to the house assistant. */
+/**
+ * The Pilot tab. JARVIS (the private assistant on the laptop) is the default; the house
+ * assistant from Pilot Core, which can control the house, is one tap away.
+ */
 @Composable
 fun AssistantScreen() {
+    var mode by rememberSaveable { mutableStateOf(AssistantMode.Jarvis) }
+    Column(Modifier.fillMaxSize()) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = PilotDimens.ScreenPadding),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            AssistantMode.entries.forEach { option ->
+                Chip(option.label, selected = option == mode, onClick = { mode = option })
+            }
+        }
+        // Only the chosen assistant is composed, so the other one's microphone and polling are off.
+        Box(Modifier.weight(1f).fillMaxWidth()) {
+            when (mode) {
+                AssistantMode.Jarvis -> JarvisScreen()
+                AssistantMode.House -> HouseAssistantScreen()
+            }
+        }
+    }
+}
+
+/** The house assistant: talk or type to Pilot Core. */
+@Composable
+private fun HouseAssistantScreen() {
     val context = LocalContext.current.applicationContext
     val model = appViewModel {
         AssistantViewModel(it.pilot, AndroidVoiceRecorder(context), AndroidReplyPlayer(context), it.dispatchers.io)
@@ -148,7 +178,7 @@ internal fun AssistantContent(
     val twoPane = LocalPilotWindow.current.isTwoPane
     Column(Modifier.fillMaxSize()) {
         ScreenHeader(
-            title = "Pilot",
+            title = "House assistant",
             status = when {
                 !live -> "Waiting for Pilot Core"
                 roomName != null -> "Answering for $roomName"

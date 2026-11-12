@@ -274,9 +274,10 @@ internal object EnergyJson {
 
     fun day(value: JSONObject) = EnergyDay(
         date = value.strOrNull("local_date") ?: value.strOrNull("date") ?: value.strOrNull("day"),
-        solarGeneratedKwh = value.doubleOrNull("solar_generated_kwh"),
-        houseConsumedKwh = value.doubleOrNull("house_consumed_kwh"),
-        gridExportedKwh = value.doubleOrNull("grid_exported_kwh"),
+        // Recorded daily rows (`/mobile/v1/daily`) use the storage names after the `?:`.
+        solarGeneratedKwh = value.doubleOrNull("solar_generated_kwh") ?: value.doubleOrNull("pv_kwh"),
+        houseConsumedKwh = value.doubleOrNull("house_consumed_kwh") ?: value.doubleOrNull("whole_house_load_kwh"),
+        gridExportedKwh = value.doubleOrNull("grid_exported_kwh") ?: value.doubleOrNull("export_kwh"),
     )
 
     private fun planPoint(value: JSONObject) = EnergyPlanPoint(
@@ -292,8 +293,26 @@ internal object EnergyJson {
     )
 
     /** `GET /mobile/v1/history`: rows are telemetry, or wrap it in a `telemetry` field. */
-    fun history(rows: List<JSONObject>): List<EnergyTelemetry> =
-        rows.map { telemetry(it.optJSONObject("telemetry") ?: it) }
+    fun history(rows: List<JSONObject>): List<EnergyTelemetry> = rows.map { row ->
+        val wrapped = row.optJSONObject("telemetry")
+        when {
+            wrapped != null -> telemetry(wrapped)
+            row.has("interval_start") -> intervalOutcome(row)
+            else -> telemetry(row)
+        }
+    }
+
+    /** A recorded five-minute outcome row: interval averages, stamped with the interval start. */
+    private fun intervalOutcome(value: JSONObject) = EnergyTelemetry(
+        measuredAt = value.instantOrNull("interval_start"),
+        healthy = true,
+        pvKw = value.doubleOrNull("average_pv_kw"),
+        pvStringsKw = (1..3).map { value.doubleOrNull("average_pv${it}_kw") },
+        loadKw = value.doubleOrNull("average_whole_house_load_kw"),
+        gridKw = value.doubleOrNull("average_grid_kw"),
+        batteryKw = value.doubleOrNull("average_battery_kw"),
+        socPct = null,
+    )
 
     fun daily(rows: List<JSONObject>): List<EnergyDay> = rows.map(::day)
 }

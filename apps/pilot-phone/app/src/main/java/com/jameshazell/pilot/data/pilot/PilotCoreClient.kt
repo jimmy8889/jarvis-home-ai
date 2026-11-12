@@ -93,8 +93,16 @@ class PilotCoreClient(
     suspend fun home(roomId: String): HomeProjection =
         PilotJson.home(request("$device/home?room_id=${encode(roomId)}"))
 
-    suspend fun homeAction(roomId: String, entityId: String, action: String, value: Double? = null): HomeAction =
-        PilotJson.homeAction(request("$device/home/actions", "POST", homeActionBody(roomId, entityId, action, value)))
+    /** @param option a text parameter instead of [value], e.g. the mode for `set_hvac_mode`. */
+    suspend fun homeAction(
+        roomId: String,
+        entityId: String,
+        action: String,
+        value: Double? = null,
+        option: String? = null,
+    ): HomeAction = PilotJson.homeAction(
+        request("$device/home/actions", "POST", homeActionBody(roomId, entityId, action, value, option)),
+    )
 
     suspend fun confirmHomeAction(actionId: String): HomeAction =
         PilotJson.homeAction(request("$device/home/actions/$actionId/confirm", "POST", JSONObject()))
@@ -180,9 +188,16 @@ class PilotCoreClient(
 
         private fun encode(value: String) = URLEncoder.encode(value, Charsets.UTF_8.name())
 
-        internal fun homeActionBody(roomId: String, entityId: String, action: String, value: Double?): JSONObject {
+        internal fun homeActionBody(
+            roomId: String,
+            entityId: String,
+            action: String,
+            value: Double?,
+            option: String? = null,
+        ): JSONObject {
             val parameters = JSONObject()
             value?.let { parameters.put("value", it) }
+            if (value == null) option?.let { parameters.put("value", it) }
             return JSONObject()
                 .put("room_id", roomId)
                 .put("entity_id", entityId)

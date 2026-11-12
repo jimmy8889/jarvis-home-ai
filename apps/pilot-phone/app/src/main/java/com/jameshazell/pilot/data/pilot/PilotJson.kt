@@ -64,6 +64,8 @@ internal object PilotJson {
                         ?.toFloat()?.coerceIn(0f, 100f),
                     percentage = attributes.doubleOrNull("percentage")
                         ?.toFloat()?.coerceIn(0f, 100f),
+                    currentTemperature = attributes.doubleOrNull("current_temperature"),
+                    humidity = attributes.doubleOrNull("humidity"),
                 )
             }.filter { it.presentation.included && it.presentation.duplicateOf == null },
             observedAt = freshness.instantOrNull("observed_at")

@@ -229,6 +229,10 @@ data class HomeEntity(
     val targetTemperature: Double? = null,
     val positionPercent: Float? = null,
     val percentage: Float? = null,
+    /** Climate: the measured room temperature (`current_temperature`). */
+    val currentTemperature: Double? = null,
+    /** Climate and humidity sensors: relative humidity in percent. */
+    val humidity: Double? = null,
 ) {
     val isOn: Boolean
         get() = state.lowercase() in setOf(

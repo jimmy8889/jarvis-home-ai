@@ -259,33 +259,58 @@ class PilotRepository(
     }
 
     /**
+     * Devices of any room, without changing the selected room or [home]. Used for the house
+     * overview (room tiles). Actions are stripped unless [canControlHome].
+     */
+    suspend fun homeFor(roomId: String): Outcome<HomeProjection> {
+        val client = client() ?: return notPaired()
+        return when (val result = outcomeOf(Service.Pilot) { client.home(roomId) }) {
+            is Outcome.Success -> Outcome.Success(result.value.readOnlyUnless(canControlHome))
+            is Outcome.Failure -> result
+        }
+    }
+
+    /**
      * Sends a device action (`turn_on`, `set_brightness`, `unlock`, ...). The room list updates
      * optimistically and is rolled back on failure. When the returned action has
      * `confirmationRequired && status == "pending"`, show a ConfirmDialog and call
      * [confirmHomeAction] with its id; nothing has happened yet.
+     *
+     * @param roomId the room the entity is in; defaults to the selected room. [home] is only
+     * touched when it is the selected room.
+     * @param option a text parameter instead of [value], e.g. the mode for `set_hvac_mode`.
      */
-    suspend fun homeAction(entity: HomeEntity, action: String, value: Double? = null): Outcome<HomeAction> {
+    suspend fun homeAction(
+        entity: HomeEntity,
+        action: String,
+        value: Double? = null,
+        roomId: String? = null,
+        option: String? = null,
+    ): Outcome<HomeAction> {
         if (!canControlHome) return Outcome.Failure(
             AppError(ErrorKind.Forbidden, "This phone has read-only access to room devices."),
         )
         val client = liveClient() ?: return notLive()
-        val roomId = _selectedRoomId.value ?: return notLive()
+        val target = roomId ?: _selectedRoomId.value ?: return notLive()
+        val selected = target == _selectedRoomId.value
         val before = _home.value
         val optimistic = optimisticEntity(entity, action, value)
-        if (optimistic != entity && before is LoadState.Content) {
+        if (selected && optimistic != entity && before is LoadState.Content) {
             _home.value = before.copy(
                 value = before.value.copy(
                     entities = before.value.entities.map { if (it.entityId == entity.entityId) optimistic else it },
                 ),
             )
         }
-        val result = outcomeOf(Service.Pilot) { client.homeAction(roomId, entity.entityId, action, value) }
-        when (result) {
-            is Outcome.Success -> {
-                val pending = result.value.confirmationRequired && result.value.status == "pending"
-                if (pending) _home.value = before else refreshHome(roomId, silent = true)
+        val result = outcomeOf(Service.Pilot) { client.homeAction(target, entity.entityId, action, value, option) }
+        if (selected) {
+            when (result) {
+                is Outcome.Success -> {
+                    val pending = result.value.confirmationRequired && result.value.status == "pending"
+                    if (pending) _home.value = before else refreshHome(target, silent = true)
+                }
+                is Outcome.Failure -> _home.value = before
             }
-            is Outcome.Failure -> _home.value = before
         }
         return result
     }

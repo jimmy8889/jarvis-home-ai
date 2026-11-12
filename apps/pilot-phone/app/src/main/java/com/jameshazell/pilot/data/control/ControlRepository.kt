@@ -15,8 +15,12 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -44,6 +48,10 @@ class ControlRepository(
     private val _approvals = MutableStateFlow<List<ControlApproval>>(emptyList())
     /** Approval requests received this session that have not been answered from this phone. */
     val approvals: StateFlow<List<ControlApproval>> = _approvals.asStateFlow()
+
+    private val _events = MutableSharedFlow<ControlEvent>(extraBufferCapacity = 256, onBufferOverflow = BufferOverflow.DROP_OLDEST)
+    /** Every socket event, after this repository has applied it. Not replayed to late collectors. */
+    val socketEvents: SharedFlow<ControlEvent> = _events.asSharedFlow()
 
     private val events = ControlEventStream(scope, client, ::onEvent, onConnected = ::refresh)
     val connection: StateFlow<ControlConnection> = events.connection
@@ -113,10 +121,20 @@ class ControlRepository(
         }
     }
 
-    /** Sends a message; the reply streams into [messages] under the returned task id. */
-    suspend fun sendMessage(text: String, target: ControlTarget = ControlTarget.Auto, projectId: String? = null): Outcome<String?> =
+    /**
+     * Sends a message; the reply streams into [messages] under the returned task id.
+     *
+     * @param idempotencyKey reuse the same key when retrying a send that may have reached the
+     * server: James Control then returns the existing task instead of starting a second one.
+     */
+    suspend fun sendMessage(
+        text: String,
+        target: ControlTarget = ControlTarget.Auto,
+        projectId: String? = null,
+        idempotencyKey: String = UUID.randomUUID().toString(),
+    ): Outcome<String?> =
         outcomeOf(Service.Control) {
-            val body = ControlJson.messageBody(text.trim(), target, projectId, UUID.randomUUID().toString())
+            val body = ControlJson.messageBody(text.trim(), target, projectId, idempotencyKey)
             val reply = JSONObject(client.send(ControlClient.MESSAGES_PATH, "POST", body).ifBlank { "{}" })
             reply.optString("id").takeIf(String::isNotBlank)
                 ?: reply.optJSONObject("task")?.optString("id")?.takeIf(String::isNotBlank)
@@ -144,6 +162,19 @@ class ControlRepository(
                 ?: JSONObject()
         }.also(::noteSession)
 
+    /** [taskEvents], typed. */
+    suspend fun taskTimeline(taskId: String): Outcome<List<ControlTaskEvent>> = when (val raw = taskEvents(taskId)) {
+        is Outcome.Success -> Outcome.Success(raw.value.map(ControlJson::taskEvent))
+        is Outcome.Failure -> raw
+    }
+
+    /** [conversation], flattened to a list of who said what. */
+    suspend fun transcript(conversation: ControlConversation): Outcome<ControlTranscript> =
+        when (val raw = conversation(conversation)) {
+            is Outcome.Success -> Outcome.Success(ControlJson.transcript(raw.value, conversation))
+            is Outcome.Failure -> raw
+        }
+
     private fun onEvent(event: ControlEvent) {
         when (event) {
             is ControlEvent.MessageDelta -> _messages.update { it + (event.id to it[event.id].orEmpty() + event.text) }
@@ -151,9 +182,22 @@ class ControlRepository(
             is ControlEvent.ApprovalRequested -> _approvals.update { list ->
                 if (list.any { it.id == event.approval.id }) list else list + event.approval
             }
-            ControlEvent.TaskUpdated, ControlEvent.WorkerUpdated -> refresh()
+            is ControlEvent.TaskUpdated -> {
+                event.task?.let { task -> updateOverview { it.withTask(task) } }
+                refresh()
+            }
+            is ControlEvent.WorkerUpdated -> {
+                event.worker?.let { worker -> updateOverview { it.withWorker(worker) } }
+                refresh()
+            }
             is ControlEvent.Other -> Unit
         }
+        _events.tryEmit(event)
+    }
+
+    /** Applies a pushed change straight away; the refresh that follows confirms it. */
+    private fun updateOverview(change: (ControlOverview) -> ControlOverview) {
+        _overview.update { state -> if (state is LoadState.Content) state.copy(value = change(state.value)) else state }
     }
 
     private fun noteSession(result: Outcome<*>) {

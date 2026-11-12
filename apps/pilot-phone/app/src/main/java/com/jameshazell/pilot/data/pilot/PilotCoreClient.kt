@@ -72,6 +72,15 @@ class PilotCoreClient(
             ?: root.optString("next_cursor").takeIf(String::isNotBlank)
     }
 
+    /**
+     * The current event cursor, read from the cheap events endpoint. Core's events *snapshot*
+     * endpoint builds every room's device list just to return the same number, which stalls Core.
+     */
+    suspend fun currentEventCursor(pathTemplate: String): String? {
+        val root = request(eventPath(pathTemplate, "0", longPoll = false) + "&limit=1")
+        return root.optString("cursor").takeIf(String::isNotBlank)
+    }
+
     /** Long poll: the server holds the request for up to 25 seconds. */
     suspend fun events(pathTemplate: String, cursor: String?): PilotEventPage =
         PilotJson.events(request(eventPath(pathTemplate, cursor, longPoll = true)))

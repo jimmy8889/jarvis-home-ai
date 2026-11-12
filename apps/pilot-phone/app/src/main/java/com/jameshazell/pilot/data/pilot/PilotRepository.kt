@@ -266,7 +266,7 @@ class PilotRepository(
         val snapshotPath = manifest?.eventSnapshotPath ?: return
         val eventPath = manifest.eventLongPollPath ?: snapshotPath.removeSuffix("/snapshot")
         try {
-            eventCursor = client.eventSnapshotCursor(snapshotPath, eventCursor) ?: eventCursor
+            eventCursor = eventCursor ?: client.currentEventCursor(eventPath)
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (_: Exception) {

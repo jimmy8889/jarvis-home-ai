@@ -1,0 +1,162 @@
+{
+  "manifest": {
+    "contract": {"schema": "pilot.client.v1", "version": "1.0"},
+    "features": {"live_events": true, "media_queue": true, "assistant_cards": true},
+    "endpoints": {
+      "snapshot": {"method": "GET", "path": "/v1/devices/{device_id}/events/snapshot"},
+      "events": {"method": "GET", "path": "/v1/devices/{device_id}/events"},
+      "events_ws": "/v1/devices/{device_id}/events/ws"
+    }
+  },
+  "home": {
+    "selected_room_id": "office",
+    "room": {"id": "office", "name": "Office"},
+    "freshness": {"status": "ok", "observed_at": "2026-07-22T08:00:00Z"},
+    "entities": [
+      {
+        "entity_id": "light.office_lamp",
+        "domain": "light",
+        "name": "Office lamp raw name",
+        "state": "on",
+        "area_id": "james_office",
+        "attributes": {"brightness": 128},
+        "actions": ["turn_on", "turn_off", "set_brightness"],
+        "presentation": {
+          "exposure_policy": "included",
+          "included": true,
+          "reason": "Primary room light",
+          "category": "lighting",
+          "priority": 10,
+          "room": {"trust": "registry", "authoritative": true},
+          "supported_actions": ["turn_on", "turn_off", "set_brightness"],
+          "canonical_id": "office.main_light",
+          "display_name": "Desk lamp",
+          "icon": "●",
+          "section": "Favourites",
+          "control": "light"
+        }
+      },
+      {
+        "entity_id": "sensor.office_temperature",
+        "domain": "sensor",
+        "name": "Office temperature",
+        "state": "23.4",
+        "area_id": "james_office",
+        "attributes": {"unit_of_measurement": "°C", "device_class": "temperature"},
+        "actions": [],
+        "presentation": {
+          "included": true,
+          "priority": 30,
+          "display_name": "Temperature",
+          "section": "Climate",
+          "control": "sensor"
+        }
+      },
+      {
+        "entity_id": "sensor.office_temperature_duplicate",
+        "domain": "sensor",
+        "name": "Duplicate temperature",
+        "state": "23.4",
+        "attributes": {},
+        "actions": [],
+        "presentation": {
+          "included": true,
+          "duplicate_of": "sensor.office_temperature"
+        }
+      }
+    ]
+  },
+  "media": {
+    "rooms": [
+      {
+        "id": "office",
+        "name": "Office",
+        "default_music_player_id": "office-n150",
+        "players": []
+      }
+    ],
+    "media": {
+      "observed_at": "2026-07-22T08:00:00Z",
+      "revision": "media-42",
+      "players": {
+        "office-n150": {
+          "player": {
+            "id": "office-n150",
+            "room_id": "office",
+            "name": "Pilot Office Music",
+            "kind": "audio",
+            "protocol": "sendspin",
+            "enabled": true,
+            "control_enabled": true
+          },
+          "status": "ok",
+          "effective": {
+            "available": true,
+            "powered": true,
+            "playback_state": "playing",
+            "volume_percent": 36,
+            "muted": false,
+            "position_seconds": 62,
+            "duration_seconds": 300,
+            "capabilities": {"seek": true, "mute": true, "next": true, "group": true},
+            "group_members": ["office-n150"],
+            "now_playing": {
+              "title": "Teardrop",
+              "artist": "Massive Attack",
+              "album": "Mezzanine",
+              "artwork_url": "/v1/devices/pilot-wall-tablet/media/artwork/abc",
+              "duration_seconds": 300
+            }
+          }
+        }
+      },
+      "queues": {
+        "office-n150": {
+          "player_id": "office-n150",
+          "index": 0,
+          "items": [
+            {
+              "id": "track-1",
+              "title": "Teardrop",
+              "artist": "Massive Attack",
+              "duration_seconds": 300,
+              "active": true
+            },
+            {
+              "id": "track-2",
+              "title": "Angel",
+              "artist": "Massive Attack",
+              "duration_seconds": 379
+            }
+          ]
+        }
+      }
+    }
+  },
+  "assistant": {
+    "status": "complete",
+    "response_text": "The office is 23.4 degrees.",
+    "conversation_id": "conversation-1",
+    "provider": "ollama",
+    "room_id": "office",
+    "cards": [
+      {"kind": "entity_state", "title": "Office temperature", "detail": "23.4 °C"}
+    ],
+    "sources": [
+      {"label": "Home Assistant", "url": null}
+    ],
+    "actions": ["sensor.office_temperature"]
+  },
+  "events": {
+    "cursor": "event-43",
+    "reset_required": false,
+    "events": [
+      {
+        "id": "event-43",
+        "type": "home.entity.changed",
+        "revision": "home-12",
+        "occurred_at": "2026-07-22T08:00:01Z"
+      }
+    ]
+  }
+}

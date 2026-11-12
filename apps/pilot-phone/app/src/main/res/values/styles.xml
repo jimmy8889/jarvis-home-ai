@@ -1,0 +1,9 @@
+<resources>
+    <!-- Dark only; colours mirror ui/theme/PilotColors. -->
+    <style name="Theme.Pilot" parent="android:style/Theme.Material.NoActionBar">
+        <item name="android:fontFamily">sans</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar">false</item>
+        <item name="android:windowBackground">#0B101A</item>
+    </style>
+</resources>

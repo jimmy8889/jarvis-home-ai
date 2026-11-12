@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <!-- AddressPolicy rejects cleartext public hosts before a connection is opened;
+         Android cannot express "private ranges only" here. Same behaviour as 1.x. -->
+    <base-config cleartextTrafficPermitted="true" />
+</network-security-config>

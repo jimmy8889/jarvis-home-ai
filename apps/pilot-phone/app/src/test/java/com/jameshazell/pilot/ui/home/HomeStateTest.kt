@@ -10,15 +10,25 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class HomeStateTest {
-    @Test fun homeStateSummarisesEveryRoomInCoreOrder() {
+    @Test fun homeStateListsEveryRoomWithoutClaimingLiveDevices() {
         val state = HomeFixtures.state()
         assertEquals(listOf("Living Room", "Kitchen", "Master Bedroom", "Garage"), state.rooms.map { it.name })
-        assertEquals(2, state.house.lightsOn)
         assertNull(state.openRoom)
         assertTrue(state.controlsEnabled)
         assertNull(state.controlNotice)
-        // The bedroom has an aircon reading; the dashboard label match is only a fallback.
+        // No room is open, so every tile is from an earlier visit: no tint, no power button.
+        assertTrue(state.rooms.all { it.cached && !it.active && !it.canToggleLights })
+        assertEquals("Playing · Earlier: 2 of 3 on", state.rooms[0].status)
+        // The bedroom temperature comes from the dashboard, which is current.
         assertEquals(21.3, state.rooms[2].temperatureC!!, 0.001)
+    }
+
+    @Test fun onlyTheOpenRoomsTileIsLive() {
+        val state = HomeFixtures.state(openRoomId = "living")
+        assertFalse(state.rooms[0].cached)
+        assertTrue(state.rooms[0].active)
+        assertTrue(state.rooms[0].canToggleLights)
+        assertTrue(state.rooms.drop(1).all { it.cached })
     }
 
     @Test fun openRoomCarriesItsDevicesAndPlayers() {
@@ -39,7 +49,6 @@ class HomeStateTest {
         )
         val state = buildHomeState(HomeFixtures.snapshot, online = true, canControl = true, local = local)
         assertEquals(3, state.rooms[0].lightsOn)
-        assertEquals(3, state.house.lightsOn)
         assertTrue(state.openRoom!!.content.lights.all { it.isLit })
         assertEquals(setOf(shelf.entityId), state.busy)
     }
@@ -57,16 +66,21 @@ class HomeStateTest {
         val state = buildHomeState(HomeFixtures.snapshot, online = false, canControl = false, local = HomeLocalState())
         assertEquals(4, state.rooms.size)
         assertTrue(state.rooms.none { it.loaded })
-        assertFalse(state.house.lightsKnown)
+        assertTrue(state.rooms.all { it.status == "" || it.status == "Playing" || it.status.endsWith("°") })
         // Now playing comes from the snapshot, so it is known even without devices.
         assertTrue(state.rooms[0].playing)
     }
 
     @Test fun roomLoadErrorReachesTheOpenRoom() {
-        val local = HomeLocalState(openRoomId = "kitchen", roomErrors = mapOf("kitchen" to "Pilot Core took too long to answer."))
+        val local = HomeLocalState(
+            openRoomId = "kitchen",
+            roomErrors = mapOf("kitchen" to "Pilot Core took too long to answer."),
+            loadingRooms = setOf("kitchen"),
+        )
         val open = buildHomeState(HomeFixtures.snapshot, true, true, local).openRoom!!
         assertEquals("Pilot Core took too long to answer.", open.loadError)
         assertFalse(open.summary.loaded)
+        assertTrue(open.loading)
         assertTrue(open.content.isEmpty)
     }
 

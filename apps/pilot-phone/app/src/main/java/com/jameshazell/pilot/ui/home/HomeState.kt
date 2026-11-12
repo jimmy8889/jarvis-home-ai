@@ -26,7 +26,8 @@ data class HomeLocalState(
     /** The last command failure, shown inline until the next command or dismissal. */
     val error: String? = null,
     val confirm: PendingConfirm? = null,
-    val confirmAllLightsOff: Boolean = false,
+    /** Rooms whose devices are being read right now. */
+    val loadingRooms: Set<String> = emptySet(),
     val mediaBusy: Boolean = false,
 )
 
@@ -36,6 +37,8 @@ data class OpenRoom(
     /** This room's players that are usable, default music player first. */
     val players: List<PilotPlayerState>,
     val loadError: String?,
+    /** Its devices are being read right now. */
+    val loading: Boolean = false,
 )
 
 /** What the Home screen draws. Built by [buildHomeState]; no Android types. */
@@ -75,7 +78,10 @@ fun buildHomeState(
     val visible = local.rooms.visibleRooms
     val players = snapshot.media.players
     val temperatures = snapshot.dashboard?.temperatures.orEmpty()
-    val summaries = snapshot.media.rooms.map { room -> summariseRoom(room, visible[room.id], players, temperatures) }
+    // Only the open room's devices are current; any other room's are from an earlier visit.
+    val summaries = snapshot.media.rooms.map { room ->
+        summariseRoom(room, visible[room.id], players, temperatures, cached = room.id != local.openRoomId)
+    }
     val open = snapshot.media.rooms.firstOrNull { it.id == local.openRoomId }?.let { room ->
         OpenRoom(
             summary = summaries.first { it.id == room.id },
@@ -84,11 +90,12 @@ fun buildHomeState(
                 .filter { it.player.roomId == room.id && it.player.enabled }
                 .sortedByDescending { it.player.id == room.defaultMusicPlayerId },
             loadError = local.roomErrors[room.id],
+            loading = room.id in local.loadingRooms,
         )
     }
     return HomeScreenState(
         rooms = summaries,
-        house = summariseHouse(snapshot, visible),
+        house = summariseHouse(snapshot),
         energy = energySummary(snapshot),
         weather = weatherChip(snapshot.dashboard),
         statusLabel = statusLabel,

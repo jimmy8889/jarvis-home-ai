@@ -92,7 +92,19 @@ fun RoomDetail(room: OpenRoom, state: HomeScreenState, actions: HomeActions, mod
             title = room.summary.name,
             subtitle = room.summary.status,
             onBack = actions::closeRoom,
-        )
+        ) {
+            if (room.loading) {
+                CircularProgressIndicator(
+                    color = PilotColors.Violet, strokeWidth = 2.dp,
+                    modifier = Modifier.padding(12.dp).size(24.dp).semantics { contentDescription = "Refreshing devices" },
+                )
+            } else {
+                RoundIconButton(
+                    PilotIcons.Refresh, "Refresh ${room.summary.name}",
+                    onClick = { actions.retryRoom(room.summary.id) }, enabled = state.online,
+                )
+            }
+        }
         // Keyed by room so each room starts scrolled to the top.
         key(room.summary.id) {
             Column(
@@ -116,7 +128,11 @@ fun RoomDetail(room: OpenRoom, state: HomeScreenState, actions: HomeActions, mod
                 }
 
                 if (!room.summary.loaded && room.loadError == null) {
-                    if (state.online) LoadingDevices() else CardNote("Room devices appear when Pilot Core is reachable.")
+                    when {
+                        room.loading -> LoadingDevices()
+                        state.online -> CardNote("Tap refresh to load this room's devices.")
+                        else -> CardNote("Room devices appear when Pilot Core is reachable.")
+                    }
                 }
                 if (content.lights.isNotEmpty()) LightsCard(content.lights, scope)
                 if (content.scenes.isNotEmpty()) ScenesSection(content.scenes, scope)

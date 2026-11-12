@@ -5,7 +5,6 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -79,17 +78,6 @@ fun HomeScreen() {
             onDismiss = model::cancelPending,
         )
     }
-    if (local.confirmAllLightsOff) {
-        val count = local.rooms.visibleRooms.let(::allLightsOff).size
-        ConfirmDialog(
-            title = "Turn off all lights?",
-            message = if (count == 1) "1 light is on. It will be switched off."
-            else "$count lights are on around the house. They will all be switched off.",
-            confirmLabel = "Turn all off",
-            onConfirm = model::confirmAllLightsOff,
-            onDismiss = model::cancelAllLightsOff,
-        )
-    }
 }
 
 /** Stateless Home: the dashboard list with the open room beside it (open Fold) or over it. */
@@ -123,7 +111,7 @@ private fun HomeList(state: HomeScreenState, actions: HomeActions, now: LocalDat
         val gutter = Modifier.padding(horizontal = PilotDimens.ScreenPadding)
         Greeting(state, now, gutter)
         StatusChips(state, actions)
-        // Errors from the room tiles and "all off" show here; an open room shows its own.
+        // An open room shows its own errors.
         if (state.error != null && state.openRoom == null) {
             InlineMessage(state.error, gutter, actionLabel = "Dismiss", onAction = actions::dismissError)
         }
@@ -160,42 +148,11 @@ private val DateFormat: DateTimeFormatter = DateTimeFormatter.ofPattern("EEEE d 
 private fun StatusChips(state: HomeScreenState, actions: HomeActions) {
     val house = state.house
     val chips = buildList<@Composable () -> Unit> {
-        if (house.lightsKnown) add {
-            val on = house.lightsOn
-            StatusPill(
-                label = when (on) {
-                    0 -> "Lights off"
-                    1 -> "1 light on"
-                    else -> "$on lights on"
-                },
-                icon = PilotIcons.Light,
-                accent = PilotColors.Amber,
-                active = on > 0,
-                onClick = if (on > 0 && state.controlsEnabled) actions::requestAllLightsOff else null,
-                onClickLabel = "Turn all lights off",
-            )
-        }
-        if (house.climateActive > 0) add {
-            StatusPill(
-                if (house.climateActive == 1) "Climate on" else "${house.climateActive} climate on",
-                HomeIcons.Thermostat,
-                accent = PilotColors.Blue,
-                active = true,
-            )
-        }
         if (house.playing > 0) add {
             StatusPill(
                 if (house.playing == 1) "Music playing" else "${house.playing} rooms playing",
                 HomeIcons.Music,
                 accent = PilotColors.Pink,
-                active = true,
-            )
-        }
-        if (house.unlocked > 0) add {
-            StatusPill(
-                if (house.unlocked == 1) "1 lock open" else "${house.unlocked} locks open",
-                HomeIcons.Lock,
-                accent = PilotColors.Red,
                 active = true,
             )
         }
@@ -255,7 +212,7 @@ private fun Rooms(state: HomeScreenState, actions: HomeActions, modifier: Modifi
                             val selected = state.openRoom?.summary?.id == room.id
                             RoomTile(
                                 name = room.name,
-                                status = room.status.ifEmpty { if (state.online) "Loading…" else "Saved" },
+                                status = room.status.ifEmpty { "Open to see devices" },
                                 active = room.active,
                                 onClick = { actions.openRoom(room.id) },
                                 modifier = Modifier
@@ -265,7 +222,7 @@ private fun Rooms(state: HomeScreenState, actions: HomeActions, modifier: Modifi
                                             2.dp, PilotColors.Violet, RoundedCornerShape(PilotDimens.CardRadius),
                                         ) else Modifier,
                                     ),
-                                icon = if (room.lightsTotal > 0) PilotIcons.Light else PilotIcons.Home,
+                                icon = if (room.active) PilotIcons.Light else PilotIcons.Home,
                                 onPower = if (room.canToggleLights) ({ actions.toggleRoomLights(room.id) }) else null,
                                 powerEnabled = state.controlsEnabled,
                             )
@@ -274,9 +231,6 @@ private fun Rooms(state: HomeScreenState, actions: HomeActions, modifier: Modifi
                     }
                 }
             }
-        }
-        state.controlNotice?.takeIf { state.rooms.any { it.loaded } }?.let {
-            CardNote(it, Modifier.padding(PaddingValues(top = PilotDimens.Gap)))
         }
     }
 }

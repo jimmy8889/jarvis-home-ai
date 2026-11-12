@@ -306,38 +306,55 @@ data class OptimisticRooms(
 data class RoomSummary(
     val id: String,
     val name: String,
-    /** False until this room's devices have been read from Pilot Core. */
+    /** False when this room has not been opened in this app session, so its devices are unknown. */
     val loaded: Boolean,
+    /**
+     * True when the device figures are from an earlier visit to the room rather than current
+     * (every room except the one that is open). Cached figures are worded as past and never tint
+     * the tile or offer the power button.
+     */
+    val cached: Boolean,
     val lightsOn: Int,
     val lightsTotal: Int,
     val temperatureC: Double?,
     val climateActive: Boolean,
+    /** From the house snapshot, so always current. */
     val playing: Boolean,
-    /** The power button can do something: at least one light can be switched. */
+    /** The power button can do something: the devices are current and a light can be switched. */
     val canToggleLights: Boolean,
 ) {
-    /** Tinted on the home grid. */
-    val active: Boolean get() = lightsOn > 0
+    /** Tinted on the home grid. Never from cached figures. */
+    val active: Boolean get() = !cached && lightsOn > 0
 
-    /** "22.5° · 2 of 4 on · Playing", built only from what is known. */
+    /** "22.5° · 2 of 4 on · Playing", built only from what is known; cached figures say "Earlier". */
     val status: String
-        get() = listOfNotNull(
-            temperatureC?.let { String.format(Locale.US, "%.1f°", it) },
-            when {
+        get() {
+            val lights = when {
                 lightsTotal == 0 -> null
-                lightsOn == 0 -> "Lights off"
+                lightsOn == 0 -> "lights off"
                 else -> "$lightsOn of $lightsTotal on"
-            },
-            "Climate on".takeIf { climateActive },
-            "Playing".takeIf { playing },
-        ).joinToString(" · ").ifEmpty { if (loaded) "No devices" else "" }
+            }
+            return listOfNotNull(
+                temperatureC?.let { String.format(Locale.US, "%.1f°", it) },
+                lights?.takeIf { !cached }?.replaceFirstChar { it.uppercase() },
+                "Climate on".takeIf { climateActive && !cached },
+                "Playing".takeIf { playing },
+                lights?.takeIf { cached }?.let { "Earlier: $it" },
+            ).joinToString(" · ").ifEmpty { if (loaded && !cached) "No devices" else "" }
+        }
 }
 
+/**
+ * @param projection the room's devices if it has been opened this session, else null. Rooms are
+ * never read just to fill a tile.
+ * @param cached [projection] is from an earlier visit, not current.
+ */
 fun summariseRoom(
     room: PilotRoom,
     projection: HomeProjection?,
     players: List<PilotPlayerState> = emptyList(),
     dashboardTemperatures: List<DashboardTemperature> = emptyList(),
+    cached: Boolean = false,
 ): RoomSummary {
     val entities = projection?.entities.orEmpty()
     val lights = entities.filter { it.isLight }
@@ -345,12 +362,14 @@ fun summariseRoom(
         id = room.id,
         name = projection?.roomName?.takeIf { it.isNotBlank() && it != "Room" } ?: room.name,
         loaded = projection != null,
+        cached = cached,
         lightsOn = lights.count { it.isLit },
         lightsTotal = lights.size,
-        temperatureC = roomTemperature(room.name, entities, dashboardTemperatures),
+        // An old device reading is not shown as the temperature; the dashboard's is current.
+        temperatureC = roomTemperature(room.name, if (cached) emptyList() else entities, dashboardTemperatures),
         climateActive = entities.any { it.climateActive },
         playing = players.any { it.player.roomId == room.id && it.effective.playbackState == "playing" },
-        canToggleLights = lights.any { it.usable && it.canSwitch },
+        canToggleLights = !cached && lights.any { it.usable && it.canSwitch },
     )
 }
 
@@ -369,35 +388,16 @@ fun roomTemperature(
             .minByOrNull { it.presentation.priority }?.numericValue
         ?: dashboardTemperatures.firstOrNull { it.label.trim().equals(roomName.trim(), ignoreCase = true) }?.temperatureC
 
-/** House-wide counts for the status chips. Counts come only from rooms whose devices are loaded. */
+/** House-wide facts for the status chips, from the snapshot alone (no room is read for them). */
 data class HouseSummary(
-    val lightsOn: Int = 0,
-    val lightsKnown: Boolean = false,
-    val climateActive: Int = 0,
     val playing: Int = 0,
-    val unlocked: Int = 0,
     val carCharging: Boolean = false,
 )
 
-fun summariseHouse(snapshot: PilotSnapshot, rooms: Map<String, HomeProjection>): HouseSummary {
-    val entities = rooms.values.flatMap { it.entities }.distinctBy { it.entityId }
-    return HouseSummary(
-        lightsOn = entities.count { it.isLit },
-        lightsKnown = entities.any { it.isLight },
-        climateActive = entities.count { it.climateActive },
-        playing = snapshot.media.players.count { it.effective.playbackState == "playing" },
-        unlocked = entities.count {
-            it.domain == "lock" && it.usable && it.state.equals("unlocked", ignoreCase = true)
-        },
-        carCharging = snapshot.dashboard?.vehicle?.charging == true,
-    )
-}
-
-/** Every light that is on anywhere, as switch-off commands paired with its room. */
-fun allLightsOff(rooms: Map<String, HomeProjection>): List<Pair<String, EntityCommand>> =
-    rooms.flatMap { (roomId, room) ->
-        room.entities.filter { it.isLit && it.can("turn_off") }.map { roomId to EntityCommand(it, "turn_off") }
-    }.distinctBy { it.second.entity.entityId }
+fun summariseHouse(snapshot: PilotSnapshot): HouseSummary = HouseSummary(
+    playing = snapshot.media.players.count { it.effective.playbackState == "playing" },
+    carCharging = snapshot.dashboard?.vehicle?.charging == true,
+)
 
 // ---- Header and energy --------------------------------------------------------------------
 

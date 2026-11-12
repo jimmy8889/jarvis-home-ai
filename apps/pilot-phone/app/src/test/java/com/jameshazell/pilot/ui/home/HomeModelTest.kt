@@ -62,21 +62,25 @@ class HomeModelTest {
         assertFalse(summary.canToggleLights)
     }
 
-    @Test fun houseSummaryCountsAcrossRooms() {
-        val house = summariseHouse(HomeFixtures.snapshot, HomeFixtures.projections)
-        assertEquals(2, house.lightsOn)
-        assertTrue(house.lightsKnown)
-        assertEquals(1, house.climateActive)
+    @Test fun houseSummaryNeedsNoRoomDevices() {
+        val house = summariseHouse(HomeFixtures.snapshot)
         assertEquals(1, house.playing)
-        assertEquals(0, house.unlocked)
         assertTrue(house.carCharging)
-        assertFalse(summariseHouse(HomeFixtures.snapshot, emptyMap()).lightsKnown)
     }
 
-    @Test fun allLightsOffTargetsOnlyLitLights() {
-        val commands = allLightsOff(HomeFixtures.projections)
-        assertEquals(listOf("light.living_ceiling", "light.living_lamp"), commands.map { it.second.entity.entityId })
-        assertTrue(commands.all { it.first == "living" && it.second.action == "turn_off" })
+    @Test fun cachedRoomFiguresAreWordedAsPastAndNeverLookLive() {
+        val cached = summariseRoom(
+            HomeFixtures.rooms[0], HomeFixtures.living, HomeFixtures.players,
+            listOf(DashboardTemperature("l", "Living Room", 23.9)), cached = true,
+        )
+        assertFalse(cached.active)
+        assertFalse(cached.canToggleLights)
+        // The aircon's old reading is not shown; the dashboard's current one is.
+        assertEquals(23.9, cached.temperatureC!!, 0.001)
+        assertEquals("23.9° · Playing · Earlier: 2 of 3 on", cached.status)
+        assertEquals("Earlier: lights off", summariseRoom(HomeFixtures.rooms[1], HomeFixtures.kitchen, cached = true).status)
+        // Never opened: nothing is claimed about its devices.
+        assertEquals("", summariseRoom(HomeFixtures.rooms[3], null, cached = true).status)
     }
 
     // ---- Room power button and brightness ---------------------------------------------------

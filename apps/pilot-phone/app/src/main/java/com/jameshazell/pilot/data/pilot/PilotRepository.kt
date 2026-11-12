@@ -4,6 +4,7 @@ import android.util.LruCache
 import com.jameshazell.pilot.core.AddressPolicy
 import com.jameshazell.pilot.core.AppDispatchers
 import com.jameshazell.pilot.core.AppError
+import com.jameshazell.pilot.core.AppException
 import com.jameshazell.pilot.core.DeviceTokenStore
 import com.jameshazell.pilot.core.ErrorKind
 import com.jameshazell.pilot.core.HttpClients
@@ -75,9 +76,19 @@ class PilotRepository(
     private val _selectedRoomId = MutableStateFlow<String?>(null)
     val selectedRoomId: StateFlow<String?> = _selectedRoomId.asStateFlow()
 
-    private val _home = MutableStateFlow<LoadState<HomeProjection>>(LoadState.Loading)
-    /** Devices of the selected room. Actions are stripped unless [canControlHome]. */
-    val home: StateFlow<LoadState<HomeProjection>> = _home.asStateFlow()
+    private val _roomProjections = MutableStateFlow<Map<String, HomeProjection>>(emptyMap())
+    /**
+     * The devices of each room as last read in this app session, by room id. Only rooms the user
+     * has opened are here; nothing is prefetched, so treat every entry but the visible room's as old.
+     */
+    val roomProjections: StateFlow<Map<String, HomeProjection>> = _roomProjections.asStateFlow()
+
+    /** Every read of a room's devices goes through this gate; see [homeFor]. */
+    private val projections = HomeProjectionGate { roomId ->
+        val client = client() ?: throw AppException(AppError(ErrorKind.NotPaired, "Pair this phone with Pilot Core first."))
+        client.home(roomId).copy(roomId = roomId).readOnlyUnless(canControlHome)
+            .also { fresh -> _roomProjections.update { it + (roomId to fresh) } }
+    }
 
     /** True when the manifest grants `home_control`; otherwise room devices are read-only. */
     val canControlHome: Boolean get() = _manifest.value?.features?.contains(FEATURE_HOME_CONTROL) == true
@@ -85,9 +96,14 @@ class PilotRepository(
     @Volatile private var token: String? = null
     private var started = false
     private var refreshJob: Job? = null
-    private var pollJob: Job? = null
-    private var eventJob: Job? = null
-    private var homeJob: Job? = null
+    private var refreshQueued = false
+    private var lastRefreshStartMs = 0L
+    private var refreshFailures = 0
+    /** Polling plus event sync. There is never more than one. */
+    private var loopJob: Job? = null
+    private var restartJob: Job? = null
+    private var restartPending = false
+    private var lastLoopStartMs = 0L
     private var eventCursor: String? = null
     private val artworkCache = object : LruCache<String, ByteArray>(24 * 1024 * 1024) {
         override fun sizeOf(key: String, value: ByteArray): Int = value.size
@@ -124,38 +140,82 @@ class PilotRepository(
     /** Stop all background reads. Call from Activity.onStop. */
     fun stop() {
         started = false
-        pollJob?.cancel()
-        eventJob?.cancel()
-        refreshJob?.cancel()
-        _liveEvents.value = false
+        stopJobs()
     }
 
-    /** The network came back or changed: drop in-flight reads and start again. */
+    /**
+     * The network came back or changed. Reads that are working are left alone; otherwise the
+     * loops start again (skipping their backoff waits), at most once per [MIN_RESTART_GAP_MS].
+     */
     fun onNetworkAvailable() {
         if (!started) return
-        refreshJob?.cancel()
-        refreshJob = null
-        restart()
+        if (_snapshot.value.isLive && _liveEvents.value) return
+        restart(force = true)
     }
 
     /** Fetch the snapshot now. A refresh already in flight is not duplicated. */
-    fun refresh() {
-        if (refreshJob?.isActive == true) return
+    fun refresh() = requestRefresh(minGapMs = 0)
+
+    /**
+     * Single-flight snapshot refresh. While one is running, any number of further requests
+     * collapse into one more run afterwards. [minGapMs] spaces automatic refreshes apart so a
+     * burst of live events cannot turn into a burst of requests.
+     */
+    private fun requestRefresh(minGapMs: Long) {
+        if (refreshJob?.isActive == true) {
+            refreshQueued = true
+            return
+        }
         val client = client() ?: return
-        refreshJob = scope.launch { refreshSnapshot(client) }
+        refreshJob = scope.launch {
+            var gap = minGapMs
+            do {
+                val wait = lastRefreshStartMs + gap - nowMs()
+                if (lastRefreshStartMs != 0L && wait > 0) delay(wait)
+                refreshQueued = false
+                lastRefreshStartMs = nowMs()
+                refreshSnapshot(client)
+                // A refresh asked for while this one ran is automatic by nature: space it out.
+                gap = maxOf(gap, EVENT_REFRESH_GAP_MS)
+            } while (refreshQueued)
+        }
     }
 
-    private fun restart() {
-        pollJob?.cancel()
-        eventJob?.cancel()
-        if (!started || !_session.value.paired) return
-        startEventSync()
-        pollJob = scope.launch {
-            while (true) {
-                refresh()
-                // Events trigger refreshes when they work; polling is then only a safety net.
-                val seconds = if (_liveEvents.value) 60 else _session.value.config.refreshSeconds
-                delay(seconds * 1_000L)
+    /**
+     * (Re)starts polling and event sync as ONE job. Calls in quick succession (app start fires
+     * load, onStart and the network callback together) collapse into a single start, and loops
+     * that are already running are left alone unless [force] (the network changed and they are
+     * not healthy) or [replace] (the pairing changed, so they hold the wrong credentials).
+     */
+    private fun restart(force: Boolean = false, replace: Boolean = false) {
+        if (!started || !_session.value.paired) {
+            stopJobs()
+            return
+        }
+        val running = loopJob?.isActive == true
+        if (running && !force && !replace) return
+        if (running && restartPending && !replace) return
+        val wait = if (running && !replace) (lastLoopStartMs + MIN_RESTART_GAP_MS - nowMs()).coerceAtLeast(RESTART_DEBOUNCE_MS)
+        else RESTART_DEBOUNCE_MS
+        restartPending = true
+        restartJob?.cancel()
+        restartJob = scope.launch {
+            delay(wait)
+            restartPending = false
+            // They may have recovered on their own while this restart was waiting.
+            if (!replace && loopJob?.isActive == true && _snapshot.value.isLive && _liveEvents.value) return@launch
+            loopJob?.cancel()
+            refreshJob?.cancel()
+            lastLoopStartMs = nowMs()
+            loopJob = scope.launch {
+                launch { eventSync() }
+                while (true) {
+                    refresh()
+                    // Events trigger refreshes when they work; polling is then only a safety net.
+                    // After failures the wait doubles, so a struggling Core is not hammered.
+                    val base = if (_liveEvents.value) 60 else _session.value.config.refreshSeconds
+                    delay(pollDelayMs(base, refreshFailures))
+                }
             }
         }
     }
@@ -175,14 +235,19 @@ class PilotRepository(
                 }
                 decoded
             }
+            refreshFailures = 0
+            val previousRevision = _snapshot.value.valueOrNull()?.media?.revision
             _snapshot.value = LoadState.Content(snapshot)
             val room = _selectedRoomId.value?.takeIf { id -> snapshot.media.rooms.any { it.id == id } }
                 ?: snapshot.media.rooms.firstOrNull()?.id
             _selectedRoomId.value = room
-            room?.let { refreshHome(it, silent = true) }
+            // Room devices are NOT read here. A changed revision is only a hint, and the gate
+            // ignores it unless a room detail is on screen.
+            if (snapshot.media.revision != null && snapshot.media.revision != previousRevision) hintHomeChanged()
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (error: Exception) {
+            refreshFailures++
             val appError = error.toAppError(Service.Pilot)
             // A rejected pairing must not keep showing the house as if it were still connected.
             _snapshot.update {
@@ -193,91 +258,106 @@ class PilotRepository(
         }
     }
 
-    private fun startEventSync() {
+    /** One long-poll at a time, for as long as the loop job lives. Every failure backs off. */
+    private suspend fun eventSync() {
         val client = client() ?: return
-        eventJob = scope.launch {
-            val manifest = try {
-                client.manifest()
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (_: Exception) {
-                null
-            }
-            _manifest.value = manifest
-            val snapshotPath = manifest?.eventSnapshotPath ?: return@launch
-            val eventPath = manifest.eventLongPollPath ?: snapshotPath.removeSuffix("/snapshot")
+        val manifest = manifestWithRetry(client)
+        _manifest.value = manifest
+        val snapshotPath = manifest?.eventSnapshotPath ?: return
+        val eventPath = manifest.eventLongPollPath ?: snapshotPath.removeSuffix("/snapshot")
+        try {
+            eventCursor = client.eventSnapshotCursor(snapshotPath, eventCursor) ?: eventCursor
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            // The long poll below retries with backoff.
+        }
+        var delayMs = 1_000L
+        while (true) {
             try {
-                eventCursor = client.eventSnapshotCursor(snapshotPath, eventCursor) ?: eventCursor
-                refresh()
+                val page = client.events(eventPath, eventCursor)
+                eventCursor = page.cursor ?: eventCursor
+                _liveEvents.value = true
+                if (page.resetRequired || page.events.isNotEmpty()) {
+                    requestRefresh(EVENT_REFRESH_GAP_MS)
+                    hintHomeChanged()
+                }
+                delayMs = if (page.events.isEmpty()) 2_000L else 1_000L
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (_: Exception) {
-                // The long poll below retries with backoff.
+                _liveEvents.value = false
+                delayMs = (delayMs * 2).coerceIn(2_000L, 60_000L)
             }
-            var delayMs = 1_000L
-            while (true) {
-                try {
-                    val page = client.events(eventPath, eventCursor)
-                    eventCursor = page.cursor ?: eventCursor
-                    _liveEvents.value = true
-                    if (page.resetRequired || page.events.isNotEmpty()) refresh()
-                    delayMs = if (page.events.isEmpty()) 2_000L else 250L
-                } catch (cancelled: CancellationException) {
-                    throw cancelled
-                } catch (_: Exception) {
-                    _liveEvents.value = false
-                    delayMs = (delayMs * 2).coerceAtMost(30_000L)
-                }
-                delay(delayMs)
+            delay(delayMs)
+        }
+    }
+
+    /** Null when this Core has no manifest. A failed read is retried with backoff, never in a tight loop. */
+    private suspend fun manifestWithRetry(client: PilotCoreClient): ClientManifest? {
+        var waitMs = 5_000L
+        while (true) {
+            try {
+                return client.manifest()
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                delay(waitMs)
+                waitMs = (waitMs * 2).coerceAtMost(120_000L)
             }
         }
     }
 
     // ---- Rooms and devices ------------------------------------------------------------------
 
+    /** The room used as context for music and the assistant. Does not read the room's devices. */
     fun selectRoom(roomId: String) {
-        if (_selectedRoomId.value == roomId) return
         _selectedRoomId.value = roomId
-        _home.value = LoadState.Loading
-        refreshHome(roomId)
     }
 
-    /** @param silent keep showing the current devices while reloading. */
-    fun refreshHome(roomId: String? = _selectedRoomId.value, silent: Boolean = false) {
-        val client = client() ?: return
-        val selected = roomId ?: return
-        homeJob?.cancel()
-        homeJob = scope.launch {
-            if (!silent && _home.value !is LoadState.Content) _home.value = LoadState.Loading
-            val result = outcomeOf(Service.Pilot) { client.home(selected) }
-            if (_selectedRoomId.value != selected) return@launch
-            when (result) {
-                is Outcome.Success -> _home.value = LoadState.Content(result.value.readOnlyUnless(canControlHome))
-                is Outcome.Failure -> _home.update { it.failedWith(result.error) }
+    /**
+     * Tell the repository which room's detail is on screen (null: none). Reading a room's
+     * devices is very expensive for Pilot Core, so nothing but a visible room is ever re-read
+     * automatically.
+     */
+    fun setRoomVisible(roomId: String?) = projections.setVisibleRoom(roomId)
+
+    /**
+     * Devices of one room, through the [HomeProjectionGate]: one request at a time for the whole
+     * app, never in the background. Actions are stripped unless [canControlHome].
+     *
+     * @return null when no request was made because it is not allowed right now (too soon, or
+     * the user has already moved to another room); use [roomProjections] for what is known.
+     */
+    suspend fun homeFor(roomId: String, reason: ProjectionReason): Outcome<HomeProjection>? {
+        if (client() == null) return notPaired()
+        val result = outcomeOf(Service.Pilot) { projections.request(roomId, reason) }
+        return when (result) {
+            is Outcome.Success -> result.value?.let { Outcome.Success(it) }
+            is Outcome.Failure -> result
+        }
+    }
+
+    private fun hintHomeChanged() {
+        if (projections.visibleRoomId == null) return
+        scope.launch {
+            try {
+                projections.onChangeHint()
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                // The room keeps showing what it had; the user can refresh it.
             }
         }
     }
 
     /**
-     * Devices of any room, without changing the selected room or [home]. Used for the house
-     * overview (room tiles). Actions are stripped unless [canControlHome].
-     */
-    suspend fun homeFor(roomId: String): Outcome<HomeProjection> {
-        val client = client() ?: return notPaired()
-        return when (val result = outcomeOf(Service.Pilot) { client.home(roomId) }) {
-            is Outcome.Success -> Outcome.Success(result.value.readOnlyUnless(canControlHome))
-            is Outcome.Failure -> result
-        }
-    }
-
-    /**
-     * Sends a device action (`turn_on`, `set_brightness`, `unlock`, ...). The room list updates
-     * optimistically and is rolled back on failure. When the returned action has
-     * `confirmationRequired && status == "pending"`, show a ConfirmDialog and call
-     * [confirmHomeAction] with its id; nothing has happened yet.
+     * Sends a device action (`turn_on`, `set_brightness`, `unlock`, ...). When the returned
+     * action has `confirmationRequired && status == "pending"`, show a ConfirmDialog and call
+     * [confirmHomeAction] with its id; nothing has happened yet. The caller shows the optimistic
+     * state and re-reads the room once with [ProjectionReason.AfterAction].
      *
-     * @param roomId the room the entity is in; defaults to the selected room. [home] is only
-     * touched when it is the selected room.
+     * @param roomId the room the entity is in; defaults to the selected room.
      * @param option a text parameter instead of [value], e.g. the mode for `set_hvac_mode`.
      */
     suspend fun homeAction(
@@ -292,33 +372,12 @@ class PilotRepository(
         )
         val client = liveClient() ?: return notLive()
         val target = roomId ?: _selectedRoomId.value ?: return notLive()
-        val selected = target == _selectedRoomId.value
-        val before = _home.value
-        val optimistic = optimisticEntity(entity, action, value)
-        if (selected && optimistic != entity && before is LoadState.Content) {
-            _home.value = before.copy(
-                value = before.value.copy(
-                    entities = before.value.entities.map { if (it.entityId == entity.entityId) optimistic else it },
-                ),
-            )
-        }
-        val result = outcomeOf(Service.Pilot) { client.homeAction(target, entity.entityId, action, value, option) }
-        if (selected) {
-            when (result) {
-                is Outcome.Success -> {
-                    val pending = result.value.confirmationRequired && result.value.status == "pending"
-                    if (pending) _home.value = before else refreshHome(target, silent = true)
-                }
-                is Outcome.Failure -> _home.value = before
-            }
-        }
-        return result
+        return outcomeOf(Service.Pilot) { client.homeAction(target, entity.entityId, action, value, option) }
     }
 
     suspend fun confirmHomeAction(actionId: String): Outcome<HomeAction> {
         val client = liveClient() ?: return notLive()
         return outcomeOf(Service.Pilot) { client.confirmHomeAction(actionId) }
-            .also { if (it is Outcome.Success) refreshHome(silent = true) }
     }
 
     // ---- Media, dashboard, assistant --------------------------------------------------------
@@ -432,9 +491,10 @@ class PilotRepository(
         eventCursor = null
         _manifest.value = null
         _snapshot.value = LoadState.Loading
-        _home.value = LoadState.Loading
+        _roomProjections.value = emptyMap()
+        projections.reset()
         _session.value = PilotSession(loaded = true, paired = true, config = config)
-        restart()
+        restart(replace = true)
     }
 
     /** Forgets the Pilot Core device token. Energy Manager and James Control are untouched. */
@@ -447,7 +507,8 @@ class PilotRepository(
         _manifest.value = null
         _selectedRoomId.value = null
         _snapshot.value = LoadState.Loading
-        _home.value = LoadState.Loading
+        _roomProjections.value = emptyMap()
+        projections.reset()
         _session.update { it.copy(paired = false) }
     }
 
@@ -458,18 +519,21 @@ class PilotRepository(
         )
         withContext(dispatchers.io) { prefs.save(config) }
         _session.update { it.copy(config = config) }
-        restart()
+        // The running poll loop reads the new interval on its next turn; nothing to restart.
     }
 
     // ---- Internals --------------------------------------------------------------------------
 
     private fun stopJobs() {
-        pollJob?.cancel()
-        eventJob?.cancel()
+        restartJob?.cancel()
+        restartPending = false
+        loopJob?.cancel()
         refreshJob?.cancel()
-        homeJob?.cancel()
+        refreshQueued = false
         _liveEvents.value = false
     }
+
+    private fun nowMs(): Long = System.nanoTime() / 1_000_000
 
     private fun client(): PilotCoreClient? {
         val current = token ?: return null
@@ -491,6 +555,20 @@ class PilotRepository(
 
     companion object {
         const val FEATURE_HOME_CONTROL = "home_control"
+
+        /** Calls to restart() within this window become one start. */
+        private const val RESTART_DEBOUNCE_MS = 400L
+        /** Running loops are torn down and restarted at most this often. */
+        private const val MIN_RESTART_GAP_MS = 10_000L
+        /** Minimum spacing of snapshot refreshes triggered by live events. */
+        private const val EVENT_REFRESH_GAP_MS = 5_000L
+        private const val MAX_POLL_DELAY_MS = 120_000L
+
+        /** Poll wait: the configured interval, doubled per consecutive failure, capped at two minutes. */
+        internal fun pollDelayMs(baseSeconds: Int, failures: Int): Long {
+            val base = baseSeconds.coerceAtLeast(1) * 1_000L
+            return (base shl failures.coerceIn(0, 6)).coerceIn(base, maxOf(base, MAX_POLL_DELAY_MS))
+        }
 
         internal fun decodeEnvelope(raw: JSONObject, fromCache: Boolean) = PilotSnapshot(
             media = PilotJson.media(raw.getJSONObject("media")),

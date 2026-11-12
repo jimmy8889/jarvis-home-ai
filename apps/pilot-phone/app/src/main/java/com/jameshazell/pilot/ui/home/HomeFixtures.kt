@@ -202,7 +202,6 @@ internal object HomeFixtures {
         override fun setRoomBrightness(roomId: String, percent: Int) = Unit
         override fun act(roomId: String, entity: HomeEntity, action: String, value: Double?, option: String?) = Unit
         override fun media(command: MediaCommand) = Unit
-        override fun requestAllLightsOff() = Unit
         override fun retryRoom(roomId: String) = Unit
         override fun dismissError() = Unit
     }

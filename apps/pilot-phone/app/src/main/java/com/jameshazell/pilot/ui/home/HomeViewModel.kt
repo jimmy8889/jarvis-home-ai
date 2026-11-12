@@ -10,11 +10,10 @@ import com.jameshazell.pilot.data.pilot.HomeAction
 import com.jameshazell.pilot.data.pilot.HomeEntity
 import com.jameshazell.pilot.data.pilot.MediaCommand
 import com.jameshazell.pilot.data.pilot.PilotRepository
+import com.jameshazell.pilot.data.pilot.ProjectionReason
 import com.jameshazell.pilot.data.pilot.PilotSnapshot
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -29,7 +28,6 @@ interface HomeActions {
     fun setRoomBrightness(roomId: String, percent: Int)
     fun act(roomId: String, entity: HomeEntity, action: String, value: Double? = null, option: String? = null)
     fun media(command: MediaCommand)
-    fun requestAllLightsOff()
     fun retryRoom(roomId: String)
     fun dismissError()
 }
@@ -38,9 +36,10 @@ interface HomeActions {
  * Home and room detail. Activity-scoped, so the open room, in-flight commands and loaded devices
  * all survive folding and unfolding.
  *
- * Pilot Core serves devices one room at a time, so the house overview is assembled here: every
- * room is read when Home is on screen and the snapshot changes (at most once per
- * [MIN_SWEEP_MS]), and a room is read again after each command sent to it.
+ * Reading a room's devices is very expensive for Pilot Core, so a room is read only when the
+ * user opens it, asks to refresh it, or has just sent it a command; the repository may also
+ * re-read the room that is visibly open when something changed (at most every 30 s). The Home
+ * grid never causes a read: tiles use the snapshot plus what earlier opens left behind.
  */
 class HomeViewModel(private val pilot: PilotRepository) : ViewModel(), HomeActions {
     val snapshot: StateFlow<LoadState<PilotSnapshot>> = pilot.snapshot
@@ -51,10 +50,6 @@ class HomeViewModel(private val pilot: PilotRepository) : ViewModel(), HomeActio
     val local: StateFlow<HomeLocalState> = _local.asStateFlow()
 
     private var visible = false
-    private var lastSweepNanos = 0L
-    private var sweepJob: Job? = null
-    private var trailingSweep: Job? = null
-    private var sweepAgain = false
 
     init {
         viewModelScope.launch {
@@ -62,89 +57,84 @@ class HomeViewModel(private val pilot: PilotRepository) : ViewModel(), HomeActio
                 val value = state.valueOrNull()
                 if (value == null) {
                     // Unpaired or pairing again: nothing from the previous house may linger.
-                    if (state is LoadState.Loading) _local.value = HomeLocalState()
+                    if (state is LoadState.Loading) {
+                        _local.value = HomeLocalState()
+                        syncVisibleRoom()
+                    }
                     return@collect
                 }
                 val ids = value.media.rooms.map { it.id }.toSet()
                 _local.update { it.copy(rooms = it.rooms.keepOnly(ids), openRoomId = it.openRoomId?.takeIf(ids::contains)) }
-                sweep(force = false)
+                syncVisibleRoom()
             }
         }
-        // Whether this phone may control devices arrives with the manifest; read the rooms again
-        // so their controls appear (or disappear) straight away.
-        viewModelScope.launch { pilot.manifest.collect { sweep(force = true) } }
+        // Rooms re-read by the repository (the visible room, when something changed) land here.
+        viewModelScope.launch {
+            pilot.roomProjections.collect { fresh ->
+                _local.update { local ->
+                    val changed = fresh.values.filter { local.rooms.confirmed[it.roomId] !== it }
+                    if (changed.isEmpty()) local
+                    else local.copy(rooms = changed.fold(local.rooms) { rooms, room -> rooms.confirm(room) })
+                }
+            }
+        }
     }
 
-    /** Home is on screen (true) or not (false). Rooms are only read while it is. */
+    /** Home is on screen (true) or not (false). */
     fun setVisible(value: Boolean) {
         visible = value
-        if (value) sweep(force = false)
+        syncVisibleRoom()
     }
 
+    /** Retry from the connection error or the "saved data" banner. */
     fun refresh() {
         pilot.refresh()
-        sweep(force = true)
+        _local.value.openRoomId?.let(::retryRoom)
     }
+
+    override fun onCleared() = pilot.setRoomVisible(null)
+
+    /** A room counts as visible only while Home is on screen with that room's detail open. */
+    private fun syncVisibleRoom() = pilot.setRoomVisible(_local.value.openRoomId.takeIf { visible })
 
     // ---- Rooms ------------------------------------------------------------------------------
 
     override fun openRoom(roomId: String) {
         _local.update { it.copy(openRoomId = roomId, error = null) }
+        syncVisibleRoom()
         // The open room is also the context for music and the assistant.
         pilot.selectRoom(roomId)
-        viewModelScope.launch { loadRoom(roomId) }
+        viewModelScope.launch { loadRoom(roomId, ProjectionReason.UserOpened) }
     }
 
-    override fun closeRoom() = _local.update { it.copy(openRoomId = null, error = null) }
+    override fun closeRoom() {
+        _local.update { it.copy(openRoomId = null, error = null) }
+        syncVisibleRoom()
+    }
 
+    /** The Refresh button or Retry in a room: the one explicit way to re-read its devices. */
     override fun retryRoom(roomId: String) {
-        viewModelScope.launch { loadRoom(roomId) }
+        viewModelScope.launch { loadRoom(roomId, ProjectionReason.UserRetry) }
     }
 
     override fun dismissError() = _local.update { it.copy(error = null) }
 
-    private fun sweep(force: Boolean) {
-        if (!visible) return
-        val state = pilot.snapshot.value
-        val rooms = state.valueOrNull()?.media?.rooms.orEmpty()
-        if (!state.isLive || rooms.isEmpty()) return
-        if (sweepJob?.isActive == true) {
-            sweepAgain = sweepAgain || force
-            return
+    /**
+     * Reads one room's devices if the repository's gate allows it now. Rooms are never read for
+     * the Home grid, on a timer or ahead of time: reading a room is very expensive for Pilot Core.
+     *
+     * @param settled entities whose commands just succeeded; their optimistic state is replaced.
+     */
+    private suspend fun loadRoom(roomId: String, reason: ProjectionReason, settled: Set<String> = emptySet()) {
+        _local.update { it.copy(loadingRooms = it.loadingRooms + roomId) }
+        val result = try {
+            pilot.homeFor(roomId, reason)
+        } finally {
+            _local.update { it.copy(loadingRooms = it.loadingRooms - roomId) }
         }
-        val elapsedMs = (System.nanoTime() - lastSweepNanos) / 1_000_000
-        val missing = rooms.any { it.id !in _local.value.rooms.confirmed }
-        if (!force && !missing && lastSweepNanos != 0L && elapsedMs < MIN_SWEEP_MS) {
-            // Too soon: read once more when the quiet period ends so the last change is not missed.
-            if (trailingSweep?.isActive != true) {
-                trailingSweep = viewModelScope.launch {
-                    delay(MIN_SWEEP_MS - elapsedMs)
-                    sweep(force = true)
-                }
-            }
-            return
-        }
-        lastSweepNanos = System.nanoTime()
-        sweepJob = viewModelScope.launch {
-            rooms.map { room -> async { loadRoom(room.id) } }.awaitAll()
-        }.also { job ->
-            job.invokeOnCompletion {
-                if (sweepAgain) {
-                    sweepAgain = false
-                    viewModelScope.launch { sweep(force = true) }
-                }
-            }
-        }
-    }
-
-    /** @param settled entities whose commands just succeeded; their optimistic state is replaced. */
-    private suspend fun loadRoom(roomId: String, settled: Set<String> = emptySet()) {
-        when (val result = pilot.homeFor(roomId)) {
+        when (result) {
             is Outcome.Success -> _local.update {
-                it.copy(
-                    rooms = it.rooms.confirm(result.value.copy(roomId = roomId), settled),
-                    roomErrors = it.roomErrors - roomId,
-                )
+                it.copy(rooms = it.rooms.confirm(result.value, settled), roomErrors = it.roomErrors - roomId)
             }
             is Outcome.Failure -> _local.update {
                 it.copy(
@@ -152,6 +142,8 @@ class HomeViewModel(private val pilot: PilotRepository) : ViewModel(), HomeActio
                     roomErrors = it.roomErrors + (roomId to result.error.message),
                 )
             }
+            // Not read this time (too soon, or the user has moved on): keep what is shown.
+            null -> _local.update { it.copy(rooms = it.rooms.promote(roomId, settled)) }
         }
     }
 
@@ -167,7 +159,7 @@ class HomeViewModel(private val pilot: PilotRepository) : ViewModel(), HomeActio
         }
         viewModelScope.launch {
             when (val sent = execute(roomId, command, userConfirmed = false)) {
-                Sent.Done -> loadRoom(roomId, setOf(entity.entityId))
+                Sent.Done -> loadRoom(roomId, ProjectionReason.AfterAction, setOf(entity.entityId))
                 Sent.Held -> Unit
                 is Sent.Failed -> showError(sent.message)
             }
@@ -183,17 +175,6 @@ class HomeViewModel(private val pilot: PilotRepository) : ViewModel(), HomeActio
         val lights = _local.value.rooms.visible(roomId)?.entities.orEmpty().filter { it.isLight }
         val level = percent.coerceIn(0, 100).toDouble()
         sendGroup(brightnessTargets(lights).map { roomId to EntityCommand(it, "set_brightness", level) })
-    }
-
-    override fun requestAllLightsOff() {
-        if (ready()) _local.update { it.copy(confirmAllLightsOff = true) }
-    }
-
-    fun cancelAllLightsOff() = _local.update { it.copy(confirmAllLightsOff = false) }
-
-    fun confirmAllLightsOff() {
-        _local.update { it.copy(confirmAllLightsOff = false) }
-        sendGroup(allLightsOff(_local.value.rooms.visibleRooms))
     }
 
     /** The user tapped the confirm button of the dialog for [HomeLocalState.confirm]. */
@@ -216,7 +197,7 @@ class HomeViewModel(private val pilot: PilotRepository) : ViewModel(), HomeActio
                 _local.update { it.copy(confirm = it.confirm?.copy(busy = false, error = sent.message)) }
             } else {
                 _local.update { it.copy(confirm = null) }
-                loadRoom(pending.roomId, setOf(id))
+                loadRoom(pending.roomId, ProjectionReason.AfterAction, setOf(id))
             }
         }
     }
@@ -230,7 +211,7 @@ class HomeViewModel(private val pilot: PilotRepository) : ViewModel(), HomeActio
                 async { Triple(roomId, command.entity.entityId, execute(roomId, command, userConfirmed = false)) }
             }.awaitAll()
             results.filter { it.third == Sent.Done }.groupBy({ it.first }, { it.second }).forEach { (roomId, ids) ->
-                launch { loadRoom(roomId, ids.toSet()) }
+                launch { loadRoom(roomId, ProjectionReason.AfterAction, ids.toSet()) }
             }
             val errors = results.mapNotNull { (it.third as? Sent.Failed)?.message }
             if (errors.isNotEmpty()) showError(groupFailureMessage(errors.size, commands.size, errors.first()))
@@ -316,9 +297,5 @@ class HomeViewModel(private val pilot: PilotRepository) : ViewModel(), HomeActio
             pilot.media(command).onFailure { showError(it.message) }
             _local.update { it.copy(mediaBusy = false) }
         }
-    }
-
-    private companion object {
-        const val MIN_SWEEP_MS = 20_000L
     }
 }

@@ -1,9 +1,11 @@
 package com.jameshazell.pilot.ui.theme
 
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -104,5 +106,8 @@ object PilotText {
 
 @Composable
 fun PilotTheme(content: @Composable () -> Unit) {
-    MaterialTheme(colorScheme = PilotColorScheme, typography = PilotTypography, content = content)
+    MaterialTheme(colorScheme = PilotColorScheme, typography = PilotTypography) {
+        // Text outside a Surface otherwise falls back to black, which is invisible on this theme.
+        CompositionLocalProvider(LocalContentColor provides PilotColors.Text, content = content)
+    }
 }
